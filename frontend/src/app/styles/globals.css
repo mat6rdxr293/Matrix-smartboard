@@ -115,3 +115,15 @@ body.lite-mode .backdrop-blur-md {
 body.lite-mode .thinking-shimmer {
   animation-duration: 4.2s;
 }
+
+.session-shell {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  color: #e7f2ff;
+  background:
+    radial-gradient(800px 500px at 15% 0%, rgba(91, 231, 196, 0.1), transparent 55%),
+    #0a0e14;
+}
