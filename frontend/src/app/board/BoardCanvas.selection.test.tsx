@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
 import BoardCanvas from "./BoardCanvas";
+import { drawStrokes } from "./boardEngine";
 
 vi.mock("./boardEngine", async () => {
   const actual = await vi.importActual<typeof import("./boardEngine")>("./boardEngine");
@@ -35,10 +36,10 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const mount = () => render(
+const mount = (initialStrokes: any[] = []) => render(
   <I18nProvider><BoardCanvas
     onOcrText={vi.fn()} ocrEnabled={false} expanded={false} onTogglePanels={vi.fn()} onStartTimer={vi.fn()}
-    initialStrokes={[]} onChangeStrokes={vi.fn()} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
+    initialStrokes={initialStrokes} onChangeStrokes={vi.fn()} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
     canUndo={false} canRedo={false} initialPenColor="#FF0000" onChangePenColor={vi.fn()}
     initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={vi.fn()}
   /></I18nProvider>
@@ -91,4 +92,37 @@ it("lets pan mode drag the board even when the gesture starts over a graph", () 
   fireEvent.pointerUp(canvas, { pointerId: 20, pointerType: "mouse", clientX: 160, clientY: 135 });
 
   expect(graphOverlay.style.transform).toContain("translate(60px, 35px)");
+});
+
+it("renders the latest pan on canvas when an older animation frame was already queued", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+  const view = mount();
+  while (frames.length) frames.shift()!(100);
+  vi.mocked(drawStrokes).mockClear();
+
+  fireEvent.click(screen.getByRole("button", { name: /перемещение|жылжыту/i }));
+  const canvas = view.container.querySelector("canvas")!;
+  fireEvent.pointerDown(canvas, { pointerId: 30, pointerType: "mouse", clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(canvas, { pointerId: 30, pointerType: "mouse", clientX: 160, clientY: 135 });
+  fireEvent.pointerUp(canvas, { pointerId: 30, pointerType: "mouse", clientX: 160, clientY: 135 });
+
+  expect(frames.length).toBeGreaterThan(0);
+  while (frames.length) frames.shift()!(220);
+  expect(vi.mocked(drawStrokes)).toHaveBeenLastCalledWith(
+    expect.anything(), expect.any(Array), expect.objectContaining({ pan: { x: 60, y: 35 } }),
+  );
+});
+
+it("redraws persisted handwriting when the browser tab becomes visible again", () => {
+  const stroke = { points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], color: "#fff", width: 2, mode: "draw" as const };
+  mount([stroke]);
+  vi.mocked(drawStrokes).mockClear();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+
+  document.dispatchEvent(new Event("visibilitychange"));
+
+  expect(vi.mocked(drawStrokes)).toHaveBeenLastCalledWith(
+    expect.anything(), [stroke], expect.any(Object),
+  );
 });

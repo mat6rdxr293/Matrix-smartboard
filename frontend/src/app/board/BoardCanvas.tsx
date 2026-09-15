@@ -110,6 +110,7 @@ export default function BoardCanvas({
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number | null>(null);
   const pendingRenderRef = useRef(false);
+  const drawFrameRef = useRef<() => void>(() => undefined);
   const workerEnabledRef = useRef(false);
   const strokesRef = useRef<Stroke[]>(initialStrokes);
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
@@ -477,6 +478,8 @@ export default function BoardCanvas({
     }
   }
 
+  drawFrameRef.current = drawFrame;
+
   function scheduleRender() {
     if (pendingRenderRef.current) return;
     pendingRenderRef.current = true;
@@ -485,14 +488,24 @@ export default function BoardCanvas({
         rafRef.current = requestAnimationFrame((nextTs) => {
           lastRenderTsRef.current = nextTs;
           pendingRenderRef.current = false;
-          drawFrame();
+          rafRef.current = null;
+          drawFrameRef.current();
         });
         return;
       }
       lastRenderTsRef.current = ts;
       pendingRenderRef.current = false;
-      drawFrame();
+      rafRef.current = null;
+      drawFrameRef.current();
     });
+  }
+
+  function forceCanvasRedraw() {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    pendingRenderRef.current = false;
+    lastRenderTsRef.current = 0;
+    drawFrameRef.current();
   }
 
   const drawIncrementalSegment = (stroke: Stroke, segment: { x: number; y: number }[]) => {
@@ -822,6 +835,21 @@ export default function BoardCanvas({
   useLayoutEffect(() => {
     scheduleRender();
   }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode]);
+
+  useEffect(() => {
+    const redrawIfVisible = () => {
+      if (document.visibilityState === "visible") forceCanvasRedraw();
+    };
+    const redraw = () => forceCanvasRedraw();
+    document.addEventListener("visibilitychange", redrawIfVisible);
+    window.addEventListener("pageshow", redraw);
+    window.addEventListener("focus", redraw);
+    return () => {
+      document.removeEventListener("visibilitychange", redrawIfVisible);
+      window.removeEventListener("pageshow", redraw);
+      window.removeEventListener("focus", redraw);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
