@@ -57,10 +57,10 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-echo "Starting backend at http://localhost:8000"
+echo "Starting backend at http://localhost:8001"
 (
   cd backend
-  exec "$venv_python" -m uvicorn app.main:app --reload --port 8000
+  exec "$venv_python" -m uvicorn app.main:app --reload --port 8001
 ) &
 backend_pid=$!
 
