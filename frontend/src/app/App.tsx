@@ -25,7 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { callAi, getStatus } from "@/app/ai/api";
-import { MessageSquare, NotebookPen, X } from "lucide-react";
+import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { sessionApi } from "@/app/session/api";
@@ -202,7 +202,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   const lastServerSnapshotRef = useRef("");
   const scoreHideTimerRef = useRef<number | null>(null);
   const boardReplayQueueRef = useRef<BoardReplayOp[]>([]);
-  const boardReplayFlushRef = useRef(false);
+  const boardReplayFlushRef = useRef<Promise<void> | null>(null);
   const boardReplayLoadedRef = useRef(false);
   const [scoreOverlay, setScoreOverlay] = useState<{
     percent: number;
@@ -263,29 +263,39 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
     }
   };
 
-  const flushBoardReplay = async () => {
-    if (boardReplayFlushRef.current) return;
-    if (!boardReplayQueueRef.current.length) return;
-    boardReplayFlushRef.current = true;
-    try {
-      while (boardReplayQueueRef.current.length) {
-        const chunk = boardReplayQueueRef.current.slice(0, 80);
-        await appendBoardReplay(chunk, lesson.id);
-        boardReplayQueueRef.current.splice(0, chunk.length);
-        persistBoardReplayQueue(boardReplayQueueRef.current);
+  const flushBoardReplay = () => {
+    if (boardReplayFlushRef.current) return boardReplayFlushRef.current;
+    if (!boardReplayQueueRef.current.length) return Promise.resolve();
+    const run = (async () => {
+      try {
+        while (boardReplayQueueRef.current.length) {
+          const chunk = boardReplayQueueRef.current.slice(0, 80);
+          await appendBoardReplay(chunk, lesson.id);
+          const acknowledged = new Set(
+            chunk.map((operation) => operation.client_operation_id ?? operation.clientOperationId).filter(Boolean)
+          );
+          boardReplayQueueRef.current = boardReplayQueueRef.current.filter((operation) => {
+            const id = operation.client_operation_id ?? operation.clientOperationId;
+            return id ? !acknowledged.has(id) : !chunk.includes(operation);
+          });
+          persistBoardReplayQueue(boardReplayQueueRef.current);
+        }
+      } catch {
+        // offline/server unavailable: keep queue for next retry
       }
-    } catch {
-      // offline/server unavailable: keep queue for next retry
-    } finally {
-      boardReplayFlushRef.current = false;
-    }
+    })();
+    const tracked = run.finally(() => {
+      if (boardReplayFlushRef.current === tracked) boardReplayFlushRef.current = null;
+    });
+    boardReplayFlushRef.current = tracked;
+    return tracked;
   };
 
   const onBoardReplayOp = (op: BoardReplayOp) => {
     setBoardHistory((previous) => replayBoardOperations(previous, [op]));
     boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
-    if (boardReplayQueueRef.current.length >= 24) {
+    if (boardReplayLoadedRef.current && boardReplayQueueRef.current.length >= 24) {
       void flushBoardReplay();
     }
   };
@@ -423,23 +433,25 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
           queue = [];
         }
       }
+      boardReplayQueueRef.current = queue;
       try {
         const data = await loadBoardReplay(lesson.id);
         if (!alive) return;
         const serverOperations = Array.isArray(data.operations) ? data.operations : [];
-        queue = filterPendingBoardReplayOps(serverOperations, queue);
-        persistBoardReplayQueue(queue);
+        const pending = filterPendingBoardReplayOps(serverOperations, boardReplayQueueRef.current);
+        boardReplayQueueRef.current = pending;
+        persistBoardReplayQueue(pending);
         const base = replayBoardOperations(createBoardHistory(), serverOperations);
-        const withQueue = queue.length ? replayBoardOperations(base, queue) : base;
+        const withQueue = pending.length ? replayBoardOperations(base, pending) : base;
         setBoardHistory(withQueue);
       } catch {
         if (!alive) return;
-        if (queue.length) {
-          setBoardHistory((previous) => replayBoardOperations(previous, queue));
+        const pending = boardReplayQueueRef.current;
+        if (pending.length) {
+          setBoardHistory((previous) => replayBoardOperations(previous, pending));
         }
       } finally {
-        boardReplayQueueRef.current = queue;
-        boardReplayLoadedRef.current = true;
+        if (alive) boardReplayLoadedRef.current = true;
       }
     };
     loadReplay();
@@ -460,14 +472,11 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
     const onPageHide = () => {
       if (!boardReplayQueueRef.current.length || typeof navigator === "undefined" || !navigator.sendBeacon) return;
       try {
+        persistBoardReplayQueue(boardReplayQueueRef.current);
         const body = JSON.stringify({ operations: boardReplayQueueRef.current.slice(0, 80) });
-        const ok = navigator.sendBeacon(`/api/lessons/${lesson.id}/board/operations`, new Blob([body], { type: "application/json" }));
-        if (ok) {
-          boardReplayQueueRef.current.splice(0, Math.min(80, boardReplayQueueRef.current.length));
-          persistBoardReplayQueue(boardReplayQueueRef.current);
-        }
+        navigator.sendBeacon(`/api/lessons/${lesson.id}/board/operations`, new Blob([body], { type: "application/json" }));
       } catch {
-        // ignore
+        // keep the local backup; the server deduplicates retries by client operation id
       }
     };
     window.addEventListener("pagehide", onPageHide);
@@ -1122,6 +1131,10 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                       onReplayOp={onBoardReplayOp}
                       lowPowerOverride={ultraLite}
                       renderQualityMode={performanceMode}
+                      taskOpen={taskOpen}
+                      assistantOpen={assistantOpen}
+                      onToggleTask={() => setTaskOpen((v) => !v)}
+                      onToggleAssistant={() => setAssistantOpen((v) => !v)}
                     />
                   </motion.div>
                 ) : (
@@ -1218,28 +1231,15 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                         onReplayOp={onBoardReplayOp}
                         lowPowerOverride={ultraLite}
                         renderQualityMode={performanceMode}
+                        taskOpen={taskOpen}
+                        assistantOpen={assistantOpen}
+                        onToggleTask={() => setTaskOpen((v) => !v)}
+                        onToggleAssistant={() => setAssistantOpen((v) => !v)}
                       />
                     </motion.div>
                   </motion.div>
                 )}
               </AnimatePresence>
-              </div>
-
-              <div data-testid="board-quick-actions" className="flex shrink-0 justify-end gap-2 px-1">
-                <Button
-                  variant={taskOpen ? "accent" : "outline"}
-                  size="sm"
-                  onClick={() => setTaskOpen((v) => !v)}
-                >
-                  <NotebookPen size={16} className="mr-2" /> {tl("exercise")}
-                </Button>
-                <Button
-                  variant={assistantOpen ? "accent" : "outline"}
-                  size="sm"
-                  onClick={() => setAssistantOpen((v) => !v)}
-                >
-                  <MessageSquare size={16} className="mr-2" /> {tl("ai_assistant")}
-                </Button>
               </div>
 
               <AnimatePresence>

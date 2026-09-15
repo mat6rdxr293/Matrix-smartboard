@@ -6,7 +6,7 @@ import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
-import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, Minus, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, MessageSquare, Minus, NotebookPen, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 
@@ -77,6 +77,10 @@ export default function BoardCanvas({
   onReplayOp,
   lowPowerOverride,
   renderQualityMode,
+  taskOpen,
+  assistantOpen,
+  onToggleTask,
+  onToggleAssistant,
 }: {
   onOcrText: (text: string) => void;
   ocrEnabled: boolean;
@@ -96,6 +100,10 @@ export default function BoardCanvas({
   onReplayOp?: (op: BoardReplayOp) => void;
   lowPowerOverride?: boolean;
   renderQualityMode?: RenderQualityMode;
+  taskOpen?: boolean;
+  assistantOpen?: boolean;
+  onToggleTask?: () => void;
+  onToggleAssistant?: () => void;
 }) {
   const { tl } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -151,6 +159,7 @@ export default function BoardCanvas({
   const [dynamicSize, setDynamicSize] = useState({ w: 1600, h: 900 });
   const widthPx = dynamicSize.w;
   const heightPx = dynamicSize.h;
+  const compactToolbar = widthPx < 1750;
   const [zoom, setZoom] = useState(() => {
     if (typeof window === "undefined") return 1;
     const raw = window.localStorage.getItem("board.zoom");
@@ -1035,6 +1044,7 @@ export default function BoardCanvas({
                   onPreview={updateGraphPreview}
                   onCommit={commitGraphUpdate}
                   onDelete={deleteGraph}
+                  interactionDisabled={mode === "pan"}
                 />
               ))}
             </div>
@@ -1046,7 +1056,7 @@ export default function BoardCanvas({
           </div>
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div data-testid="board-toolbar" className="scrollbar-hide mt-3 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0">
         <Button variant="outline" size="sm" onClick={onTogglePanels}>
           <Menu size={14} className="mr-2" /> {tl("panels")}
         </Button>
@@ -1535,6 +1545,20 @@ export default function BoardCanvas({
         >
           <Scan size={14} className="mr-2" /> {tl("recognize")}
         </Button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {onToggleTask && (
+            <Button variant={taskOpen ? "accent" : "outline"} size="sm" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
+              <NotebookPen size={16} className={compactToolbar ? "" : "mr-2"} />
+              {!compactToolbar && tl("exercise")}
+            </Button>
+          )}
+          {onToggleAssistant && (
+            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
+              <MessageSquare size={16} className={compactToolbar ? "" : "mr-2"} />
+              {!compactToolbar && tl("ai_assistant")}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

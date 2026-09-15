@@ -23,6 +23,7 @@ beforeEach(() => {
     clear: () => undefined, key: () => null, length: 0 } as Storage;
   Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(16); return 1; });
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -75,4 +76,19 @@ it("hides graph UI when pressing elsewhere in the application, not only the canv
 
   fireEvent.pointerDown(document.body, { pointerId: 6, pointerType: "mouse" });
   expect(screen.queryByRole("button", { name: /удалить график|графикті өшіру/i })).not.toBeInTheDocument();
+});
+
+it("lets pan mode drag the board even when the gesture starts over a graph", () => {
+  const view = mount();
+  const graphElement = screen.getByTestId("graph-element-g1");
+  const graphOverlay = graphElement.parentElement as HTMLDivElement;
+  fireEvent.click(screen.getByRole("button", { name: /перемещение|жылжыту/i }));
+
+  expect(graphElement).toHaveClass("pointer-events-none");
+  const canvas = view.container.querySelector("canvas")!;
+  fireEvent.pointerDown(canvas, { pointerId: 20, pointerType: "mouse", clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(canvas, { pointerId: 20, pointerType: "mouse", clientX: 160, clientY: 135 });
+  fireEvent.pointerUp(canvas, { pointerId: 20, pointerType: "mouse", clientX: 160, clientY: 135 });
+
+  expect(graphOverlay.style.transform).toContain("translate(60px, 35px)");
 });

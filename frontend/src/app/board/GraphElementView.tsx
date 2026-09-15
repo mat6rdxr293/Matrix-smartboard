@@ -20,12 +20,13 @@ type Props = {
   onPreview: (graph: GraphElement) => void;
   onCommit: (before: GraphElement, after: GraphElement) => void;
   onDelete: (graph: GraphElement) => void;
+  interactionDisabled?: boolean;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 export default function GraphElementView(props: Props) {
-  const { graph, selected, backgroundColor, isDarkBackground, zoom, visibleWorld, onSelect, onPreview, onCommit, onDelete } = props;
+  const { graph, selected, backgroundColor, isDarkBackground, zoom, visibleWorld, onSelect, onPreview, onCommit, onDelete, interactionDisabled = false } = props;
   const { tl } = useI18n();
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [editingLabel, setEditingLabel] = useState<"x" | "y" | null>(null);
@@ -240,7 +241,7 @@ export default function GraphElementView(props: Props) {
     <div
       data-testid={`graph-element-${graph.id}`}
       data-graph-interactive="true"
-      className="absolute pointer-events-auto"
+      className={`absolute ${interactionDisabled ? "pointer-events-none" : "pointer-events-auto"}`}
       style={{
         left: 0,
         top: 0,
