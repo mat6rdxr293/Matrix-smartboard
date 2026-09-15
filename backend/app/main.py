@@ -26,11 +26,15 @@ from .pptx_import import import_pptx, import_pptx_full, import_pptx_stickers
 from .pptx_export import export_pptx
 from .m365 import M365Client, M365Error
 from .settings import get_openai_key, settings
+from .school_routes import router as school_router
+from .school_store import SchoolStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("practice-module")
 
 app = FastAPI()
+app.state.school_store = SchoolStore(settings.practice_db_path, session_days=settings.school_session_days)
+app.include_router(school_router)
 
 app.add_middleware(
     CORSMiddleware,
