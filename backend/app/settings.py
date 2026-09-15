@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(default=30, validation_alias="RATE_LIMIT_PER_MINUTE")
     public_base_url: str | None = Field(default=None, validation_alias="PUBLIC_BASE_URL")
     pm_shared_secret: str | None = Field(default=None, validation_alias="PM_SHARED_SECRET")
+    practice_db_path: Path = Field(
+        default=BASE_DIR / "app" / "data" / "practice.db",
+        validation_alias="PRACTICE_DB_PATH",
+    )
+    school_session_days: int = Field(default=30, validation_alias="SCHOOL_SESSION_DAYS")
 
     m365_client_id: str | None = Field(default=None, validation_alias="M365_CLIENT_ID")
     m365_tenant_id: str | None = Field(default=None, validation_alias="M365_TENANT_ID")
