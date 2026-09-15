@@ -6,6 +6,7 @@ import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
+import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, MessageSquare, Minus, NotebookPen, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
@@ -150,13 +151,17 @@ export default function BoardCanvas({
   const [showLineSlider, setShowLineSlider] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearSlideValue, setClearSlideValue] = useState(0);
-  const localSyncRef = useRef(false);
   const penTimerRef = useRef<number | null>(null);
   const eraserTimerRef = useRef<number | null>(null);
   const lineTimerRef = useRef<number | null>(null);
   const [inputMode, setInputMode] = useState<"auto" | "mouse" | "touch">("auto");
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
+  const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
+  const lineToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
+  const eraserToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
+  const boardToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
+  const clearToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const [dynamicSize, setDynamicSize] = useState({ w: 1600, h: 900 });
   const widthPx = dynamicSize.w;
   const heightPx = dynamicSize.h;
@@ -266,8 +271,9 @@ export default function BoardCanvas({
     if (!el) return;
     const update = () => {
       const rect = el.getBoundingClientRect();
-      const nextW = Math.max(1, Math.floor(rect.width));
-      const nextH = Math.max(1, Math.floor(rect.height));
+      const nextW = Math.floor(rect.width);
+      const nextH = Math.floor(rect.height);
+      if (nextW <= 1 || nextH <= 1) return;
       setDynamicSize({ w: nextW, h: nextH });
     };
     update();
@@ -312,11 +318,7 @@ export default function BoardCanvas({
   const clampPan = (next: { x: number; y: number }) => next;
 
   const syncStrokesToParent = (next: Stroke[]) => {
-    localSyncRef.current = true;
     onChangeStrokes(next);
-    window.setTimeout(() => {
-      localSyncRef.current = false;
-    }, 0);
   };
 
   const syncGraphsToParent = (next: GraphElement[]) => {
@@ -863,12 +865,10 @@ export default function BoardCanvas({
         workerRef.current = null;
       }
       workerEnabledRef.current = false;
-      syncStrokesToParent([...strokesRef.current]);
     };
-  }, [onChangeStrokes]);
+  }, []);
 
   useEffect(() => {
-    if (localSyncRef.current) return;
     strokesRef.current = [...initialStrokes];
     setShowClearConfirm(false);
     setClearSlideValue(0);
@@ -1088,7 +1088,7 @@ export default function BoardCanvas({
         <Button variant="outline" size="sm" onClick={onTogglePanels}>
           <Menu size={14} className="mr-2" /> {tl("panels")}
         </Button>
-        <div className="relative">
+        <div ref={penToolbarAnchorRef} className="relative">
           <Button
             variant={mode === "draw" ? "accent" : "outline"}
             size="sm"
@@ -1103,17 +1103,13 @@ export default function BoardCanvas({
           >
             <Paintbrush size={14} className="mr-2" /> {tl("pen")}
           </Button>
-          <AnimatePresence>
-            {showPenPalette && mode === "draw" && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="absolute bottom-full left-0 z-50 mb-2 rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
-                onPointerDown={schedulePenHide}
-                onPointerUp={schedulePenHide}
-                onPointerMove={schedulePenHide}
-              >
+          <BoardToolbarPopover
+            anchorRef={penToolbarAnchorRef}
+            open={showPenPalette && mode === "draw"}
+            testId="board-toolbar-popover-pen"
+            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+          >
+            <div onPointerDown={schedulePenHide} onPointerUp={schedulePenHide} onPointerMove={schedulePenHide}>
                 {showPenSlider && (
                   <div className="mb-2 flex items-center gap-2">
                     <span className="text-xs text-frost/60">{tl("thickness")}</span>
@@ -1195,11 +1191,10 @@ export default function BoardCanvas({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+          </BoardToolbarPopover>
         </div>
-        <div className="relative">
+        <div ref={lineToolbarAnchorRef} className="relative">
           <Button
             variant={mode === "line" ? "accent" : "outline"}
             size="sm"
@@ -1215,17 +1210,13 @@ export default function BoardCanvas({
           >
             <Minus size={14} className="mr-2" /> {tl("line")}
           </Button>
-          <AnimatePresence>
-            {showLineSlider && mode === "line" && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="absolute bottom-full left-0 z-50 mb-2 rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
-                onPointerDown={scheduleLineHide}
-                onPointerUp={scheduleLineHide}
-                onPointerMove={scheduleLineHide}
-              >
+          <BoardToolbarPopover
+            anchorRef={lineToolbarAnchorRef}
+            open={showLineSlider && mode === "line"}
+            testId="board-toolbar-popover-line"
+            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+          >
+            <div onPointerDown={scheduleLineHide} onPointerUp={scheduleLineHide} onPointerMove={scheduleLineHide}>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-frost/60">{tl("thickness")}</span>
                   <input
@@ -1247,9 +1238,8 @@ export default function BoardCanvas({
                     }}
                   />
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+          </BoardToolbarPopover>
         </div>
         <Button
           variant={mode === "graph" ? "accent" : "outline"}
@@ -1292,7 +1282,7 @@ export default function BoardCanvas({
           {boardLock ? <Lock size={14} className="mr-2" /> : <Unlock size={14} className="mr-2" />}
           {tl("board_lock")}
         </Button>
-        <div className="relative">
+        <div ref={eraserToolbarAnchorRef} className="relative">
           <Button
             variant={mode === "erase" ? "accent" : "outline"}
             size="sm"
@@ -1308,17 +1298,13 @@ export default function BoardCanvas({
         >
           <Eraser size={14} className="mr-2" /> {tl("eraser")}
         </Button>
-          <AnimatePresence>
-            {showEraserSlider && mode === "erase" && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="absolute bottom-full left-0 z-50 mb-2 rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
-                onPointerDown={scheduleEraserHide}
-                onPointerUp={scheduleEraserHide}
-                onPointerMove={scheduleEraserHide}
-              >
+          <BoardToolbarPopover
+            anchorRef={eraserToolbarAnchorRef}
+            open={showEraserSlider && mode === "erase"}
+            testId="board-toolbar-popover-eraser"
+            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+          >
+            <div onPointerDown={scheduleEraserHide} onPointerUp={scheduleEraserHide} onPointerMove={scheduleEraserHide}>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-frost/60">{tl("eraser_size")}</span>
                   <input
@@ -1340,11 +1326,10 @@ export default function BoardCanvas({
                     }}
                   />
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+          </BoardToolbarPopover>
         </div>
-        <div className="relative">
+        <div ref={boardToolbarAnchorRef} className="relative">
           <Button
             variant="outline"
             size="sm"
@@ -1355,14 +1340,12 @@ export default function BoardCanvas({
           >
             <Grid3x3 size={14} className="mr-2" /> {tl("board")}
           </Button>
-          <AnimatePresence>
-            {showBoardSettings && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="absolute bottom-full left-0 z-40 mb-2 rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
-              >
+          <BoardToolbarPopover
+            anchorRef={boardToolbarAnchorRef}
+            open={showBoardSettings}
+            testId="board-toolbar-popover-board"
+            className="rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+          >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs text-frost/60">{tl("grid")}</span>
                   <Button variant={grid ? "accent" : "outline"} size="sm" onClick={() => setGrid((v) => !v)}>
@@ -1455,9 +1438,7 @@ export default function BoardCanvas({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </BoardToolbarPopover>
         </div>
         <div className="relative flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1">
           <button
@@ -1516,7 +1497,7 @@ export default function BoardCanvas({
         <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")}>
           <RotateCw size={14} />
         </Button>
-        <div className="relative flex items-center">
+        <div ref={clearToolbarAnchorRef} className="relative flex items-center">
           <Button
             variant="ghost"
             size="sm"
@@ -1529,14 +1510,13 @@ export default function BoardCanvas({
           >
             <Trash2 size={14} />
           </Button>
-          <AnimatePresence>
-            {showClearConfirm && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="absolute bottom-full right-0 z-50 mb-2 w-[260px] rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
-              >
+          <BoardToolbarPopover
+            anchorRef={clearToolbarAnchorRef}
+            open={showClearConfirm}
+            align="right"
+            testId="board-toolbar-popover-clear"
+            className="w-[260px] rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+          >
                 <div className="mb-2 text-xs text-frost/70">{tl("slide_to_clear")}</div>
                 <input
                   type="range"
@@ -1558,9 +1538,7 @@ export default function BoardCanvas({
                   }}
                   className="w-[140px]"
                 />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </BoardToolbarPopover>
         </div>
         <Button variant="outline" size="sm" onClick={handleSnapshot}>
           <Save size={14} className="mr-2" /> {tl("snapshot")}

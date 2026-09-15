@@ -36,14 +36,15 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const mount = (initialStrokes: any[] = []) => render(
+const board = (initialStrokes: any[] = [], onChangeStrokes = vi.fn()) => (
   <I18nProvider><BoardCanvas
     onOcrText={vi.fn()} ocrEnabled={false} expanded={false} onTogglePanels={vi.fn()} onStartTimer={vi.fn()}
-    initialStrokes={initialStrokes} onChangeStrokes={vi.fn()} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
+    initialStrokes={initialStrokes} onChangeStrokes={onChangeStrokes} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
     canUndo={false} canRedo={false} initialPenColor="#FF0000" onChangePenColor={vi.fn()}
     initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={vi.fn()}
   /></I18nProvider>
 );
+const mount = (initialStrokes: any[] = [], onChangeStrokes = vi.fn()) => render(board(initialStrokes, onChangeStrokes));
 it("hides graph HUD and editor when the board is pressed outside graph UI", () => {
   const view = mount();
   fireEvent.pointerDown(screen.getByTestId("graph-element-g1"), { pointerId: 1, pointerType: "mouse" });
@@ -125,4 +126,38 @@ it("redraws persisted handwriting when the browser tab becomes visible again", (
   expect(vi.mocked(drawStrokes)).toHaveBeenLastCalledWith(
     expect.anything(), [stroke], expect.any(Object),
   );
+});
+
+
+it("rehydrates server handwriting even when the parent callback identity changes", () => {
+  const stroke = { points: [{ x: 10, y: 20 }, { x: 30, y: 40 }], color: "#fff", width: 3, mode: "draw" as const };
+  const view = mount([], vi.fn());
+  vi.mocked(drawStrokes).mockClear();
+
+  view.rerender(board([stroke], vi.fn()));
+
+  expect(vi.mocked(drawStrokes)).toHaveBeenLastCalledWith(
+    expect.anything(), [stroke], expect.any(Object),
+  );
+});
+
+
+it("renders toolbar settings outside the horizontally scrolling toolbar", () => {
+  mount();
+  const toolbar = screen.getByTestId("board-toolbar");
+
+  const cases: Array<[RegExp, string]> = [
+    [/ручка|қалам/i, "pen"],
+    [/линия|сызық/i, "line"],
+    [/ластик|өшіргіш/i, "eraser"],
+    [/^доска$|^тақта$/i, "board"],
+    [/очистить доску|тақтаны тазарту/i, "clear"],
+  ];
+
+  for (const [buttonName, popoverName] of cases) {
+    fireEvent.click(screen.getByRole("button", { name: buttonName }));
+    const popover = screen.getByTestId(`board-toolbar-popover-${popoverName}`);
+    expect(toolbar).not.toContainElement(popover);
+    expect(popover.parentElement).toBe(document.body);
+  }
 });
