@@ -1,32 +1,29 @@
 import type { Stroke } from "@/app/board/boardEngine";
-import { withSubjectQuery } from "@/app/subjects/subjectConfig";
 
 export type BoardReplayOp =
-  | { op: "add"; stroke: Stroke; ts?: number }
-  | { op: "undo"; ts?: number }
-  | { op: "redo"; ts?: number }
-  | { op: "clear"; ts?: number };
+  | { client_operation_id?: string; op: "add"; stroke: Stroke; ts?: number }
+  | { client_operation_id?: string; op: "undo"; ts?: number }
+  | { client_operation_id?: string; op: "redo"; ts?: number }
+  | { client_operation_id?: string; op: "clear"; ts?: number };
 
-const withReplaySubject = (path: string, subjectId?: string) =>
-  subjectId ? withSubjectQuery(path, subjectId) : path;
-
-export async function loadBoardReplay(subjectId?: string) {
-  const res = await fetch(withReplaySubject("/api/board/replay", subjectId), { cache: "no-store" });
+export async function loadBoardReplay(lessonId: string) {
+  const res = await fetch(`/api/lessons/${lessonId}/board`, { cache: "no-store", credentials: "same-origin" });
   if (!res.ok) {
     throw new Error("board replay load failed");
   }
-  return (await res.json()) as { strokes: Stroke[]; updatedAt?: number };
+  return (await res.json()) as { operations: BoardReplayOp[] };
 }
 
-export async function appendBoardReplay(ops: BoardReplayOp[], subjectId?: string) {
+export async function appendBoardReplay(ops: BoardReplayOp[], lessonId: string) {
   if (!ops.length) return { ok: true };
-  const res = await fetch(withReplaySubject("/api/board/replay", subjectId), {
+  const res = await fetch(`/api/lessons/${lessonId}/board/operations`, {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ops }),
+    body: JSON.stringify({ operations: ops }),
   });
   if (!res.ok) {
     throw new Error("board replay append failed");
   }
-  return (await res.json()) as { ok: boolean; updatedAt?: number };
+  return (await res.json()) as { ok: boolean; inserted?: number };
 }

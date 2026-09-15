@@ -6,7 +6,9 @@ export async function callAi(
   studentAttempt?: string,
   assistantContext?: string,
   continueFrom?: boolean,
-  subject?: string
+  subject?: string,
+  lessonId?: string,
+  clientMessageId?: string,
 ) {
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -18,6 +20,8 @@ export async function callAi(
       assistant_context: assistantContext || null,
       continue_from: !!continueFrom,
       subject: subject || null,
+      lesson_id: lessonId || null,
+      client_message_id: clientMessageId || null,
     }),
   });
   if (!res.ok) {

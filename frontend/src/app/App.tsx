@@ -17,7 +17,6 @@ import { appendBoardReplay, loadBoardReplay, type BoardReplayOp } from "@/app/bo
 import {
   buildDefaultSlidesForSubject,
   getDefaultTasksForSubject,
-  getSubjectIdFromWindow,
   getPracticeTokenFromWindow,
   verifyPracticeToken,
   getSubjectMeta,
@@ -29,6 +28,8 @@ import { callAi, getStatus } from "@/app/ai/api";
 import { MessageSquare, NotebookPen, X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
+import { sessionApi } from "@/app/session/api";
+import type { Lesson, Room, School } from "@/app/session/types";
 
 const TeacherDashboard = lazy(() => import("@/app/teacher/TeacherDashboard"));
 
@@ -101,9 +102,18 @@ const isSiteBackground = (value: unknown): value is SiteBackground => {
   );
 };
 
-export default function App() {
+type LessonWorkspaceProps = {
+  school: School;
+  room: Room;
+  lesson: Lesson;
+  onComplete: () => void;
+  onOpenHistory: () => void;
+  onChangeRoom: () => void;
+};
+
+export default function App({ school, room, lesson, onComplete, onOpenHistory, onChangeRoom }: LessonWorkspaceProps) {
   const { locale, tl } = useI18n();
-  const subjectId = useMemo(() => getSubjectIdFromWindow(), []);
+  const subjectId = lesson.subjectId;
   // Teacher tab is bound to verified practice token from main portal auth.
   const [hideTeacherTab, setHideTeacherTab] = useState(true);
   const canSeeTeacherTab = !hideTeacherTab;
@@ -127,7 +137,7 @@ export default function App() {
   const defaultSlideData = useMemo(() => buildDefaultSlidesForSubject(subjectId, locale), [subjectId, locale]);
   const subjectStoragePrefix = `subject.${subjectId}`;
   const storageBackupKey = `${subjectStoragePrefix}.backup.storage`;
-  const boardReplayBackupKey = `${subjectStoragePrefix}.backup.boardReplayQueue`;
+  const boardReplayBackupKey = `school.${school.id}.room.${room.id}.lesson.${lesson.id}.backup.boardReplayQueue`;
   const performanceModeKey = `${subjectStoragePrefix}.performance.mode`;
   const tasksSidebarWidthKey = `${subjectStoragePrefix}.sidebar.tasks`;
   const slidesSidebarWidthKey = `${subjectStoragePrefix}.sidebar.slides`;
@@ -281,7 +291,7 @@ export default function App() {
     try {
       while (boardReplayQueueRef.current.length) {
         const chunk = boardReplayQueueRef.current.slice(0, 80);
-        await appendBoardReplay(chunk, subjectId);
+        await appendBoardReplay(chunk, lesson.id);
         boardReplayQueueRef.current.splice(0, chunk.length);
         persistBoardReplayQueue(boardReplayQueueRef.current);
       }
@@ -293,11 +303,16 @@ export default function App() {
   };
 
   const onBoardReplayOp = (op: BoardReplayOp) => {
-    boardReplayQueueRef.current.push(op);
+    boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
     if (boardReplayQueueRef.current.length >= 24) {
       void flushBoardReplay();
     }
+  };
+
+  const leaveLesson = async (next: () => void) => {
+    await flushBoardReplay();
+    next();
   };
 
   const typeText = (
@@ -413,9 +428,9 @@ export default function App() {
         }
       }
       try {
-        const data = await loadBoardReplay(subjectId);
+        const data = await loadBoardReplay(lesson.id);
         if (!alive) return;
-        const base = Array.isArray(data.strokes) ? data.strokes : [];
+        const base = Array.isArray(data.operations) ? applyBoardReplayOps([], data.operations) : [];
         const withQueue = queue.length ? applyBoardReplayOps(base, queue) : base;
         setBoardStrokes(withQueue);
       } catch {
@@ -432,7 +447,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [boardReplayBackupKey, subjectId]);
+  }, [boardReplayBackupKey, lesson.id]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -446,8 +461,8 @@ export default function App() {
     const onPageHide = () => {
       if (!boardReplayQueueRef.current.length || typeof navigator === "undefined" || !navigator.sendBeacon) return;
       try {
-        const body = JSON.stringify({ ops: boardReplayQueueRef.current.slice(0, 80) });
-        const ok = navigator.sendBeacon(withSubjectApi("/api/board/replay"), new Blob([body], { type: "application/json" }));
+        const body = JSON.stringify({ operations: boardReplayQueueRef.current.slice(0, 80) });
+        const ok = navigator.sendBeacon(`/api/lessons/${lesson.id}/board/operations`, new Blob([body], { type: "application/json" }));
         if (ok) {
           boardReplayQueueRef.current.splice(0, Math.min(80, boardReplayQueueRef.current.length));
           persistBoardReplayQueue(boardReplayQueueRef.current);
@@ -458,7 +473,24 @@ export default function App() {
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
-  }, [subjectId]);
+  }, [lesson.id]);
+
+  useEffect(() => {
+    let alive = true;
+    sessionApi.loadChat(lesson.id)
+      .then((items) => {
+        if (!alive) return;
+        setMessages(items.slice().reverse().map((item) => ({
+          id: item.clientMessageId,
+          role: item.role,
+          text: item.status === "error" ? `${tl("error")}: ${item.text}` : item.text,
+          mode: item.mode || undefined,
+          timestamp: new Date(item.createdAt).toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", { hour: "2-digit", minute: "2-digit" }),
+        })));
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [lesson.id, locale, tl]);
 
   useEffect(() => {
     setAttempt("");
@@ -753,7 +785,9 @@ export default function App() {
         attempt.trim() || undefined,
         lastAssistant.text,
         true,
-        subjectName
+        subjectName,
+        lesson.id,
+        crypto.randomUUID(),
       );
       await typeText(res.text, (partial) => updateMessage(id, partial), () => continueTokenRef.current !== token);
     } catch (err) {
@@ -1048,6 +1082,13 @@ export default function App() {
           m365BadgeLabel={officeEmbedLabel}
           performanceMode={performanceMode}
           onChangePerformanceMode={setPerformanceMode}
+          schoolName={school.name}
+          roomName={room.name}
+          grade={lesson.grade}
+          subjectName={subjectName}
+          onCompleteLesson={() => void leaveLesson(onComplete)}
+          onOpenHistory={() => void leaveLesson(onOpenHistory)}
+          onChangeRoom={() => void leaveLesson(onChangeRoom)}
         />
         <div className="relative h-[calc(100vh-140px)] min-h-0">
           {tab === "tasks" && (
@@ -1226,6 +1267,7 @@ export default function App() {
                         <TaskPanel
                           task={selectedTask}
                           subjectName={subjectName}
+                          lessonId={lesson.id}
                           attempt={attempt}
                           setAttempt={setAttempt}
                           addMessage={addMessage}

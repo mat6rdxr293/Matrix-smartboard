@@ -2,6 +2,8 @@ import type { Slide } from "@/app/presentation/Slides";
 import { tasks as algebraTasks, type Task } from "@/app/tasks/tasks";
 
 export type SubjectId =
+  | "math"
+  | "natural_science"
   | "algebra"
   | "geometry"
   | "physics"
@@ -11,7 +13,8 @@ export type SubjectId =
   | "kazakh"
   | "history"
   | "informatics"
-  | "geography";
+  | "geography"
+  | "english";
 
 export type SubjectMeta = {
   id: SubjectId;
@@ -24,6 +27,16 @@ export type SubjectMeta = {
 };
 
 const SUBJECT_MAP: Record<SubjectId, SubjectMeta> = {
+  math: {
+    id: "math", nameRu: "Математика", nameKk: "Математика",
+    lessonRu: "Математика · практическая лаборатория", lessonKk: "Математика · практикалық зертхана",
+    focusRu: ["числа", "вычисления", "задачи"], focusKk: ["сандар", "есептеулер", "есептер"],
+  },
+  natural_science: {
+    id: "natural_science", nameRu: "Естествознание", nameKk: "Жаратылыстану",
+    lessonRu: "Естествознание · практическая лаборатория", lessonKk: "Жаратылыстану · практикалық зертхана",
+    focusRu: ["природа", "наблюдения", "опыты"], focusKk: ["табиғат", "бақылау", "тәжірибе"],
+  },
   algebra: {
     id: "algebra",
     nameRu: "Алгебра",
@@ -114,6 +127,11 @@ const SUBJECT_MAP: Record<SubjectId, SubjectMeta> = {
     focusRu: ["карты", "климат", "ресурсы"],
     focusKk: ["карталар", "климат", "ресурстар"],
   },
+  english: {
+    id: "english", nameRu: "Английский язык", nameKk: "Ағылшын тілі",
+    lessonRu: "Английский язык · практическая лаборатория", lessonKk: "Ағылшын тілі · практикалық зертхана",
+    focusRu: ["лексика", "грамматика", "речь"], focusKk: ["лексика", "грамматика", "сөйлеу"],
+  },
 };
 
 const SUBJECT_IDS: SubjectId[] = Object.keys(SUBJECT_MAP) as SubjectId[];
@@ -164,6 +182,18 @@ export const withSubjectQuery = (path: string, subjectId: string): string => {
 export const getSubjectMeta = (subjectId: string): SubjectMeta => SUBJECT_MAP[normalizeId(subjectId)];
 
 const SUBJECT_TASKS: Record<Exclude<SubjectId, "algebra">, Task[]> = {
+  math: [
+    { id: 1, title: "Порядок действий", problem: "Вычисли: 48 : 6 + 7 · 3.", tags: ["вычисления"] },
+    { id: 2, title: "Текстовая задача", problem: "В трёх коробках по 12 карандашей. 8 карандашей раздали. Сколько осталось?", tags: ["задача"] },
+    { id: 3, title: "Дроби", problem: "Сравни дроби 3/4 и 5/8 и объясни ответ.", tags: ["дроби"] },
+    { id: 4, title: "Периметр", problem: "Найди периметр прямоугольника со сторонами 7 см и 4 см.", tags: ["геометрия"] },
+  ],
+  natural_science: [
+    { id: 1, title: "Состояния вещества", problem: "Назови три состояния воды и приведи по одному примеру.", tags: ["вещество"] },
+    { id: 2, title: "Солнечная система", problem: "Объясни, почему на Земле сменяются день и ночь.", tags: ["космос"] },
+    { id: 3, title: "Живая природа", problem: "Перечисли признаки живого организма.", tags: ["природа"] },
+    { id: 4, title: "Простой опыт", problem: "Предложи опыт, который показывает испарение воды.", tags: ["опыт"] },
+  ],
   geometry: [
     { id: 1, title: "Теорема Пифагора", problem: "В прямоугольном треугольнике катеты 9 и 12. Найди гипотенузу.", tags: ["треугольник"] },
     { id: 2, title: "Площадь треугольника", problem: "Найди площадь треугольника со сторонами 5, 5 и 6.", tags: ["площадь"] },
@@ -217,6 +247,12 @@ const SUBJECT_TASKS: Record<Exclude<SubjectId, "algebra">, Task[]> = {
     { id: 2, title: "Климат", problem: "Объясни, почему в степи амплитуда температур выше, чем у моря.", tags: ["климат"] },
     { id: 3, title: "Ресурсы", problem: "Назови основные природные ресурсы региона и отрасли их использования.", tags: ["ресурсы"] },
     { id: 4, title: "Население", problem: "Сравни показатели урбанизации двух регионов и сделай вывод.", tags: ["демография"] },
+  ],
+  english: [
+    { id: 1, title: "Present Simple", problem: "Put the verb in the correct form: She (go) to school every day.", tags: ["grammar"] },
+    { id: 2, title: "Vocabulary", problem: "Write five words about school and use each in a sentence.", tags: ["vocabulary"] },
+    { id: 3, title: "Questions", problem: "Make a question for the answer: I live in Aktobe.", tags: ["speaking"] },
+    { id: 4, title: "Short writing", problem: "Write four sentences about your favourite subject.", tags: ["writing"] },
   ],
 };
 

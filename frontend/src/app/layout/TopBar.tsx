@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Expand, Pause, Play, RefreshCw, Settings2, Tv } from "lucide-react";
+import { DoorOpen, Expand, History, Pause, Play, RefreshCw, Settings2, SquareCheckBig, Tv } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
@@ -22,7 +22,7 @@ type TopBarProps = {
   onToggleRunning: () => void;
   onReset: () => void;
   currentTab: string;
-  tabs: { id: string; label: string }[];
+  tabs: readonly { id: string; label: string }[];
   onChangeTab: (id: string) => void;
   slideshowOpen: boolean;
   onToggleSlideshow: () => void;
@@ -31,6 +31,13 @@ type TopBarProps = {
   m365BadgeLabel?: string;
   performanceMode: "quality" | "balanced" | "performance";
   onChangePerformanceMode: (mode: "quality" | "balanced" | "performance") => void;
+  schoolName: string;
+  roomName: string;
+  grade: number;
+  subjectName: string;
+  onCompleteLesson: () => void;
+  onOpenHistory: () => void;
+  onChangeRoom: () => void;
 };
 
 function formatTime(seconds: number) {
@@ -60,6 +67,13 @@ export default function TopBar({
   m365BadgeLabel = "M365",
   performanceMode,
   onChangePerformanceMode,
+  schoolName,
+  roomName,
+  grade,
+  subjectName,
+  onCompleteLesson,
+  onOpenHistory,
+  onChangeRoom,
 }: TopBarProps) {
   const { locale, setLocale, tl } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -101,10 +115,13 @@ export default function TopBar({
   };
 
   return (
-    <div className="glass relative z-50 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-2xl px-5 py-3 shadow-soft">
-      <div className="flex items-center gap-3">
+    <div className="glass relative z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-visible rounded-2xl px-4 py-2.5 shadow-soft">
+      <div className="flex min-w-0 items-center gap-3">
         <Badge className="bg-white/10">{tl("open_lesson")}</Badge>
-        <div className="text-lg font-semibold">{lessonTitle}</div>
+        <div className="min-w-0">
+          <div className="truncate text-base font-semibold" title={lessonTitle}>{subjectName}</div>
+          <div className="truncate text-[11px] text-frost/50">{schoolName} · кабинет {roomName} · {grade} класс</div>
+        </div>
       </div>
       <div className="flex items-center justify-center">
         <div className="relative flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1">
@@ -129,7 +146,7 @@ export default function TopBar({
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
         {showTimerControls && (
           <>
             <div className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold">{formatTime(seconds)}</div>
@@ -164,6 +181,15 @@ export default function TopBar({
         )}
         <Button variant="outline" size="sm" onClick={handleFullscreen} className={topActionBtnClass}>
           <Expand size={16} /> {tl("fullscreen")}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onOpenHistory} aria-label="История уроков" title="История уроков">
+          <History size={16} />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onChangeRoom} aria-label="Сменить кабинет" title="Сменить кабинет">
+          <DoorOpen size={16} />
+        </Button>
+        <Button variant="outline" size="sm" onClick={onCompleteLesson} className="h-8 whitespace-nowrap px-2 text-[10px]" title="Завершить урок">
+          <SquareCheckBig size={15} className="mr-1" /> Завершить
         </Button>
 
         <div ref={settingsRef} className="relative">

@@ -12,6 +12,7 @@ import { X } from "lucide-react";
 export type TaskPanelProps = {
   task: Task;
   subjectName: string;
+  lessonId: string;
   attempt: string;
   setAttempt: (value: string) => void;
   addMessage: (msg: AssistantMessage) => void;
@@ -62,6 +63,7 @@ const shouldContinue = (text: string) => {
 export default function TaskPanel({
   task,
   subjectName,
+  lessonId,
   attempt,
   setAttempt,
   addMessage,
@@ -123,7 +125,7 @@ export default function TaskPanel({
 
     try {
       let fullText = "";
-      const res = await callAi(mode, task.problem, attempt.trim() || undefined, undefined, false, subjectName);
+      const res = await callAi(mode, task.problem, attempt.trim() || undefined, undefined, false, subjectName, lessonId, crypto.randomUUID());
       fullText = res.text || "";
       await typeText(
         fullText,
@@ -139,7 +141,9 @@ export default function TaskPanel({
           attempt.trim() || undefined,
           fullText,
           true,
-          subjectName
+          subjectName,
+          lessonId,
+          crypto.randomUUID(),
         );
         const next = cont.text || "";
         if (!next.trim()) break;
