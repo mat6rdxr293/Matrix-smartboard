@@ -186,7 +186,8 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
   };
 
   return (
-    <div className="w-[320px] rounded-xl border border-white/15 bg-ink/95 p-2 shadow-glass backdrop-blur">
+    <div className="w-[320px] space-y-2">
+      <div data-testid="graph-functions-window" className="w-[320px] rounded-xl border border-white/15 bg-ink/95 p-2 shadow-glass backdrop-blur">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-frost/70">{tl("graph_functions")}</span>
         <button
@@ -199,7 +200,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
           <Plus size={14} />
         </button>
       </div>
-      <div className="space-y-2">
+      <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1">
         {draft.expressions.map((item, index) => {
           const error = errors.get(item.id);
           const errorId = `graph-expression-error-${item.id}`;
@@ -269,6 +270,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
             </div>
           );
         })}
+      </div>
       </div>
       {activeExpressionId && <MathOnScreenKeyboard onAction={handleMathKeyboard} />}
     </div>

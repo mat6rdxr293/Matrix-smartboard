@@ -77,3 +77,14 @@ it("edits an axis label using the on-screen text keyboard", () => {
   expect(onCommit).toHaveBeenCalledTimes(1);
   expect((onCommit.mock.calls[0][1] as GraphElement).xLabel).toBe("v, м/с");
 });
+
+it("docks the editor beside the graph instead of covering it", () => {
+  render(<I18nProvider><GraphElementView {...props} /></I18nProvider>);
+  const dock = screen.getByTestId("graph-dock-panel");
+  expect(dock).toHaveAttribute("data-side", "right");
+  expect(dock).toHaveStyle({ left: "432px" });
+
+  fireEvent.click(screen.getByTestId("graph-x-label"));
+  expect(screen.getByRole("group", { name: /экранная клавиатура|экрандық пернетақта/i })).toBeInTheDocument();
+  expect(screen.getByTestId("graph-dock-panel")).toHaveAttribute("data-side", "right");
+});

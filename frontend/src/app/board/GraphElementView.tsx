@@ -5,6 +5,7 @@ import type { GraphElement } from "./boardDocument";
 import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
 import GraphEditor from "./GraphEditor";
 import { TextOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
+import { getGraphDockPlacement } from "./graphDock";
 
 type VisibleWorld = { left: number; top: number; right: number; bottom: number };
 
@@ -48,6 +49,14 @@ export default function GraphElementView(props: Props) {
 
   const controlSize = Math.max(28, 28 / Math.max(zoom, 0.1));
   const uiScale = 1 / Math.min(Math.max(zoom, 0.1), 1);
+  const dockWidthCss = editingLabel ? 500 : 320;
+  const dockHeightCss = editingLabel ? 680 : 650;
+  const dockPlacement = getGraphDockPlacement(
+    graph,
+    visibleWorld,
+    dockWidthCss * uiScale,
+    dockHeightCss * uiScale,
+  );
   const mathToX = (x: number) => ((x - graph.xMin) / (graph.xMax - graph.xMin)) * graph.width;
   const mathToY = (y: number) => ((graph.yMax - y) / (graph.yMax - graph.yMin)) * graph.height;
   const axisX = mathToX(0);
@@ -349,16 +358,6 @@ export default function GraphElementView(props: Props) {
         )}
       </svg>
 
-      {selected && editingLabel && (
-        <div
-          className="absolute z-[70]"
-          style={{ left: graph.width / 2, top: graph.height / 2, transform: `translate(-50%, -50%) scale(${uiScale})`, transformOrigin: "center" }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <TextOnScreenKeyboard onAction={handleTextKeyboard} />
-        </div>
-      )}
-
       {selected && (
         <div
           className="absolute left-0 top-0 flex w-full items-center justify-between rounded-t-lg border-b border-white/10 bg-ink/80 px-1 backdrop-blur"
@@ -393,13 +392,21 @@ export default function GraphElementView(props: Props) {
         </div>
       )}
 
-      {selected && !editorCollapsed && (
+      {selected && (!editorCollapsed || editingLabel) && (
         <div
-          className="absolute left-2 z-40"
-          style={{ top: controlSize + 6, transform: `scale(${uiScale})`, transformOrigin: "top left" }}
+          data-testid="graph-dock-panel"
+          data-side={dockPlacement.side}
+          className="absolute z-[70] flex flex-col gap-2"
+          style={{
+            left: dockPlacement.left,
+            top: dockPlacement.top,
+            transform: `scale(${uiScale})`,
+            transformOrigin: "top left",
+          }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <GraphEditor graph={graph} onPreview={onPreview} onCommit={onCommit} />
+          {!editorCollapsed && <GraphEditor graph={graph} onPreview={onPreview} onCommit={onCommit} />}
+          {editingLabel && <TextOnScreenKeyboard onAction={handleTextKeyboard} />}
         </div>
       )}
 
