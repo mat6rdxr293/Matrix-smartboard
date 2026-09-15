@@ -57,3 +57,23 @@ describe("GraphElementView", () => {
     expect((onCommit.mock.calls[0][1] as GraphElement).xLabel).toBe("t, с");
   });
 });
+
+it("edits an axis label using the on-screen text keyboard", () => {
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onCommit={onCommit} /></I18nProvider>);
+
+  fireEvent.click(screen.getByTestId("graph-x-label"));
+  expect(screen.getByRole("group", { name: /экранная клавиатура|экрандық пернетақта/i })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /очистить подпись|таңбаны тазарту/i }));
+  fireEvent.click(screen.getByRole("button", { name: "v" }));
+  fireEvent.click(screen.getByRole("button", { name: "comma" }));
+  fireEvent.click(screen.getByRole("button", { name: "space" }));
+  fireEvent.click(screen.getByRole("button", { name: /кириллица|кириллица/i }));
+  fireEvent.click(screen.getByRole("button", { name: "м" }));
+  fireEvent.click(screen.getByRole("button", { name: "slash" }));
+  fireEvent.click(screen.getByRole("button", { name: "с" }));
+  fireEvent.click(screen.getByRole("button", { name: /готово|дайын/i }));
+
+  expect(onCommit).toHaveBeenCalledTimes(1);
+  expect((onCommit.mock.calls[0][1] as GraphElement).xLabel).toBe("v, м/с");
+});

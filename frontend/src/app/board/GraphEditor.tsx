@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { compileExpression } from "./graphExpression";
 import type { GraphElement } from "./boardDocument";
+import { MathOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
 
 const GRAPH_COLORS = ["#4DA3FF", "#FF5A5F", "#5BE7C4", "#F6D365", "#C084FC", "#FF9F43", "#E7F2FF", "#111827"];
 
@@ -16,6 +17,10 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
   const draftRef = useRef(graph);
   const commitBaseRef = useRef(graph);
   const timerRef = useRef<number | null>(null);
+  const expressionInputsRef = useRef(new Map<string, HTMLInputElement>());
+  const selectionRef = useRef({ start: 0, end: 0 });
+  const pendingCaretRef = useRef<{ id: string; position: number } | null>(null);
+  const [activeExpressionId, setActiveExpressionId] = useState<string | null>(null);
 
   useEffect(() => {
     const current = draftRef.current;
@@ -98,8 +103,90 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
     commitNow(next);
   };
 
+  const rememberSelection = (id: string, input: HTMLInputElement) => {
+    setActiveExpressionId(id);
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    selectionRef.current = { start, end };
+  };
+
+  const restoreCaret = (id: string, position: number) => {
+    selectionRef.current = { start: position, end: position };
+    pendingCaretRef.current = { id, position };
+    expressionInputsRef.current.get(id)?.focus();
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingCaretRef.current;
+    if (!pending) return;
+    const input = expressionInputsRef.current.get(pending.id);
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(pending.position, pending.position);
+    pendingCaretRef.current = null;
+  }, [draft]);
+
+  const previewExpressionValue = (id: string, value: string) => {
+    const next = {
+      ...draftRef.current,
+      expressions: draftRef.current.expressions.map((item) => item.id === id ? { ...item, expression: value } : item),
+    };
+    publishPreview(next);
+  };
+
+  const handleMathKeyboard = (action: VirtualKeyboardAction) => {
+    const id = activeExpressionId;
+    if (!id) return;
+    const item = draftRef.current.expressions.find((entry) => entry.id === id);
+    if (!item) return;
+    let { start, end } = selectionRef.current;
+    start = Math.max(0, Math.min(start, item.expression.length));
+    end = Math.max(start, Math.min(end, item.expression.length));
+
+    if (action.type === "done") {
+      commitNow();
+      setActiveExpressionId(null);
+      expressionInputsRef.current.get(id)?.blur();
+      return;
+    }
+    if (action.type === "cancel") {
+      const base = commitBaseRef.current.expressions.find((entry) => entry.id === id);
+      if (base) previewExpressionValue(id, base.expression);
+      setActiveExpressionId(null);
+      expressionInputsRef.current.get(id)?.blur();
+      return;
+    }
+    if (action.type === "clear") {
+      previewExpressionValue(id, "");
+      restoreCaret(id, 0);
+      return;
+    }
+    if (action.type === "left" || action.type === "right") {
+      const position = action.type === "left" ? Math.max(0, start - 1) : Math.min(item.expression.length, end + 1);
+      restoreCaret(id, position);
+      return;
+    }
+    if (action.type === "backspace") {
+      if (start === end && start === 0) return;
+      const from = start === end ? start - 1 : start;
+      const nextValue = item.expression.slice(0, from) + item.expression.slice(end);
+      previewExpressionValue(id, nextValue);
+      restoreCaret(id, from);
+      return;
+    }
+    if (action.type === "insert") {
+      const available = 120 - (item.expression.length - (end - start));
+      const inserted = action.value.slice(0, Math.max(0, available));
+      if (!inserted) return;
+      const nextValue = item.expression.slice(0, start) + inserted + item.expression.slice(end);
+      const position = Math.max(start, start + inserted.length - (action.cursorBack ?? 0));
+      previewExpressionValue(id, nextValue);
+      restoreCaret(id, position);
+    }
+  };
+
   return (
-    <div className="w-[250px] rounded-xl border border-white/15 bg-ink/95 p-2 shadow-glass backdrop-blur">
+    <div className="w-[320px] rounded-xl border border-white/15 bg-ink/95 p-2 shadow-glass backdrop-blur">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-frost/70">{tl("graph_functions")}</span>
         <button
@@ -121,10 +208,21 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
               <div className="flex items-center gap-1.5">
                 <span className="w-5 text-[10px] text-frost/50">{index + 1}</span>
                 <input
+                  ref={(node) => {
+                    if (node) expressionInputsRef.current.set(item.id, node);
+                    else expressionInputsRef.current.delete(item.id);
+                  }}
                   value={item.expression}
                   maxLength={120}
+                  inputMode="none"
+                  onFocus={(event) => rememberSelection(item.id, event.currentTarget)}
+                  onClick={(event) => rememberSelection(item.id, event.currentTarget)}
+                  onSelect={(event) => rememberSelection(item.id, event.currentTarget)}
                   onChange={(event) => updateExpression(item.id, { expression: event.target.value })}
-                  onBlur={() => commitNow()}
+                  onBlur={() => {
+                    commitNow();
+                    setActiveExpressionId((current) => current === item.id ? null : current);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -172,6 +270,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
           );
         })}
       </div>
+      {activeExpressionId && <MathOnScreenKeyboard onAction={handleMathKeyboard} />}
     </div>
   );
 }

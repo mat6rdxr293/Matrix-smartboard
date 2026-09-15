@@ -245,7 +245,20 @@
     "resize_graph": "Изменить размер графика",
     "undo": "Отменить",
     "redo": "Повторить",
-    "clear_board": "Очистить доску"
+    "clear_board": "Очистить доску",
+    "math_keyboard": "Математическая клавиатура",
+    "screen_keyboard": "Экранная клавиатура",
+    "cursor_left": "Курсор влево",
+    "cursor_right": "Курсор вправо",
+    "backspace": "Удалить символ",
+    "clear_expression": "Очистить выражение",
+    "clear_label": "Очистить подпись",
+    "cancel": "Отмена",
+    "done": "Готово",
+    "shift": "Регистр",
+    "cyrillic": "Кириллица",
+    "latin": "Латиница",
+    "space": "Пробел"
   },
   "defaults": {
     "slides": [

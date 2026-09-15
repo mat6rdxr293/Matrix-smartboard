@@ -245,7 +245,20 @@
     "resize_graph": "График өлшемін өзгерту",
     "undo": "Болдырмау",
     "redo": "Қайталау",
-    "clear_board": "Тақтаны тазарту"
+    "clear_board": "Тақтаны тазарту",
+    "math_keyboard": "Математикалық пернетақта",
+    "screen_keyboard": "Экрандық пернетақта",
+    "cursor_left": "Курсорды солға",
+    "cursor_right": "Курсорды оңға",
+    "backspace": "Таңбаны өшіру",
+    "clear_expression": "Өрнекті тазарту",
+    "clear_label": "Таңбаны тазарту",
+    "cancel": "Бас тарту",
+    "done": "Дайын",
+    "shift": "Регистр",
+    "cyrillic": "Кириллица",
+    "latin": "Латын",
+    "space": "Бос орын"
   },
   "defaults": {
     "slides": [

@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, MoveDiagonal2, Trash2 } from "lucide-react";
 import { useI18n } from "@/i18n";
 import type { GraphElement } from "./boardDocument";
 import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
 import GraphEditor from "./GraphEditor";
+import { TextOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
 
 type VisibleWorld = { left: number; top: number; right: number; bottom: number };
 
@@ -28,6 +29,8 @@ export default function GraphElementView(props: Props) {
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [editingLabel, setEditingLabel] = useState<"x" | "y" | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
+  const labelSelectionRef = useRef({ start: 0, end: 0 });
   const dragRef = useRef<{
     id: number;
     startX: number;
@@ -144,8 +147,30 @@ export default function GraphElementView(props: Props) {
 
   const beginLabelEdit = (axis: "x" | "y") => {
     if (!selected) return;
+    const value = axis === "x" ? graph.xLabel : graph.yLabel;
     setEditingLabel(axis);
-    setLabelDraft(axis === "x" ? graph.xLabel : graph.yLabel);
+    setLabelDraft(value);
+    labelSelectionRef.current = { start: value.length, end: value.length };
+  };
+
+  useEffect(() => {
+    if (!editingLabel || !labelInputRef.current) return;
+    const position = labelDraft.length;
+    labelInputRef.current.focus();
+    labelInputRef.current.setSelectionRange(position, position);
+    labelSelectionRef.current = { start: position, end: position };
+  }, [editingLabel]);
+
+  const rememberLabelSelection = (input: HTMLInputElement) => {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    labelSelectionRef.current = { start, end };
+  };
+
+  const restoreLabelCaret = (position: number) => {
+    labelSelectionRef.current = { start: position, end: position };
+    labelInputRef.current?.focus();
+    labelInputRef.current?.setSelectionRange(position, position);
   };
 
   const commitLabel = (axis: "x" | "y") => {
@@ -160,6 +185,46 @@ export default function GraphElementView(props: Props) {
   const cancelLabel = () => {
     setEditingLabel(null);
     setLabelDraft("");
+  };
+
+  const handleTextKeyboard = (action: VirtualKeyboardAction) => {
+    if (!editingLabel) return;
+    let { start, end } = labelSelectionRef.current;
+    start = Math.max(0, Math.min(start, labelDraft.length));
+    end = Math.max(start, Math.min(end, labelDraft.length));
+
+    if (action.type === "done") {
+      commitLabel(editingLabel);
+      return;
+    }
+    if (action.type === "cancel") {
+      cancelLabel();
+      return;
+    }
+    if (action.type === "clear") {
+      setLabelDraft("");
+      restoreLabelCaret(0);
+      return;
+    }
+    if (action.type === "left" || action.type === "right") {
+      const position = action.type === "left" ? Math.max(0, start - 1) : Math.min(labelDraft.length, end + 1);
+      restoreLabelCaret(position);
+      return;
+    }
+    if (action.type === "backspace") {
+      if (start === end && start === 0) return;
+      const from = start === end ? start - 1 : start;
+      setLabelDraft(labelDraft.slice(0, from) + labelDraft.slice(end));
+      restoreLabelCaret(from);
+      return;
+    }
+    if (action.type === "insert") {
+      const available = 32 - (labelDraft.length - (end - start));
+      const inserted = action.value.slice(0, Math.max(0, available));
+      if (!inserted) return;
+      setLabelDraft(labelDraft.slice(0, start) + inserted + labelDraft.slice(end));
+      restoreLabelCaret(start + inserted.length);
+    }
   };
 
   return (
@@ -239,11 +304,16 @@ export default function GraphElementView(props: Props) {
         {editingLabel === "x" && (
           <foreignObject x={Math.max(4, graph.width - 122)} y={Math.max(2, axisY - 28)} width={116} height={30}>
             <input
+              ref={labelInputRef}
               autoFocus
               value={labelDraft}
               maxLength={32}
+              inputMode="none"
               aria-label={tl("x_axis_label")}
               onPointerDown={(event) => event.stopPropagation()}
+              onFocus={(event) => rememberLabelSelection(event.currentTarget)}
+              onClick={(event) => rememberLabelSelection(event.currentTarget)}
+              onSelect={(event) => rememberLabelSelection(event.currentTarget)}
               onChange={(event) => setLabelDraft(event.target.value)}
               onBlur={() => commitLabel("x")}
               onKeyDown={(event) => {
@@ -257,11 +327,16 @@ export default function GraphElementView(props: Props) {
         {editingLabel === "y" && (
           <foreignObject x={Math.min(graph.width - 122, axisX + 8)} y={2} width={116} height={30}>
             <input
+              ref={labelInputRef}
               autoFocus
               value={labelDraft}
               maxLength={32}
+              inputMode="none"
               aria-label={tl("y_axis_label")}
               onPointerDown={(event) => event.stopPropagation()}
+              onFocus={(event) => rememberLabelSelection(event.currentTarget)}
+              onClick={(event) => rememberLabelSelection(event.currentTarget)}
+              onSelect={(event) => rememberLabelSelection(event.currentTarget)}
               onChange={(event) => setLabelDraft(event.target.value)}
               onBlur={() => commitLabel("y")}
               onKeyDown={(event) => {
@@ -273,6 +348,16 @@ export default function GraphElementView(props: Props) {
           </foreignObject>
         )}
       </svg>
+
+      {selected && editingLabel && (
+        <div
+          className="absolute z-[70]"
+          style={{ left: graph.width / 2, top: graph.height / 2, transform: `translate(-50%, -50%) scale(${uiScale})`, transformOrigin: "center" }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <TextOnScreenKeyboard onAction={handleTextKeyboard} />
+        </div>
+      )}
 
       {selected && (
         <div

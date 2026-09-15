@@ -69,3 +69,22 @@ it("keeps the pre-edit state when a preview is echoed back before debounce commi
   expect((onCommit.mock.calls[0][1] as GraphElement).expressions[0].expression).toBe("x^2");
   vi.useRealTimers();
 });
+
+it("enters a function using only the on-screen math keyboard", () => {
+  const onCommit = vi.fn();
+  mount(vi.fn(), onCommit);
+  const input = screen.getByRole("textbox", { name: /функц|function/i });
+
+  fireEvent.focus(input);
+  expect(screen.getByRole("group", { name: /математическая клавиатура|математикалық пернетақта/i })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /очистить выражение|өрнекті тазарту/i }));
+  fireEvent.click(screen.getByRole("button", { name: "sin" }));
+  expect(input).toHaveValue("sin()");
+  expect((input as HTMLInputElement).selectionStart).toBe(4);
+  fireEvent.click(screen.getByRole("button", { name: "x" }));
+
+  expect(input).toHaveValue("sin(x)");
+  fireEvent.click(screen.getByRole("button", { name: /готово|дайын/i }));
+  expect(onCommit).toHaveBeenCalledTimes(1);
+  expect((onCommit.mock.calls[0][1] as GraphElement).expressions[0].expression).toBe("sin(x)");
+});
