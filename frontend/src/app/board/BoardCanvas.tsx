@@ -107,6 +107,18 @@ export default function BoardCanvas({
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
   const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
   const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedGraphId) return;
+    const handleOutsideGraphPointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-graph-interactive="true"]')) return;
+      setSelectedGraphId(null);
+    };
+    document.addEventListener("pointerdown", handleOutsideGraphPointer, true);
+    return () => document.removeEventListener("pointerdown", handleOutsideGraphPointer, true);
+  }, [selectedGraphId]);
   const [color, setColor] = useState(initialPenColor);
   const [showAllPens, setShowAllPens] = useState(false);
   const [width, setWidth] = useState(4);
@@ -975,7 +987,10 @@ export default function BoardCanvas({
   };
 
   return (
-    <div className={cn("glass flex h-full flex-col rounded-2xl shadow-glass", expanded ? "p-2" : "p-4")}>
+    <div
+      data-testid="board-canvas-root"
+      className={cn("glass flex h-full flex-col rounded-2xl shadow-glass", expanded ? "p-2" : "p-4")}
+    >
       <div ref={areaRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div className="absolute inset-0 flex items-stretch justify-stretch">
           <div

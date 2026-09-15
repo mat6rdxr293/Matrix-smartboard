@@ -239,6 +239,7 @@ export default function GraphElementView(props: Props) {
   return (
     <div
       data-testid={`graph-element-${graph.id}`}
+      data-graph-interactive="true"
       className="absolute pointer-events-auto"
       style={{
         left: 0,

@@ -1091,7 +1091,8 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
         />
         <div className="relative h-[calc(100vh-140px)] min-h-0">
           {tab === "tasks" && (
-            <div className="relative h-full">
+            <div className="relative flex h-full min-h-0 flex-col gap-2">
+              <div className="relative min-h-0 flex-1">
               <AnimatePresence mode="wait">
                 {boardExpanded ? (
                   <motion.div
@@ -1222,21 +1223,22 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                   </motion.div>
                 )}
               </AnimatePresence>
+              </div>
 
-              <div className="absolute bottom-4 right-4 flex gap-2">
+              <div data-testid="board-quick-actions" className="flex shrink-0 justify-end gap-2 px-1">
                 <Button
                   variant={taskOpen ? "accent" : "outline"}
-                  size="lg"
+                  size="sm"
                   onClick={() => setTaskOpen((v) => !v)}
                 >
-                  <NotebookPen size={18} className="mr-2" /> {tl("exercise")}
+                  <NotebookPen size={16} className="mr-2" /> {tl("exercise")}
                 </Button>
                 <Button
                   variant={assistantOpen ? "accent" : "outline"}
-                  size="lg"
+                  size="sm"
                   onClick={() => setAssistantOpen((v) => !v)}
                 >
-                  <MessageSquare size={18} className="mr-2" /> {tl("ai_assistant")}
+                  <MessageSquare size={16} className="mr-2" /> {tl("ai_assistant")}
                 </Button>
               </div>
 
