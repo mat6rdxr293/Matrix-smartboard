@@ -238,8 +238,19 @@ export default function GraphElementView(props: Props) {
 
   return (
     <div
+      data-testid={`graph-element-${graph.id}`}
       className="absolute pointer-events-auto"
-      style={{ left: graph.x, top: graph.y, width: graph.width, height: graph.height, zIndex: selected ? 30 : 10 }}
+      style={{
+        left: 0,
+        top: 0,
+        width: graph.width,
+        height: graph.height,
+        zIndex: selected ? 30 : 10,
+        transform: `translate3d(${graph.x}px, ${graph.y}px, 0)`,
+        willChange: "transform",
+        backfaceVisibility: "hidden",
+        isolation: "isolate",
+      }}
       onPointerDown={(event) => {
         event.stopPropagation();
         onSelect();
@@ -360,7 +371,7 @@ export default function GraphElementView(props: Props) {
 
       {selected && (
         <div
-          className="absolute left-0 top-0 flex w-full items-center justify-between rounded-t-lg border-b border-white/10 bg-ink/80 px-1 backdrop-blur"
+          className="absolute left-0 top-0 flex w-full items-center justify-between rounded-t-lg border-b border-white/15 bg-ink px-1"
           style={{ height: controlSize }}
           onPointerDown={startDrag}
           onPointerMove={moveDrag}
@@ -372,7 +383,7 @@ export default function GraphElementView(props: Props) {
           <div className="flex items-center gap-1" onPointerDown={(event) => event.stopPropagation()}>
             <button
               type="button"
-              className="flex items-center justify-center rounded-md border border-white/10 bg-black/20"
+              className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]"
               style={{ width: controlSize, height: controlSize }}
               onClick={() => setEditorCollapsed((value) => !value)}
               aria-label={editorCollapsed ? tl("expand_graph_editor") : tl("collapse_graph_editor")}
@@ -381,7 +392,7 @@ export default function GraphElementView(props: Props) {
             </button>
             <button
               type="button"
-              className="flex items-center justify-center rounded-md border border-white/10 bg-black/20"
+              className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]"
               style={{ width: controlSize, height: controlSize }}
               onClick={() => onDelete(graph)}
               aria-label={tl("delete_graph")}
@@ -413,7 +424,7 @@ export default function GraphElementView(props: Props) {
       {selected && (
         <button
           type="button"
-          className="absolute bottom-0 right-0 flex cursor-nwse-resize items-center justify-center rounded-tl-md border border-white/20 bg-ink/90"
+          className="absolute bottom-0 right-0 flex cursor-nwse-resize items-center justify-center rounded-tl-md border border-white/20 bg-ink"
           style={{ width: controlSize, height: controlSize }}
           onPointerDown={startResize}
           onPointerMove={moveResize}

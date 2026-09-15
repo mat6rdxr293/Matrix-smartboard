@@ -24,3 +24,14 @@ describe("getGraphDockPlacement", () => {
     expect(result.top).toBe(312);
   });
 });
+
+it("keeps a side dock aligned to the graph top even when the panel is taller than the viewport", () => {
+  const result = getGraphDockPlacement(
+    { x: 20, y: 200, width: 420, height: 300 },
+    visible,
+    320,
+    650,
+  );
+  expect(result.side).toBe("right");
+  expect(result.top).toBe(0);
+});

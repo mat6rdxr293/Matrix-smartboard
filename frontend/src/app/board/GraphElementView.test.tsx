@@ -88,3 +88,16 @@ it("docks the editor beside the graph instead of covering it", () => {
   expect(screen.getByRole("group", { name: /экранная клавиатура|экрандық пернетақта/i })).toBeInTheDocument();
   expect(screen.getByTestId("graph-dock-panel")).toHaveAttribute("data-side", "right");
 });
+
+it("uses compositor transform for graph movement and avoids blur on the drag bar", () => {
+  render(<I18nProvider><GraphElementView {...props} /></I18nProvider>);
+  expect(screen.getByTestId("graph-element-g1")).toHaveStyle({ transform: "translate3d(20px, 30px, 0)" });
+  expect(screen.getByLabelText(/перемещение|жылжыту/i).className).not.toContain("backdrop-blur");
+});
+
+it("keeps the side dock top aligned with a lower graph", () => {
+  render(<I18nProvider><GraphElementView {...props} graph={{ ...graph, y: 200 }} /></I18nProvider>);
+  const dock = screen.getByTestId("graph-dock-panel");
+  expect(dock).toHaveAttribute("data-side", "right");
+  expect(dock).toHaveStyle({ top: "0px" });
+});

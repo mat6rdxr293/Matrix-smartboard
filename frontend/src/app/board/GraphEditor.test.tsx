@@ -88,3 +88,12 @@ it("enters a function using only the on-screen math keyboard", () => {
   expect(onCommit).toHaveBeenCalledTimes(1);
   expect((onCommit.mock.calls[0][1] as GraphElement).expressions[0].expression).toBe("sin(x)");
 });
+
+it("uses opaque touch keys for the math keyboard", () => {
+  mount();
+  const input = screen.getByRole("textbox", { name: /функц|function/i });
+  fireEvent.focus(input);
+  const sin = screen.getByRole("button", { name: "sin" });
+  expect(sin.className).toContain("bg-[#151b24]");
+  expect(sin.className).not.toContain("bg-white/5");
+});

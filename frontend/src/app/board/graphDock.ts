@@ -23,12 +23,10 @@ export function getGraphDockPlacement(
   const topSpace = graph.y - visible.top;
 
   if (rightSpace >= panelWidth + GAP) {
-    const worldTop = clamp(graph.y, visible.top + EDGE, visible.bottom - panelHeight - EDGE);
-    return { side: "right", left: graph.width + GAP, top: worldTop - graph.y };
+    return { side: "right", left: graph.width + GAP, top: 0 };
   }
   if (leftSpace >= panelWidth + GAP) {
-    const worldTop = clamp(graph.y, visible.top + EDGE, visible.bottom - panelHeight - EDGE);
-    return { side: "left", left: -panelWidth - GAP, top: worldTop - graph.y };
+    return { side: "left", left: -panelWidth - GAP, top: 0 };
   }
   if (bottomSpace >= panelHeight + GAP || bottomSpace >= topSpace) {
     const worldLeft = clamp(graph.x, visible.left + EDGE, visible.right - panelWidth - EDGE);

@@ -19,7 +19,7 @@ function TouchKey({ label, ariaLabel, onPress, className = "" }: TouchKeyProps) 
       aria-label={ariaLabel ?? label}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onPress}
-      className={`flex h-11 min-w-11 select-none items-center justify-center rounded-lg border border-white/15 bg-white/5 px-2 text-sm font-semibold text-frost active:bg-accent active:text-ink ${className}`}
+      className={`flex h-11 min-w-11 select-none items-center justify-center rounded-lg border border-white/20 bg-[#151b24] px-2 text-sm font-semibold text-frost active:bg-accent active:text-ink ${className}`}
     >
       {label}
     </button>
@@ -41,7 +41,7 @@ const mathValueKeys = [
 export function MathOnScreenKeyboard({ onAction }: { onAction: (action: VirtualKeyboardAction) => void }) {
   const { tl } = useI18n();
   return (
-    <div role="group" aria-label={tl("math_keyboard")} className="mt-2 w-[304px] rounded-xl border border-white/15 bg-ink/98 p-2 shadow-glass">
+    <div role="group" aria-label={tl("math_keyboard")} className="mt-2 w-[304px] rounded-xl border border-white/15 bg-ink p-2 shadow-glass">
       <div className="grid grid-cols-6 gap-1">
         {mathFunctionKeys.map(([label, value]) => (
           <TouchKey key={label} label={label} onPress={() => onAction({ type: "insert", value, cursorBack: 1 })} />
@@ -58,7 +58,7 @@ export function MathOnScreenKeyboard({ onAction }: { onAction: (action: VirtualK
         <TouchKey label="⌫" ariaLabel={tl("backspace")} onPress={() => onAction({ type: "backspace" })} />
         <TouchKey label="C" ariaLabel={tl("clear_expression")} onPress={() => onAction({ type: "clear" })} />
         <TouchKey label={tl("cancel")} onPress={() => onAction({ type: "cancel" })} className="col-span-1" />
-        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="bg-accent/20" />
+        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="bg-accent text-ink" />
       </div>
     </div>
   );
@@ -74,7 +74,7 @@ export function TextOnScreenKeyboard({ onAction }: { onAction: (action: VirtualK
   const rows = layout === "latin" ? LATIN_ROWS : CYRILLIC_ROWS;
 
   return (
-    <div role="group" aria-label={tl("screen_keyboard")} className="w-[500px] rounded-xl border border-white/15 bg-ink/98 p-2 shadow-glass">
+    <div role="group" aria-label={tl("screen_keyboard")} className="w-[500px] rounded-xl border border-white/15 bg-ink p-2 shadow-glass">
       <div className="grid grid-cols-10 gap-1">
         {"1234567890".split("").map((key) => (
           <TouchKey key={key} label={key} onPress={() => onAction({ type: "insert", value: key })} />
@@ -108,7 +108,7 @@ export function TextOnScreenKeyboard({ onAction }: { onAction: (action: VirtualK
       </div>
       <div className="mt-1 flex justify-end gap-1">
         <TouchKey label={tl("cancel")} onPress={() => onAction({ type: "cancel" })} className="min-w-[92px]" />
-        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="min-w-[92px] bg-accent/20" />
+        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="min-w-[92px] bg-accent text-ink" />
       </div>
     </div>
   );
