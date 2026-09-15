@@ -7,6 +7,7 @@ import time
 import asyncio
 import secrets
 import re
+import os
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
@@ -14,7 +15,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 import jwt as pyjwt
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -962,13 +963,18 @@ async def divide_endpoint(payload: DivideRequest) -> dict:
 
 # Static frontend
 static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 @app.get("/")
-async def root() -> FileResponse:
+async def root():
+    dev_frontend_url = os.getenv("PRACTICE_DEV_FRONTEND_URL", "").strip()
+    if dev_frontend_url:
+        return RedirectResponse(dev_frontend_url)
     index_file = static_dir / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
     raise HTTPException(status_code=404, detail="Frontend not built")
+
+
+if static_dir.exists():
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

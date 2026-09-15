@@ -60,7 +60,7 @@ trap cleanup EXIT INT TERM
 echo "Starting backend at http://localhost:8001"
 (
   cd backend
-  exec "$venv_python" -m uvicorn app.main:app --reload --port 8001
+  PRACTICE_DEV_FRONTEND_URL="http://localhost:5174" exec "$venv_python" -m uvicorn app.main:app --reload --port 8001
 ) &
 backend_pid=$!
 
