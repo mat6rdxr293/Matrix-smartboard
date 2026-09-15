@@ -1,0 +1,38 @@
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+*.lnk
+
+# Python
+.venv/
+.venv-mac/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Frontend dependencies and generated builds
+frontend/node_modules/
+frontend/dist/
+backend/app/static/
+
+# Local secrets and certificates
+backend/.env
+backend/key
+certs/
+
+# Local runtime data
+backend/app/data/media/
+backend/app/data/*.ndjson
+backend/app/data/board_replay.json
+backend/app/data/presentation.pptx
+backend/app/data/presentation_source.json
+backend/app/data/practice.db*
+backend/app/data/subjects/*/board_replay.json
+backend/app/data/subjects/*/board_replay.ndjson
+
+# Local design companion sessions
+.superpowers/
+
+# Logs
+*.log

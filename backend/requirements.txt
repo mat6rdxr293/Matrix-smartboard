@@ -1,0 +1,10 @@
+﻿fastapi==0.115.6
+PyJWT==2.9.0
+uvicorn[standard]==0.30.6
+pydantic-settings==2.5.2
+python-multipart==0.0.9
+openai>=2.17.0
+python-pptx==0.6.23
+Pillow>=11.0.0
+httpx==0.27.2
+cryptography==43.0.1

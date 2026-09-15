@@ -1,0 +1,6 @@
+﻿# Reverse proxy: https://matrix-host.ru:444 -> http://127.0.0.1:8000
+# Requires Caddy with access to ports 80/443 for ACME, and 444 open.
+matrix-host.ru:444 {
+  encode gzip
+  reverse_proxy 127.0.0.1:8000
+}

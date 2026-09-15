@@ -1,0 +1,117 @@
+﻿@import "katex/dist/katex.min.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: "Segoe UI Variable", "Segoe UI", "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  background-color: #0a0e14;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.no-select,
+button,
+a,
+[role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.glass {
+  background: rgb(18, 24, 36);
+  border: 1px solid rgba(231, 242, 255, 0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.text-muted {
+  color: rgba(231, 242, 255, 0.65);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.grid-overlay {
+  background-image: linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.bg-slateboard {
+  background-color: #0f1724;
+}
+
+.bg-deepblue {
+  background-color: #0b1220;
+}
+
+.bg-graphite {
+  background-color: #121824;
+}
+
+.bg-inknight {
+  background-color: #0a0e14;
+}
+
+.thinking-shimmer {
+  font-weight: 600;
+  background: linear-gradient(110deg, rgba(231, 242, 255, 0.25) 10%, rgba(231, 242, 255, 0.9) 45%, rgba(231, 242, 255, 0.25) 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer 2.6s ease-in-out infinite;
+}
+
+@keyframes thinking-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+body.lite-mode .glass {
+  background: rgb(18, 24, 36) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.lite-mode .shadow-soft,
+body.lite-mode .shadow-glass {
+  box-shadow: none !important;
+}
+
+body.lite-mode .backdrop-blur,
+body.lite-mode .backdrop-blur-sm,
+body.lite-mode .backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.lite-mode .thinking-shimmer {
+  animation-duration: 4.2s;
+}

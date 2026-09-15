@@ -1,0 +1,6 @@
+{
+  "mode": "gradient",
+  "color": "#0A0E14",
+  "gradient": "radial-gradient(1200px 600px at 30% -10%, rgba(77,163,255,0.12) 0%, rgba(10,14,20,0.4) 45%, rgba(10,14,20,1) 100%)",
+  "image": ""
+}
