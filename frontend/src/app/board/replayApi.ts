@@ -1,10 +1,30 @@
 import type { Stroke } from "@/app/board/boardEngine";
+import type { GraphElement } from "@/app/board/boardDocument";
 
-export type BoardReplayOp =
-  | { client_operation_id?: string; op: "add"; stroke: Stroke; ts?: number }
-  | { client_operation_id?: string; op: "undo"; ts?: number }
-  | { client_operation_id?: string; op: "redo"; ts?: number }
-  | { client_operation_id?: string; op: "clear"; ts?: number };
+type BoardReplayMeta = {
+  client_operation_id?: string;
+  clientOperationId?: string;
+  ts?: number;
+};
+
+export type BoardReplayOp = BoardReplayMeta & (
+  | { op: "add"; stroke: Stroke }
+  | { op: "graph_add"; graph: GraphElement }
+  | { op: "graph_update"; before: GraphElement; after: GraphElement }
+  | { op: "graph_delete"; graph: GraphElement }
+  | { op: "undo" | "redo" | "clear" }
+);
+
+const replayOperationId = (operation: BoardReplayOp) =>
+  operation.client_operation_id ?? operation.clientOperationId;
+
+export function filterPendingBoardReplayOps(server: BoardReplayOp[], local: BoardReplayOp[]) {
+  const savedIds = new Set(server.map(replayOperationId).filter((id): id is string => Boolean(id)));
+  return local.filter((operation) => {
+    const id = replayOperationId(operation);
+    return !id || !savedIds.has(id);
+  });
+}
 
 export async function loadBoardReplay(lessonId: string) {
   const res = await fetch(`/api/lessons/${lessonId}/board`, { cache: "no-store", credentials: "same-origin" });

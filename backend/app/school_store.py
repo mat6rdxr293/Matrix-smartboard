@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import secrets
 import sqlite3
 import time
@@ -28,6 +29,67 @@ class ResourceNotFound(LookupError):
 
 class InvalidLesson(ValueError):
     pass
+
+
+BOARD_OPERATION_TYPES = {
+    "add", "graph_add", "graph_update", "graph_delete", "undo", "redo", "clear"
+}
+BOARD_SCHEMA_VERSION = "2"
+MAX_BOARD_OPERATION_JSON_BYTES = 512_000
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _is_valid_board_stroke(stroke: object) -> bool:
+    if not isinstance(stroke, dict):
+        return False
+    points = stroke.get("points")
+    if not isinstance(points, list) or len(points) < 2 or len(points) > 5000:
+        return False
+    if any(not isinstance(point, dict) or not _is_number(point.get("x")) or not _is_number(point.get("y")) for point in points):
+        return False
+    return (
+        _is_number(stroke.get("width"))
+        and 0 < float(stroke["width"]) <= 100
+        and isinstance(stroke.get("color"), str)
+        and 1 <= len(stroke["color"]) <= 32
+        and stroke.get("mode") in {"draw", "erase"}
+    )
+
+
+def _is_valid_graph(graph: object) -> bool:
+    if not isinstance(graph, dict):
+        return False
+    graph_id = graph.get("id")
+    if not isinstance(graph_id, str) or not graph_id.strip() or len(graph_id) > 120:
+        return False
+    if not _is_number(graph.get("x")) or not _is_number(graph.get("y")):
+        return False
+    if not _is_number(graph.get("width")) or not 260 <= float(graph["width"]) <= 1200:
+        return False
+    if not _is_number(graph.get("height")) or not 190 <= float(graph["height"]) <= 900:
+        return False
+    if any(not isinstance(graph.get(key), str) or len(graph[key]) > 32 for key in ("xLabel", "yLabel")):
+        return False
+    if (graph.get("xMin"), graph.get("xMax"), graph.get("yMin"), graph.get("yMax")) != (-10, 10, -10, 10):
+        return False
+    expressions = graph.get("expressions")
+    if not isinstance(expressions, list) or not 1 <= len(expressions) <= 8:
+        return False
+    for item in expressions:
+        if not isinstance(item, dict):
+            return False
+        if not isinstance(item.get("id"), str) or not item["id"] or len(item["id"]) > 120:
+            return False
+        if not isinstance(item.get("expression"), str) or len(item["expression"]) > 120:
+            return False
+        if not isinstance(item.get("color"), str) or not 1 <= len(item["color"]) <= 32:
+            return False
+        if not isinstance(item.get("visible"), bool):
+            return False
+    return True
 
 
 def _now_ms() -> int:
@@ -165,7 +227,7 @@ class SchoolStore:
                     lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL,
                     client_operation_id TEXT NOT NULL,
-                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'undo', 'redo', 'clear')),
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
                     payload_json TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL,
                     UNIQUE(lesson_id, sequence),
@@ -191,8 +253,72 @@ class SchoolStore:
 
                 CREATE INDEX IF NOT EXISTS idx_chat_messages_lesson
                     ON chat_messages(lesson_id, sequence);
+
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
+            self._migrate_board_operations(connection)
+
+    def _migrate_board_operations(self, connection: sqlite3.Connection) -> None:
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'board_operations'"
+        ).fetchone()
+        ddl = row["sql"] if row and isinstance(row["sql"], str) else ""
+        connection.execute("SAVEPOINT board_operations_v2")
+        try:
+            if "graph_add" not in ddl:
+                legacy = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
+                ).fetchone()
+                if legacy is not None:
+                    raise RuntimeError("unfinished board_operations migration")
+                connection.execute("ALTER TABLE board_operations RENAME TO board_operations_legacy")
+                connection.execute(
+                    """
+                    CREATE TABLE board_operations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+                        sequence INTEGER NOT NULL,
+                        client_operation_id TEXT NOT NULL,
+                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
+                        payload_json TEXT NOT NULL,
+                        occurred_at INTEGER NOT NULL,
+                        UNIQUE(lesson_id, sequence),
+                        UNIQUE(lesson_id, client_operation_id)
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO board_operations(id, lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at)
+                    SELECT id, lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at
+                    FROM board_operations_legacy ORDER BY id
+                    """
+                )
+                connection.execute("DROP TABLE board_operations_legacy")
+            else:
+                legacy = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
+                ).fetchone()
+                if legacy is not None:
+                    connection.execute("DROP TABLE board_operations_legacy")
+
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_operations_lesson ON board_operations(lesson_id, sequence)"
+            )
+            connection.execute(
+                "INSERT INTO schema_meta(key, value) VALUES ('board_operations', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (BOARD_SCHEMA_VERSION,),
+            )
+            connection.execute("RELEASE SAVEPOINT board_operations_v2")
+        except Exception:
+            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v2")
+            connection.execute("RELEASE SAVEPOINT board_operations_v2")
+            raise
 
     @staticmethod
     def _hash_password(password: str, salt: bytes) -> bytes:
@@ -436,26 +562,47 @@ class SchoolStore:
             for operation in operations:
                 op_type = operation.get("op")
                 client_id = str(operation.get("client_operation_id") or "").strip()
-                if op_type not in {"add", "undo", "redo", "clear"} or not client_id:
+                if op_type not in BOARD_OPERATION_TYPES or not client_id:
                     raise ValueError("invalid board operation")
-                stroke = operation.get("stroke")
-                if op_type == "add" and not isinstance(stroke, dict):
-                    raise ValueError("add operation requires stroke")
-                occurred_at = operation.get("ts")
-                if not isinstance(occurred_at, int):
-                    occurred_at = _now_ms()
                 if connection.execute(
                     "SELECT 1 FROM board_operations WHERE lesson_id = ? AND client_operation_id = ?",
                     (lesson_id, client_id),
                 ).fetchone():
                     continue
+
+                payload: dict = {}
+                if op_type == "add":
+                    stroke = operation.get("stroke")
+                    if not _is_valid_board_stroke(stroke):
+                        raise ValueError("add operation requires valid stroke")
+                    payload = {"stroke": stroke}
+                elif op_type in {"graph_add", "graph_delete"}:
+                    graph = operation.get("graph")
+                    if not _is_valid_graph(graph):
+                        raise ValueError(f"{op_type} operation requires valid graph")
+                    payload = {"graph": graph}
+                elif op_type == "graph_update":
+                    before = operation.get("before")
+                    after = operation.get("after")
+                    if not _is_valid_graph(before) or not _is_valid_graph(after):
+                        raise ValueError("graph_update operation requires valid before and after")
+                    if before["id"] != after["id"]:
+                        raise ValueError("graph_update ids must match")
+                    payload = {"before": before, "after": after}
+
+                payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                if len(payload_json.encode("utf-8")) > MAX_BOARD_OPERATION_JSON_BYTES:
+                    raise ValueError("board operation is too large")
+                occurred_at = operation.get("ts")
+                if not isinstance(occurred_at, int):
+                    occurred_at = _now_ms()
                 sequence += 1
                 connection.execute(
                     """
                     INSERT INTO board_operations(lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (lesson_id, sequence, client_id, op_type, json.dumps({"stroke": stroke}, ensure_ascii=False), occurred_at),
+                    (lesson_id, sequence, client_id, op_type, payload_json, occurred_at),
                 )
                 inserted += 1
             if inserted:
@@ -480,6 +627,11 @@ class SchoolStore:
             }
             if row["op_type"] == "add":
                 item["stroke"] = payload.get("stroke")
+            elif row["op_type"] in {"graph_add", "graph_delete"}:
+                item["graph"] = payload.get("graph")
+            elif row["op_type"] == "graph_update":
+                item["before"] = payload.get("before")
+                item["after"] = payload.get("after")
             result.append(item)
         return result
 

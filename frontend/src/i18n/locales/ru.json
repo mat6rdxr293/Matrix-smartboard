@@ -227,7 +227,25 @@
     "download_video": "Скачать видео",
     "speed": "Скорость",
     "step_current_total": "Шаг: {current}/{total}",
-    "select_replay_in_list": "Выберите реплей в списке"
+    "select_replay_in_list": "Выберите реплей в списке",
+    "graph": "График",
+    "graph_functions": "Функции",
+    "add_function": "Добавить функцию",
+    "function": "Функция",
+    "function_color": "Цвет функции",
+    "hide_function": "Скрыть функцию",
+    "show_function": "Показать функцию",
+    "delete_function": "Удалить функцию",
+    "invalid_expression": "Некорректное выражение",
+    "x_axis_label": "Подпись оси X",
+    "y_axis_label": "Подпись оси Y",
+    "collapse_graph_editor": "Свернуть редактор графика",
+    "expand_graph_editor": "Развернуть редактор графика",
+    "delete_graph": "Удалить график",
+    "resize_graph": "Изменить размер графика",
+    "undo": "Отменить",
+    "redo": "Повторить",
+    "clear_board": "Очистить доску"
   },
   "defaults": {
     "slides": [

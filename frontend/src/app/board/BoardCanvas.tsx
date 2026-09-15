@@ -4,7 +4,9 @@ import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
-import { Eraser, Grid3x3, Hand, Lock, Menu, Minus, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import type { GraphElement } from "@/app/board/boardDocument";
+import GraphElementView from "@/app/board/GraphElementView";
+import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, Minus, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 
@@ -64,6 +66,10 @@ export default function BoardCanvas({
   onStartTimer,
   initialStrokes,
   onChangeStrokes,
+  initialGraphs,
+  onChangeGraphs,
+  canUndo,
+  canRedo,
   initialPenColor,
   onChangePenColor,
   initialBgColor,
@@ -79,6 +85,10 @@ export default function BoardCanvas({
   onStartTimer: () => void;
   initialStrokes: Stroke[];
   onChangeStrokes: (next: Stroke[]) => void;
+  initialGraphs: GraphElement[];
+  onChangeGraphs: (next: GraphElement[]) => void;
+  canUndo: boolean;
+  canRedo: boolean;
   initialPenColor: string;
   onChangePenColor: (color: string) => void;
   initialBgColor: string;
@@ -94,12 +104,14 @@ export default function BoardCanvas({
   const pendingRenderRef = useRef(false);
   const workerEnabledRef = useRef(false);
   const strokesRef = useRef<Stroke[]>(initialStrokes);
-  const redoRef = useRef<Stroke[]>([]);
+  const graphsRef = useRef<GraphElement[]>(initialGraphs);
+  const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
+  const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null);
   const [color, setColor] = useState(initialPenColor);
   const [showAllPens, setShowAllPens] = useState(false);
   const [width, setWidth] = useState(4);
   const [eraserWidth, setEraserWidth] = useState(16);
-  const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan">("draw");
+  const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph">("draw");
   const [grid, setGrid] = useState(true);
   const [loading, setLoading] = useState(false);
   const [bg, setBg] = useState(initialBgColor);
@@ -144,7 +156,6 @@ export default function BoardCanvas({
     lastCenter: null,
   });
   const pinchRef = useRef<{ active: boolean; startDist: number }>({ active: false, startDist: 0 });
-  const lastClearRef = useRef<Stroke[] | null>(null);
   const eraserPreviewRef = useRef<{ x: number; y: number } | null>(null);
 
   const isDarkBg = useMemo(() => {
@@ -284,6 +295,59 @@ export default function BoardCanvas({
     window.setTimeout(() => {
       localSyncRef.current = false;
     }, 0);
+  };
+
+  const syncGraphsToParent = (next: GraphElement[]) => {
+    graphsRef.current = next;
+    setGraphs(next);
+    onChangeGraphs(next);
+  };
+
+  const updateGraphPreview = (next: GraphElement) => {
+    const nextGraphs = graphsRef.current.map((graph) => graph.id === next.id ? next : graph);
+    syncGraphsToParent(nextGraphs);
+  };
+
+  const commitGraphUpdate = (before: GraphElement, after: GraphElement) => {
+    updateGraphPreview(after);
+    onReplayOp?.({ op: "graph_update", before, after, ts: Date.now() });
+  };
+
+  const graphVisibleWorld = () => {
+    const scale = zoomRef.current || 1;
+    const currentPan = panRef.current;
+    const left = -currentPan.x / scale;
+    const top = -currentPan.y / scale;
+    return { left, top, right: left + widthPx / scale, bottom: top + heightPx / scale };
+  };
+
+  const clampGraphPosition = (graph: GraphElement): GraphElement => {
+    const visible = graphVisibleWorld();
+    return {
+      ...graph,
+      x: Math.min(Math.max(graph.x, visible.left + 48 - graph.width), visible.right - 48),
+      y: Math.min(Math.max(graph.y, visible.top + 48 - graph.height), visible.bottom - 48),
+    };
+  };
+
+  const createGraphAt = (x: number, y: number) => {
+    const safeX = Number.isFinite(x) ? x : 0;
+    const safeY = Number.isFinite(y) ? y : 0;
+    const id = crypto.randomUUID();
+    const graph = clampGraphPosition({
+      id, x: safeX - 210, y: safeY - 150, width: 420, height: 300,
+      xLabel: "x", yLabel: "y", xMin: -10, xMax: 10, yMin: -10, yMax: 10,
+      expressions: [{ id: crypto.randomUUID(), expression: "x", color: "#4DA3FF", visible: true }],
+    });
+    onReplayOp?.({ op: "graph_add", graph, ts: Date.now() });
+    syncGraphsToParent([...graphsRef.current, graph]);
+    setSelectedGraphId(graph.id);
+  };
+
+  const deleteGraph = (graph: GraphElement) => {
+    onReplayOp?.({ op: "graph_delete", graph, ts: Date.now() });
+    syncGraphsToParent(graphsRef.current.filter((item) => item.id !== graph.id));
+    if (selectedGraphId === graph.id) setSelectedGraphId(null);
   };
 
   const buildReplayStroke = (stroke: Stroke): Stroke => {
@@ -437,8 +501,6 @@ export default function BoardCanvas({
   };
 
   const startStroke = (x: number, y: number) => {
-    lastClearRef.current = null;
-    redoRef.current = [];
     const w = mode === "erase" ? eraserWidth : width;
     strokesRef.current.push({
       points: [{ x, y }],
@@ -558,8 +620,14 @@ export default function BoardCanvas({
     const firstPoint = extractPoints(e)[0];
     const x = firstPoint.x;
     const y = firstPoint.y;
+    if (mode === "graph") {
+      createGraphAt(x, y);
+      setMode("draw");
+      activePointerIdRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      return;
+    }
     if (mode === "line") {
-      lastClearRef.current = null;
       lineStartRef.current = { x, y };
       linePreviewRef.current = { points: [{ x, y }, { x, y }], color, width, mode: "draw" };
       scheduleRender();
@@ -753,12 +821,18 @@ export default function BoardCanvas({
   useEffect(() => {
     if (localSyncRef.current) return;
     strokesRef.current = [...initialStrokes];
-    redoRef.current = [];
-    lastClearRef.current = null;
     setShowClearConfirm(false);
     setClearSlideValue(0);
     scheduleRender();
   }, [initialStrokes]);
+
+  useEffect(() => {
+    graphsRef.current = initialGraphs;
+    setGraphs(initialGraphs);
+    if (selectedGraphId && !initialGraphs.some((graph) => graph.id === selectedGraphId)) {
+      setSelectedGraphId(null);
+    }
+  }, [initialGraphs, selectedGraphId]);
 
   useEffect(() => {
     setColor(initialPenColor);
@@ -769,42 +843,22 @@ export default function BoardCanvas({
   }, [initialBgColor]);
 
   const handleUndo = () => {
-    if (strokesRef.current.length === 0 && lastClearRef.current) {
-      strokesRef.current = [...lastClearRef.current];
-      lastClearRef.current = null;
-      redoRef.current = [];
-      scheduleRender();
-      onReplayOp?.({ op: "clear", ts: Date.now() });
-      for (const stroke of strokesRef.current) {
-        onReplayOp?.({ op: "add", stroke: buildReplayStroke(stroke), ts: Date.now() });
-      }
-      syncStrokesToParent([...strokesRef.current]);
-      return;
-    }
-    if (!strokesRef.current.length) return;
-    const last = strokesRef.current.pop();
-    if (last) redoRef.current.unshift(last);
-    scheduleRender();
+    if (!canUndo) return;
     onReplayOp?.({ op: "undo", ts: Date.now() });
-    syncStrokesToParent([...strokesRef.current]);
   };
 
   const handleRedo = () => {
-    if (!redoRef.current.length) return;
-    const next = redoRef.current.shift();
-    if (next) strokesRef.current.push(next);
-    scheduleRender();
+    if (!canRedo) return;
     onReplayOp?.({ op: "redo", ts: Date.now() });
-    syncStrokesToParent([...strokesRef.current]);
   };
 
   const handleClear = () => {
-    if (strokesRef.current.length === 0) return;
-    lastClearRef.current = [...strokesRef.current];
-    strokesRef.current = [];
-    redoRef.current = [];
-    scheduleRender();
+    if (strokesRef.current.length === 0 && graphsRef.current.length === 0) return;
     onReplayOp?.({ op: "clear", ts: Date.now() });
+    strokesRef.current = [];
+    syncGraphsToParent([]);
+    setSelectedGraphId(null);
+    scheduleRender();
     syncStrokesToParent([]);
   };
 
@@ -946,6 +1000,29 @@ export default function BoardCanvas({
                 if (!lowPowerMode) scheduleRender();
               }}
             />
+            <div
+              className="pointer-events-none absolute inset-0 overflow-visible"
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "0 0",
+              }}
+            >
+              {graphs.map((graph) => (
+                <GraphElementView
+                  key={graph.id}
+                  graph={graph}
+                  selected={selectedGraphId === graph.id}
+                  backgroundColor={bg}
+                  isDarkBackground={isDarkBg}
+                  zoom={zoom}
+                  visibleWorld={graphVisibleWorld()}
+                  onSelect={() => setSelectedGraphId(graph.id)}
+                  onPreview={updateGraphPreview}
+                  onCommit={commitGraphUpdate}
+                  onDelete={deleteGraph}
+                />
+              ))}
+            </div>
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 text-sm">
                 {tl("recognition_loading")}
@@ -1121,6 +1198,22 @@ export default function BoardCanvas({
             )}
           </AnimatePresence>
         </div>
+        <Button
+          variant={mode === "graph" ? "accent" : "outline"}
+          size="sm"
+          aria-label={tl("graph")}
+          onClick={() => {
+            setMode("graph");
+            setShowPenSlider(false);
+            setShowPenPalette(false);
+            setShowAllPens(false);
+            setShowEraserSlider(false);
+            setShowLineSlider(false);
+            closeBoardSettings();
+          }}
+        >
+          <ChartSpline size={14} className="mr-2" /> {tl("graph")}
+        </Button>
         <Button
           variant={mode === "pan" ? "accent" : "outline"}
           size="sm"
@@ -1364,10 +1457,10 @@ export default function BoardCanvas({
           </button>
         </div>
 
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleUndo}>
+        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")}>
           <RotateCcw size={14} />
         </Button>
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleRedo}>
+        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")}>
           <RotateCw size={14} />
         </Button>
         <div className="relative flex items-center">
@@ -1375,6 +1468,7 @@ export default function BoardCanvas({
             variant="ghost"
             size="sm"
             className="flex h-8 w-8 items-center justify-center p-0"
+            aria-label={tl("clear_board")}
             onClick={() => {
               setShowClearConfirm((v) => !v);
               setClearSlideValue(0);
@@ -1393,6 +1487,7 @@ export default function BoardCanvas({
                 <div className="mb-2 text-xs text-frost/70">{tl("slide_to_clear")}</div>
                 <input
                   type="range"
+                  aria-label={tl("slide_to_clear")}
                   min={0}
                   max={100}
                   value={clearSlideValue}

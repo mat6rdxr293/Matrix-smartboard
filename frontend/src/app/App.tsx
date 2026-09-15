@@ -12,8 +12,8 @@ import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas from "@/app/board/BoardCanvas";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
-import type { Stroke } from "@/app/board/boardEngine";
-import { appendBoardReplay, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
+import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
+import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
 import {
   buildDefaultSlidesForSubject,
   getDefaultTasksForSubject,
@@ -54,27 +54,6 @@ const loadFromStorage = <T,>(key: string, fallback: T): T => {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const SLIDE_BASE_W = 960;
 const SLIDE_BASE_H = 540;
-
-const applyBoardReplayOps = (base: Stroke[], ops: BoardReplayOp[]) => {
-  const strokes = [...base];
-  const redo: Stroke[] = [];
-  for (const op of ops) {
-    if (op.op === "add" && op.stroke) {
-      strokes.push(op.stroke);
-      redo.length = 0;
-    } else if (op.op === "undo") {
-      const last = strokes.pop();
-      if (last) redo.push(last);
-    } else if (op.op === "redo") {
-      const again = redo.pop();
-      if (again) strokes.push(again);
-    } else if (op.op === "clear") {
-      strokes.length = 0;
-      redo.length = 0;
-    }
-  }
-  return strokes;
-};
 
 type SiteBackground = {
   mode: "solid" | "gradient" | "image";
@@ -197,7 +176,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   const taskDragControls = useDragControls();
   const assistantDragControls = useDragControls();
   const listRef = useRef<HTMLDivElement | null>(null);
-  const [boardStrokes, setBoardStrokes] = useState<Stroke[]>([]);
+  const [boardHistory, setBoardHistory] = useState<BoardHistory>(() => createBoardHistory());
   const [boardPenColor, setBoardPenColor] = useState("#FF0000");
   const [boardBgColor, setBoardBgColor] = useState("#0A0E14");
   const [taskData, setTaskData] = useState<Task[]>(() => defaultTaskData);
@@ -303,11 +282,26 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   };
 
   const onBoardReplayOp = (op: BoardReplayOp) => {
+    setBoardHistory((previous) => replayBoardOperations(previous, [op]));
     boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
     if (boardReplayQueueRef.current.length >= 24) {
       void flushBoardReplay();
     }
+  };
+
+  const syncBoardStrokes = (strokes: BoardHistory["document"]["strokes"]) => {
+    setBoardHistory((previous) => ({
+      ...previous,
+      document: { ...previous.document, strokes },
+    }));
+  };
+
+  const syncBoardGraphs = (graphs: BoardHistory["document"]["graphs"]) => {
+    setBoardHistory((previous) => ({
+      ...previous,
+      document: { ...previous.document, graphs },
+    }));
   };
 
   const leaveLesson = async (next: () => void) => {
@@ -415,6 +409,8 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   useEffect(() => {
     let alive = true;
     const loadReplay = async () => {
+      boardReplayLoadedRef.current = false;
+      setBoardHistory(createBoardHistory());
       let queue: BoardReplayOp[] = [];
       if (typeof window !== "undefined") {
         try {
@@ -430,13 +426,16 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
       try {
         const data = await loadBoardReplay(lesson.id);
         if (!alive) return;
-        const base = Array.isArray(data.operations) ? applyBoardReplayOps([], data.operations) : [];
-        const withQueue = queue.length ? applyBoardReplayOps(base, queue) : base;
-        setBoardStrokes(withQueue);
+        const serverOperations = Array.isArray(data.operations) ? data.operations : [];
+        queue = filterPendingBoardReplayOps(serverOperations, queue);
+        persistBoardReplayQueue(queue);
+        const base = replayBoardOperations(createBoardHistory(), serverOperations);
+        const withQueue = queue.length ? replayBoardOperations(base, queue) : base;
+        setBoardHistory(withQueue);
       } catch {
         if (!alive) return;
         if (queue.length) {
-          setBoardStrokes((prev) => applyBoardReplayOps(prev, queue));
+          setBoardHistory((previous) => replayBoardOperations(previous, queue));
         }
       } finally {
         boardReplayQueueRef.current = queue;
@@ -1109,8 +1108,12 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                       expanded={boardExpanded}
                       onTogglePanels={() => setBoardExpanded((v) => !v)}
                       onStartTimer={() => setTimerRunning(true)}
-                      initialStrokes={boardStrokes}
-                      onChangeStrokes={setBoardStrokes}
+                      initialStrokes={boardHistory.document.strokes}
+                      onChangeStrokes={syncBoardStrokes}
+                      initialGraphs={boardHistory.document.graphs}
+                      onChangeGraphs={syncBoardGraphs}
+                      canUndo={boardHistory.undoStack.length > 0}
+                      canRedo={boardHistory.redoStack.length > 0}
                       initialPenColor={boardPenColor}
                       onChangePenColor={setBoardPenColor}
                       initialBgColor={boardBgColor}
@@ -1201,8 +1204,12 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                         expanded={boardExpanded}
                         onTogglePanels={() => setBoardExpanded((v) => !v)}
                         onStartTimer={() => setTimerRunning(true)}
-                        initialStrokes={boardStrokes}
-                        onChangeStrokes={setBoardStrokes}
+                        initialStrokes={boardHistory.document.strokes}
+                        onChangeStrokes={syncBoardStrokes}
+                        initialGraphs={boardHistory.document.graphs}
+                        onChangeGraphs={syncBoardGraphs}
+                        canUndo={boardHistory.undoStack.length > 0}
+                        canRedo={boardHistory.redoStack.length > 0}
                         initialPenColor={boardPenColor}
                         onChangePenColor={setBoardPenColor}
                         initialBgColor={boardBgColor}

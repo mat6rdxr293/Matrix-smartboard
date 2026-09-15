@@ -227,7 +227,25 @@
     "download_video": "Бейне жүктеу",
     "speed": "Жылдамдық",
     "step_current_total": "Қадам: {current}/{total}",
-    "select_replay_in_list": "Тізімнен қайталауды таңдаңыз"
+    "select_replay_in_list": "Тізімнен қайталауды таңдаңыз",
+    "graph": "График",
+    "graph_functions": "Функциялар",
+    "add_function": "Функция қосу",
+    "function": "Функция",
+    "function_color": "Функция түсі",
+    "hide_function": "Функцияны жасыру",
+    "show_function": "Функцияны көрсету",
+    "delete_function": "Функцияны өшіру",
+    "invalid_expression": "Қате өрнек",
+    "x_axis_label": "X осінің атауы",
+    "y_axis_label": "Y осінің атауы",
+    "collapse_graph_editor": "График редакторын жинау",
+    "expand_graph_editor": "График редакторын ашу",
+    "delete_graph": "Графикті өшіру",
+    "resize_graph": "График өлшемін өзгерту",
+    "undo": "Болдырмау",
+    "redo": "Қайталау",
+    "clear_board": "Тақтаны тазарту"
   },
   "defaults": {
     "slides": [
