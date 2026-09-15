@@ -26,7 +26,8 @@ from .pptx_import import import_pptx, import_pptx_full, import_pptx_stickers
 from .pptx_export import export_pptx
 from .m365 import M365Client, M365Error
 from .settings import get_openai_key, settings
-from .school_routes import router as school_router
+from .school_routes import get_store as get_school_store
+from .school_routes import require_school, router as school_router
 from .school_store import SchoolStore
 
 logging.basicConfig(level=logging.INFO)
@@ -120,6 +121,8 @@ class AiRequest(BaseModel):
     assistant_context: Optional[str] = None
     continue_from: bool = False
     subject: Optional[str] = None
+    lesson_id: Optional[str] = None
+    client_message_id: Optional[str] = None
 
 
 class AiResponse(BaseModel):
@@ -539,9 +542,26 @@ async def media_endpoint(name: str) -> FileResponse:
 
 
 @app.post("/api/ai", response_model=AiResponse, dependencies=[Depends(_rate_limit_dependency)])
-async def ai_endpoint(payload: AiRequest) -> AiResponse:
+async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
     subject_id = _normalize_subject(payload.subject)
     history_file = _subject_ai_history_file(subject_id)
+    lesson_store = None
+    school_id = None
+    message_id = payload.client_message_id or secrets.token_hex(12)
+    if payload.lesson_id:
+        school = require_school(request)
+        lesson_store = get_school_store(request)
+        school_id = school["id"]
+        if lesson_store.get_lesson(school_id, payload.lesson_id) is None:
+            raise HTTPException(status_code=404, detail="Урок не найден")
+        lesson_store.append_chat_message(
+            school_id,
+            payload.lesson_id,
+            client_message_id=message_id,
+            role="student",
+            text=payload.student_attempt or payload.problem,
+            mode=payload.mode,
+        )
     try:
         text = generate_ai_response(
             payload.mode,
@@ -566,6 +586,15 @@ async def ai_endpoint(payload: AiRequest) -> AiResponse:
                 },
                 history_file,
             )
+        if lesson_store is not None and school_id is not None and payload.lesson_id:
+            lesson_store.append_chat_message(
+                school_id,
+                payload.lesson_id,
+                client_message_id=f"{message_id}:assistant",
+                role="assistant",
+                text=text,
+                mode=payload.mode,
+            )
         return AiResponse(text=text)
     except Exception as exc:  # noqa: BLE001
         async with ai_history_lock:
@@ -582,6 +611,16 @@ async def ai_endpoint(payload: AiRequest) -> AiResponse:
                     "ok": False,
                 },
                 history_file,
+            )
+        if lesson_store is not None and school_id is not None and payload.lesson_id:
+            lesson_store.append_chat_message(
+                school_id,
+                payload.lesson_id,
+                client_message_id=f"{message_id}:assistant",
+                role="assistant",
+                text=str(exc),
+                mode=payload.mode,
+                status="error",
             )
         raise HTTPException(status_code=503, detail=f"AI недоступен: {exc}") from exc
 

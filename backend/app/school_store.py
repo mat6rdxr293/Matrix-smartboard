@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 import sqlite3
 import time
@@ -10,12 +11,22 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from .curriculum import is_subject_allowed
+
 
 class SchoolAlreadyExists(ValueError):
     pass
 
 
 class RoomAlreadyExists(ValueError):
+    pass
+
+
+class ResourceNotFound(LookupError):
+    pass
+
+
+class InvalidLesson(ValueError):
     pass
 
 
@@ -51,6 +62,28 @@ def _room_dict(row: sqlite3.Row) -> dict:
         "name": row["name"],
         "createdAt": row["created_at"],
     }
+
+
+def _lesson_dict(row: sqlite3.Row) -> dict:
+    keys = set(row.keys())
+    result = {
+        "id": row["id"],
+        "schoolId": row["school_id"],
+        "roomId": row["room_id"],
+        "grade": row["grade"],
+        "subjectId": row["subject_id"],
+        "status": row["status"],
+        "startedAt": row["started_at"],
+        "updatedAt": row["updated_at"],
+        "endedAt": row["ended_at"],
+    }
+    if "room_name" in keys:
+        result["roomName"] = row["room_name"]
+    if "board_count" in keys:
+        result["boardOperationsCount"] = row["board_count"]
+    if "chat_count" in keys:
+        result["chatMessagesCount"] = row["chat_count"]
+    return result
 
 
 class SchoolStore:
@@ -109,6 +142,55 @@ class SchoolStore:
 
                 CREATE INDEX IF NOT EXISTS idx_rooms_school
                     ON rooms(school_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS lessons (
+                    id TEXT PRIMARY KEY,
+                    school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+                    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+                    grade INTEGER NOT NULL CHECK(grade BETWEEN 1 AND 11),
+                    subject_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active', 'completed')),
+                    started_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    ended_at INTEGER
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_lesson_per_room
+                    ON lessons(room_id) WHERE status = 'active';
+                CREATE INDEX IF NOT EXISTS idx_lessons_room_updated
+                    ON lessons(room_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS board_operations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    client_operation_id TEXT NOT NULL,
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'undo', 'redo', 'clear')),
+                    payload_json TEXT NOT NULL,
+                    occurred_at INTEGER NOT NULL,
+                    UNIQUE(lesson_id, sequence),
+                    UNIQUE(lesson_id, client_operation_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_board_operations_lesson
+                    ON board_operations(lesson_id, sequence);
+
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    client_message_id TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('student', 'assistant')),
+                    text TEXT NOT NULL,
+                    mode TEXT,
+                    status TEXT NOT NULL CHECK(status IN ('ok', 'error')),
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(lesson_id, sequence),
+                    UNIQUE(lesson_id, client_message_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chat_messages_lesson
+                    ON chat_messages(lesson_id, sequence);
                 """
             )
 
@@ -218,3 +300,241 @@ class SchoolStore:
                 (room_id, school_id),
             ).fetchone()
         return _room_dict(row) if row else None
+
+    def _require_room(self, connection: sqlite3.Connection, school_id: str, room_id: str) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM rooms WHERE id = ? AND school_id = ?",
+            (room_id, school_id),
+        ).fetchone()
+        if row is None:
+            raise ResourceNotFound("room not found")
+        return row
+
+    def _require_lesson(self, connection: sqlite3.Connection, school_id: str, lesson_id: str) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM lessons WHERE id = ? AND school_id = ?",
+            (lesson_id, school_id),
+        ).fetchone()
+        if row is None:
+            raise ResourceNotFound("lesson not found")
+        return row
+
+    def create_lesson(self, school_id: str, room_id: str, grade: int, subject_id: str) -> dict:
+        if not is_subject_allowed(grade, subject_id):
+            raise InvalidLesson("subject is not available for this grade")
+        lesson_id = uuid.uuid4().hex
+        now = _now_ms()
+        with self.connection() as connection:
+            self._require_room(connection, school_id, room_id)
+            connection.execute(
+                "UPDATE lessons SET status = 'completed', ended_at = ?, updated_at = ? WHERE room_id = ? AND status = 'active'",
+                (now, now, room_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO lessons(id, school_id, room_id, grade, subject_id, status, started_at, updated_at, ended_at)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL)
+                """,
+                (lesson_id, school_id, room_id, grade, subject_id, now, now),
+            )
+            row = connection.execute("SELECT * FROM lessons WHERE id = ?", (lesson_id,)).fetchone()
+        return _lesson_dict(row)
+
+    def get_lesson(self, school_id: str, lesson_id: str) -> dict | None:
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT lessons.*, rooms.name AS room_name,
+                    (SELECT COUNT(*) FROM board_operations WHERE lesson_id = lessons.id) AS board_count,
+                    (SELECT COUNT(*) FROM chat_messages WHERE lesson_id = lessons.id) AS chat_count
+                FROM lessons JOIN rooms ON rooms.id = lessons.room_id
+                WHERE lessons.id = ? AND lessons.school_id = ?
+                """,
+                (lesson_id, school_id),
+            ).fetchone()
+        return _lesson_dict(row) if row else None
+
+    def active_lesson(self, school_id: str, room_id: str) -> dict | None:
+        with self.connection() as connection:
+            self._require_room(connection, school_id, room_id)
+            row = connection.execute(
+                """
+                SELECT lessons.*, rooms.name AS room_name,
+                    (SELECT COUNT(*) FROM board_operations WHERE lesson_id = lessons.id) AS board_count,
+                    (SELECT COUNT(*) FROM chat_messages WHERE lesson_id = lessons.id) AS chat_count
+                FROM lessons JOIN rooms ON rooms.id = lessons.room_id
+                WHERE lessons.school_id = ? AND lessons.room_id = ? AND lessons.status = 'active'
+                """,
+                (school_id, room_id),
+            ).fetchone()
+        return _lesson_dict(row) if row else None
+
+    def list_lessons(self, school_id: str, room_id: str, *, limit: int = 100) -> list[dict]:
+        safe_limit = max(1, min(limit, 500))
+        with self.connection() as connection:
+            self._require_room(connection, school_id, room_id)
+            rows = connection.execute(
+                """
+                SELECT lessons.*, rooms.name AS room_name,
+                    (SELECT COUNT(*) FROM board_operations WHERE lesson_id = lessons.id) AS board_count,
+                    (SELECT COUNT(*) FROM chat_messages WHERE lesson_id = lessons.id) AS chat_count
+                FROM lessons JOIN rooms ON rooms.id = lessons.room_id
+                WHERE lessons.school_id = ? AND lessons.room_id = ?
+                ORDER BY CASE lessons.status WHEN 'active' THEN 0 ELSE 1 END,
+                         lessons.updated_at DESC,
+                         lessons.started_at DESC
+                LIMIT ?
+                """,
+                (school_id, room_id, safe_limit),
+            ).fetchall()
+        return [_lesson_dict(row) for row in rows]
+
+    def complete_lesson(self, school_id: str, lesson_id: str) -> dict:
+        now = _now_ms()
+        with self.connection() as connection:
+            self._require_lesson(connection, school_id, lesson_id)
+            connection.execute(
+                "UPDATE lessons SET status = 'completed', ended_at = COALESCE(ended_at, ?), updated_at = ? WHERE id = ?",
+                (now, now, lesson_id),
+            )
+        lesson = self.get_lesson(school_id, lesson_id)
+        if lesson is None:
+            raise ResourceNotFound("lesson not found")
+        return lesson
+
+    def resume_lesson(self, school_id: str, lesson_id: str) -> dict:
+        now = _now_ms()
+        with self.connection() as connection:
+            lesson = self._require_lesson(connection, school_id, lesson_id)
+            connection.execute(
+                """
+                UPDATE lessons SET status = 'completed', ended_at = COALESCE(ended_at, ?), updated_at = ?
+                WHERE room_id = ? AND status = 'active' AND id != ?
+                """,
+                (now, now, lesson["room_id"], lesson_id),
+            )
+            connection.execute(
+                "UPDATE lessons SET status = 'active', ended_at = NULL, updated_at = ? WHERE id = ?",
+                (now, lesson_id),
+            )
+        result = self.get_lesson(school_id, lesson_id)
+        if result is None:
+            raise ResourceNotFound("lesson not found")
+        return result
+
+    def append_board_operations(self, school_id: str, lesson_id: str, operations: list[dict]) -> int:
+        if len(operations) > 300:
+            raise ValueError("too many operations")
+        inserted = 0
+        with self.connection() as connection:
+            self._require_lesson(connection, school_id, lesson_id)
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS value FROM board_operations WHERE lesson_id = ?",
+                (lesson_id,),
+            ).fetchone()
+            sequence = int(row["value"])
+            for operation in operations:
+                op_type = operation.get("op")
+                client_id = str(operation.get("client_operation_id") or "").strip()
+                if op_type not in {"add", "undo", "redo", "clear"} or not client_id:
+                    raise ValueError("invalid board operation")
+                stroke = operation.get("stroke")
+                if op_type == "add" and not isinstance(stroke, dict):
+                    raise ValueError("add operation requires stroke")
+                occurred_at = operation.get("ts")
+                if not isinstance(occurred_at, int):
+                    occurred_at = _now_ms()
+                if connection.execute(
+                    "SELECT 1 FROM board_operations WHERE lesson_id = ? AND client_operation_id = ?",
+                    (lesson_id, client_id),
+                ).fetchone():
+                    continue
+                sequence += 1
+                connection.execute(
+                    """
+                    INSERT INTO board_operations(lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (lesson_id, sequence, client_id, op_type, json.dumps({"stroke": stroke}, ensure_ascii=False), occurred_at),
+                )
+                inserted += 1
+            if inserted:
+                connection.execute("UPDATE lessons SET updated_at = ? WHERE id = ?", (_now_ms(), lesson_id))
+        return inserted
+
+    def board_state(self, school_id: str, lesson_id: str) -> list[dict]:
+        with self.connection() as connection:
+            self._require_lesson(connection, school_id, lesson_id)
+            rows = connection.execute(
+                "SELECT * FROM board_operations WHERE lesson_id = ? ORDER BY sequence",
+                (lesson_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            item = {
+                "sequence": row["sequence"],
+                "clientOperationId": row["client_operation_id"],
+                "op": row["op_type"],
+                "ts": row["occurred_at"],
+            }
+            if row["op_type"] == "add":
+                item["stroke"] = payload.get("stroke")
+            result.append(item)
+        return result
+
+    def append_chat_message(
+        self,
+        school_id: str,
+        lesson_id: str,
+        *,
+        client_message_id: str,
+        role: str,
+        text: str,
+        mode: str | None = None,
+        status: str = "ok",
+    ) -> bool:
+        if role not in {"student", "assistant"} or status not in {"ok", "error"}:
+            raise ValueError("invalid chat message")
+        with self.connection() as connection:
+            self._require_lesson(connection, school_id, lesson_id)
+            if connection.execute(
+                "SELECT 1 FROM chat_messages WHERE lesson_id = ? AND client_message_id = ?",
+                (lesson_id, client_message_id),
+            ).fetchone():
+                return False
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS value FROM chat_messages WHERE lesson_id = ?",
+                (lesson_id,),
+            ).fetchone()
+            sequence = int(row["value"]) + 1
+            now = _now_ms()
+            connection.execute(
+                """
+                INSERT INTO chat_messages(lesson_id, sequence, client_message_id, role, text, mode, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (lesson_id, sequence, client_message_id, role, text, mode, status, now),
+            )
+            connection.execute("UPDATE lessons SET updated_at = ? WHERE id = ?", (now, lesson_id))
+        return True
+
+    def chat_messages(self, school_id: str, lesson_id: str) -> list[dict]:
+        with self.connection() as connection:
+            self._require_lesson(connection, school_id, lesson_id)
+            rows = connection.execute(
+                "SELECT * FROM chat_messages WHERE lesson_id = ? ORDER BY sequence",
+                (lesson_id,),
+            ).fetchall()
+        return [
+            {
+                "sequence": row["sequence"],
+                "clientMessageId": row["client_message_id"],
+                "role": row["role"],
+                "text": row["text"],
+                "mode": row["mode"],
+                "status": row["status"],
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]

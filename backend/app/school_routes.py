@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .school_store import RoomAlreadyExists, SchoolAlreadyExists, SchoolStore
+from .school_store import (
+    InvalidLesson,
+    ResourceNotFound,
+    RoomAlreadyExists,
+    SchoolAlreadyExists,
+    SchoolStore,
+)
 
 
 router = APIRouter()
@@ -18,6 +26,22 @@ class SchoolCredentials(BaseModel):
 
 class RoomCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
+
+
+class LessonCreate(BaseModel):
+    grade: int = Field(ge=1, le=11)
+    subject_id: str = Field(min_length=1, max_length=40)
+
+
+class BoardOperationInput(BaseModel):
+    client_operation_id: str = Field(min_length=1, max_length=120)
+    op: Literal["add", "undo", "redo", "clear"]
+    stroke: dict[str, Any] | None = None
+    ts: int | None = None
+
+
+class BoardOperationsPayload(BaseModel):
+    operations: list[BoardOperationInput]
 
 
 def get_store(request: Request) -> SchoolStore:
@@ -101,3 +125,98 @@ def create_room(payload: RoomCreate, request: Request) -> dict:
         raise HTTPException(status_code=409, detail="Такой кабинет уже существует") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/api/rooms/{room_id}/lessons")
+def list_lessons(room_id: str, request: Request, limit: int = 100) -> dict:
+    school = require_school(request)
+    try:
+        return {"items": get_store(request).list_lessons(school["id"], room_id, limit=limit)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Кабинет не найден") from exc
+
+
+@router.get("/api/rooms/{room_id}/active-lesson")
+def active_lesson(room_id: str, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        return {"lesson": get_store(request).active_lesson(school["id"], room_id)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Кабинет не найден") from exc
+
+
+@router.post("/api/rooms/{room_id}/lessons", status_code=201)
+def create_lesson(room_id: str, payload: LessonCreate, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        lesson = get_store(request).create_lesson(
+            school["id"], room_id, payload.grade, payload.subject_id
+        )
+        return {"lesson": lesson}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Кабинет не найден") from exc
+    except InvalidLesson as exc:
+        raise HTTPException(status_code=422, detail="Этот предмет не изучается в выбранном классе") from exc
+
+
+@router.get("/api/lessons/{lesson_id}")
+def get_lesson(lesson_id: str, request: Request) -> dict:
+    school = require_school(request)
+    lesson = get_store(request).get_lesson(school["id"], lesson_id)
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Урок не найден")
+    return {"lesson": lesson}
+
+
+@router.post("/api/lessons/{lesson_id}/complete")
+def complete_lesson(lesson_id: str, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        return {"lesson": get_store(request).complete_lesson(school["id"], lesson_id)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Урок не найден") from exc
+
+
+@router.post("/api/lessons/{lesson_id}/resume")
+def resume_lesson(lesson_id: str, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        return {"lesson": get_store(request).resume_lesson(school["id"], lesson_id)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Урок не найден") from exc
+
+
+@router.get("/api/lessons/{lesson_id}/board")
+def get_lesson_board(lesson_id: str, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        return {"operations": get_store(request).board_state(school["id"], lesson_id)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Урок не найден") from exc
+
+
+@router.post("/api/lessons/{lesson_id}/board/operations")
+def append_lesson_board_operations(
+    lesson_id: str, payload: BoardOperationsPayload, request: Request
+) -> dict:
+    school = require_school(request)
+    try:
+        inserted = get_store(request).append_board_operations(
+            school["id"],
+            lesson_id,
+            [operation.model_dump() for operation in payload.operations],
+        )
+        return {"ok": True, "inserted": inserted}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Урок не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/api/lessons/{lesson_id}/chat")
+def get_lesson_chat(lesson_id: str, request: Request) -> dict:
+    school = require_school(request)
+    try:
+        return {"items": get_store(request).chat_messages(school["id"], lesson_id)}
+    except ResourceNotFound as exc:
+        raise HTTPException(status_code=404, detail="Урок не найден") from exc
