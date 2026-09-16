@@ -1066,11 +1066,11 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
     <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
     <div
       ref={appRef}
-      className="min-h-screen px-1 py-2"
+      className="h-screen overflow-hidden px-1 pt-2"
       onContextMenu={(e) => e.preventDefault()}
       style={effectiveSiteBgStyle}
     >
-      <div className="mx-auto flex w-full max-w-[1850px] flex-col gap-3">
+      <div className="mx-auto flex h-full w-full max-w-[1850px] min-h-0 flex-col gap-3">
         <TopBar
           apiStatus={apiStatus}
           lessonTitle={lessonTitle}
@@ -1098,7 +1098,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
           onOpenHistory={() => void leaveLesson(onOpenHistory)}
           onChangeRoom={() => void leaveLesson(onChangeRoom)}
         />
-        <div className="relative h-[calc(100vh-140px)] min-h-0">
+        <div className="relative min-h-0 flex-1">
           {tab === "tasks" && (
             <div className="relative flex h-full min-h-0 flex-col gap-2">
               <div className="relative min-h-0 flex-1">

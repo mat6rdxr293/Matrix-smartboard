@@ -8,4 +8,11 @@ describe("board quick actions layout", () => {
     expect(source).toContain("onToggleTask={() => setTaskOpen((v) => !v)}");
     expect(source).toContain("onToggleAssistant={() => setAssistantOpen((v) => !v)}");
   });
+  it("fills the viewport below the lesson header without a reserved bottom chin", () => {
+    expect(source).not.toContain('h-[calc(100vh-140px)]');
+    expect(source).toContain('className="h-screen overflow-hidden px-1 pt-2"');
+    expect(source).toContain('className="mx-auto flex h-full w-full max-w-[1850px] min-h-0 flex-col gap-3"');
+    expect(source).toContain('className="relative min-h-0 flex-1"');
+  });
+
 });
