@@ -1066,7 +1066,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
     <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
     <div
       ref={appRef}
-      className="h-screen overflow-hidden px-1 pt-2"
+      className="h-screen overflow-hidden px-1 py-2"
       onContextMenu={(e) => e.preventDefault()}
       style={effectiveSiteBgStyle}
     >
