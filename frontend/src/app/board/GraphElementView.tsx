@@ -6,7 +6,7 @@ import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
 import GraphEditor from "./GraphEditor";
 import { TextOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
 import { getGraphDockPlacement } from "./graphDock";
-import { DEFAULT_GRAPH_VIEWPORT, formatGraphTick, getGraphTicks, getGraphTickStep, zoomGraphViewport, type GraphViewport } from "./graphViewport";
+import { DEFAULT_GRAPH_VIEWPORT, formatGraphTick, getGraphTicks, getGraphTickStep, panGraphViewport, zoomGraphViewport, type GraphViewport } from "./graphViewport";
 
 type VisibleWorld = { left: number; top: number; right: number; bottom: number };
 
@@ -32,6 +32,7 @@ export default function GraphElementView(props: Props) {
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [editingLabel, setEditingLabel] = useState<"x" | "y" | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
+  const [plotDragging, setPlotDragging] = useState(false);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const labelSelectionRef = useRef({ start: 0, end: 0 });
   const dragRef = useRef<{
@@ -49,13 +50,22 @@ export default function GraphElementView(props: Props) {
     last: GraphElement;
   } | null>(null);
   const wheelGestureRef = useRef<{ before: GraphElement; last: GraphElement; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const plotPanRef = useRef<{
+    id: number;
+    startX: number;
+    startY: number;
+    before: GraphElement;
+    last: GraphElement;
+  } | null>(null);
   const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{
     before: GraphElement;
+    base: GraphElement;
     last: GraphElement;
     viewport: GraphViewport;
     distance: number;
     anchor: { x: number; y: number };
+    center: { x: number; y: number };
   } | null>(null);
 
   const controlSize = Math.max(28, 28 / Math.max(zoom, 0.1));
@@ -140,49 +150,121 @@ export default function GraphElementView(props: Props) {
   };
 
   const pointerDistance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+  const pointerCenter = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  });
 
-  const handlePlotPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (event.pointerType !== "touch") return;
-    event.preventDefault();
-    event.stopPropagation();
-    onSelect();
-    touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    if (touchPointsRef.current.size !== 2) return;
-    finishWheelGesture();
-    const [a, b] = Array.from(touchPointsRef.current.values());
-    const rect = event.currentTarget.getBoundingClientRect();
-    pinchRef.current = {
-      before: graph,
-      last: graph,
-      viewport: viewportOf(graph),
-      distance: Math.max(1, pointerDistance(a, b)),
-      anchor: {
-        x: rect.width > 0 ? ((a.x + b.x) / 2 - rect.left) / rect.width : 0.5,
-        y: rect.height > 0 ? ((a.y + b.y) / 2 - rect.top) / rect.height : 0.5,
-      },
-    };
+  const startPlotPan = (id: number, x: number, y: number, before: GraphElement) => {
+    plotPanRef.current = { id, startX: x, startY: y, before, last: before };
+    setPlotDragging(true);
   };
 
-  const handlePlotPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (!touchPointsRef.current.has(event.pointerId)) return;
-    touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    const pinch = pinchRef.current;
-    if (!pinch || touchPointsRef.current.size < 2) return;
-    const [a, b] = Array.from(touchPointsRef.current.values());
-    const factor = pinch.distance / Math.max(1, pointerDistance(a, b));
-    const next = withViewport(pinch.before, zoomGraphViewport(pinch.viewport, factor, pinch.anchor));
-    pinch.last = next;
+  const previewPlotPan = (event: React.PointerEvent<SVGSVGElement>) => {
+    const pan = plotPanRef.current;
+    if (!pan || pan.id !== event.pointerId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const viewport = panGraphViewport(
+      viewportOf(pan.before),
+      { x: event.clientX - pan.startX, y: event.clientY - pan.startY },
+      { width: rect.width, height: rect.height },
+    );
+    const next = withViewport(pan.before, viewport);
+    pan.last = next;
     onPreview(next);
   };
 
-  const handlePlotPointerEnd = (event: React.PointerEvent<SVGSVGElement>) => {
-    touchPointsRef.current.delete(event.pointerId);
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  const handlePlotPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+    finishWheelGesture();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+
+    if (event.pointerType !== "touch") {
+      startPlotPan(event.pointerId, event.clientX, event.clientY, graph);
+      return;
+    }
+
+    touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touchPointsRef.current.size === 1) {
+      startPlotPan(event.pointerId, event.clientX, event.clientY, graph);
+      return;
+    }
+    if (touchPointsRef.current.size !== 2) return;
+
+    const [a, b] = Array.from(touchPointsRef.current.values());
+    const center = pointerCenter(a, b);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const existingPan = plotPanRef.current;
+    const base = existingPan?.last ?? graph;
+    const before = existingPan?.before ?? graph;
+    plotPanRef.current = null;
+    pinchRef.current = {
+      before,
+      base,
+      last: base,
+      viewport: viewportOf(base),
+      distance: Math.max(1, pointerDistance(a, b)),
+      anchor: {
+        x: rect.width > 0 ? (center.x - rect.left) / rect.width : 0.5,
+        y: rect.height > 0 ? (center.y - rect.top) / rect.height : 0.5,
+      },
+      center,
+    };
+    setPlotDragging(true);
+  };
+
+  const handlePlotPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "touch" && touchPointsRef.current.has(event.pointerId)) {
+      touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
     const pinch = pinchRef.current;
-    if (!pinch) return;
-    pinchRef.current = null;
-    if (pinch.last !== pinch.before) onCommit(pinch.before, pinch.last);
+    if (pinch && touchPointsRef.current.size >= 2) {
+      const [a, b] = Array.from(touchPointsRef.current.values());
+      const center = pointerCenter(a, b);
+      const rect = event.currentTarget.getBoundingClientRect();
+      const factor = pinch.distance / Math.max(1, pointerDistance(a, b));
+      const zoomed = zoomGraphViewport(pinch.viewport, factor, pinch.anchor);
+      const viewport = panGraphViewport(
+        zoomed,
+        { x: center.x - pinch.center.x, y: center.y - pinch.center.y },
+        { width: rect.width, height: rect.height },
+      );
+      const next = withViewport(pinch.base, viewport);
+      pinch.last = next;
+      onPreview(next);
+      return;
+    }
+
+    previewPlotPan(event);
+  };
+
+  const handlePlotPointerEnd = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "touch") touchPointsRef.current.delete(event.pointerId);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+
+    const pinch = pinchRef.current;
+    if (pinch && touchPointsRef.current.size < 2) {
+      pinchRef.current = null;
+      if (pinch.last !== pinch.before) onCommit(pinch.before, pinch.last);
+      const remaining = Array.from(touchPointsRef.current.entries())[0];
+      if (remaining) {
+        startPlotPan(remaining[0], remaining[1].x, remaining[1].y, pinch.last);
+      } else {
+        plotPanRef.current = null;
+        setPlotDragging(false);
+      }
+      return;
+    }
+
+    const pan = plotPanRef.current;
+    if (!pan || pan.id !== event.pointerId) return;
+    plotPanRef.current = null;
+    setPlotDragging(false);
+    if (pan.last !== pan.before) onCommit(pan.before, pan.last);
   };
 
   const commitZoom = (factor: number) => {
@@ -371,7 +453,11 @@ export default function GraphElementView(props: Props) {
         height={graph.height}
         viewBox={`0 0 ${graph.width} ${graph.height}`}
         className={selected ? "overflow-hidden rounded-lg ring-2 ring-accent/80" : "overflow-hidden rounded-lg"}
-        style={{ backgroundColor, touchAction: "none" }}
+        style={{
+          backgroundColor,
+          touchAction: "none",
+          cursor: interactionDisabled ? "default" : plotDragging ? "grabbing" : "grab",
+        }}
         onWheel={handleWheel}
         onPointerDown={handlePlotPointerDown}
         onPointerMove={handlePlotPointerMove}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatGraphTick, getGraphTickStep, zoomGraphViewport } from "./graphViewport";
+import { formatGraphTick, getGraphTickStep, panGraphViewport, zoomGraphViewport } from "./graphViewport";
 
 describe("graph viewport", () => {
   it("chooses Desmos-like division prices as the viewport changes", () => {
@@ -22,5 +22,13 @@ describe("graph viewport", () => {
     expect(formatGraphTick(0.5, 0.5)).toBe("0.5");
     expect(formatGraphTick(0.25000000000000006, 0.25)).toBe("0.25");
     expect(formatGraphTick(-0, 0.25)).toBe("0");
+  });
+
+  it("pans the mathematical viewport in screen drag direction", () => {
+    expect(panGraphViewport(
+      { xMin: -10, xMax: 10, yMin: -10, yMax: 10 },
+      { x: 42, y: 30 },
+      { width: 420, height: 300 },
+    )).toEqual({ xMin: -12, xMax: 8, yMin: -8, yMax: 12 });
   });
 });

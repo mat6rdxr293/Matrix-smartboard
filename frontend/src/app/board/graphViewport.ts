@@ -56,6 +56,24 @@ export function zoomGraphViewport(
   };
 }
 
+export function panGraphViewport(
+  viewport: GraphViewport,
+  delta: { x: number; y: number },
+  size: { width: number; height: number },
+): GraphViewport {
+  const xSpan = viewport.xMax - viewport.xMin;
+  const ySpan = viewport.yMax - viewport.yMin;
+  if (!(xSpan > 0) || !(ySpan > 0) || !(size.width > 0) || !(size.height > 0)) return viewport;
+  const xShift = -(delta.x / size.width) * xSpan;
+  const yShift = (delta.y / size.height) * ySpan;
+  return {
+    xMin: viewport.xMin + xShift,
+    xMax: viewport.xMax + xShift,
+    yMin: viewport.yMin + yShift,
+    yMax: viewport.yMax + yShift,
+  };
+}
+
 export function getGraphTicks(min: number, max: number, step: number): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max) || !(max > min) || !(step > 0)) return [];
   const first = Math.ceil((min - step * 1e-9) / step) * step;

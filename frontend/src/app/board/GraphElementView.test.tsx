@@ -161,3 +161,60 @@ it("shows zoom controls and resets the graph viewport", () => {
   const next = onCommit.mock.calls[0][1] as GraphElement;
   expect([next.xMin, next.xMax, next.yMin, next.yMax]).toEqual([-10, 10, -10, 10]);
 });
+
+
+it("pans inside the graph with a mouse drag and commits once", () => {
+  const onPreview = vi.fn();
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onPreview={onPreview} onCommit={onCommit} /></I18nProvider>);
+  const plot = screen.getByTestId("graph-plot");
+  vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 420, height: 300, right: 420, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.pointerDown(plot, { pointerId: 7, pointerType: "mouse", clientX: 210, clientY: 150, button: 0 });
+  fireEvent.pointerMove(plot, { pointerId: 7, pointerType: "mouse", clientX: 252, clientY: 180, buttons: 1 });
+  const next = onPreview.mock.calls[onPreview.mock.calls.length - 1][0] as GraphElement;
+  expect([next.xMin, next.xMax, next.yMin, next.yMax]).toEqual([-12, 8, -8, 12]);
+  expect(onCommit).not.toHaveBeenCalled();
+  fireEvent.pointerUp(plot, { pointerId: 7, pointerType: "mouse", clientX: 252, clientY: 180 });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+});
+
+it("pans inside the graph with one touch", () => {
+  const onPreview = vi.fn();
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onPreview={onPreview} onCommit={onCommit} /></I18nProvider>);
+  const plot = screen.getByTestId("graph-plot");
+  vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 420, height: 300, right: 420, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.pointerDown(plot, { pointerId: 1, pointerType: "touch", clientX: 210, clientY: 150 });
+  fireEvent.pointerMove(plot, { pointerId: 1, pointerType: "touch", clientX: 168, clientY: 120 });
+  const next = onPreview.mock.calls[onPreview.mock.calls.length - 1][0] as GraphElement;
+  expect([next.xMin, next.xMax, next.yMin, next.yMax]).toEqual([-8, 12, -12, 8]);
+  fireEvent.pointerUp(plot, { pointerId: 1, pointerType: "touch", clientX: 168, clientY: 120 });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+});
+
+it("pans while pinch zooming when the gesture center moves", () => {
+  const onPreview = vi.fn();
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onPreview={onPreview} onCommit={onCommit} /></I18nProvider>);
+  const plot = screen.getByTestId("graph-plot");
+  vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 420, height: 300, right: 420, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.pointerDown(plot, { pointerId: 1, pointerType: "touch", clientX: 100, clientY: 150 });
+  fireEvent.pointerDown(plot, { pointerId: 2, pointerType: "touch", clientX: 300, clientY: 150 });
+  fireEvent.pointerMove(plot, { pointerId: 1, pointerType: "touch", clientX: 120, clientY: 180 });
+  fireEvent.pointerMove(plot, { pointerId: 2, pointerType: "touch", clientX: 360, clientY: 180 });
+  const next = onPreview.mock.calls[onPreview.mock.calls.length - 1][0] as GraphElement;
+  expect(next.xMax - next.xMin).toBeLessThan(20);
+  expect((next.xMin + next.xMax) / 2).toBeLessThan(0);
+  expect((next.yMin + next.yMax) / 2).toBeGreaterThan(0);
+  fireEvent.pointerUp(plot, { pointerId: 2, pointerType: "touch", clientX: 360, clientY: 180 });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+});
