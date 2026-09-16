@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
 import BoardCanvas from "./BoardCanvas";
@@ -159,5 +159,79 @@ it("renders toolbar settings outside the horizontally scrolling toolbar", () => 
     const popover = screen.getByTestId(`board-toolbar-popover-${popoverName}`);
     expect(toolbar).not.toContainElement(popover);
     expect(popover.parentElement).toBe(document.body);
+  }
+});
+
+it("auto-hides the board toolbar after inactivity and reveals it at the bottom edge", () => {
+  vi.useFakeTimers();
+  try {
+    mount();
+    const root = screen.getByTestId("board-canvas-root");
+    const toolbar = screen.getByTestId("board-toolbar");
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    expect(toolbar).toHaveAttribute("data-visible", "true");
+    act(() => vi.advanceTimersByTime(2600));
+    expect(toolbar).toHaveAttribute("data-visible", "false");
+
+    fireEvent.pointerMove(root, { pointerId: 90, pointerType: "mouse", clientY: 585 });
+    expect(toolbar).toHaveAttribute("data-visible", "true");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("restarts toolbar auto-hide when a tool changes and keeps it visible while settings are open", () => {
+  vi.useFakeTimers();
+  try {
+    mount();
+    const toolbar = screen.getByTestId("board-toolbar");
+
+    act(() => vi.advanceTimersByTime(2000));
+    fireEvent.click(screen.getByRole("button", { name: /график/i }));
+    act(() => vi.advanceTimersByTime(1000));
+    expect(toolbar).toHaveAttribute("data-visible", "true");
+    act(() => vi.advanceTimersByTime(1600));
+    expect(toolbar).toHaveAttribute("data-visible", "false");
+
+    fireEvent.pointerMove(screen.getByTestId("board-canvas-root"), { pointerId: 91, pointerType: "mouse", clientY: 0 });
+    fireEvent.click(screen.getByRole("button", { name: /ручка|қалам/i }));
+    act(() => vi.advanceTimersByTime(4000));
+    expect(screen.getByTestId("board-toolbar-popover-pen")).toBeInTheDocument();
+    expect(toolbar).toHaveAttribute("data-visible", "true");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("overlays the toolbar at the bottom without reserving a bottom chin", () => {
+  mount();
+  expect(screen.getByTestId("board-canvas-root")).toHaveClass("pb-0");
+  expect(screen.getByTestId("board-toolbar")).toHaveClass("absolute", "bottom-0");
+});
+
+it("uses a bottom-edge tap only to reveal a hidden toolbar, without drawing", () => {
+  vi.useFakeTimers();
+  try {
+    const onChangeStrokes = vi.fn();
+    const view = mount([], onChangeStrokes);
+    const root = screen.getByTestId("board-canvas-root");
+    const toolbar = screen.getByTestId("board-toolbar");
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}),
+    });
+    act(() => vi.advanceTimersByTime(2600));
+    onChangeStrokes.mockClear();
+
+    const canvas = view.container.querySelector("canvas")!;
+    fireEvent.pointerDown(canvas, { pointerId: 92, pointerType: "touch", clientX: 500, clientY: 590 });
+    fireEvent.pointerUp(canvas, { pointerId: 92, pointerType: "touch", clientX: 500, clientY: 590 });
+
+    expect(toolbar).toHaveAttribute("data-visible", "true");
+    expect(onChangeStrokes).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
   }
 });

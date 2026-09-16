@@ -155,6 +155,9 @@ export default function BoardCanvas({
   const eraserTimerRef = useRef<number | null>(null);
   const lineTimerRef = useRef<number | null>(null);
   const [inputMode, setInputMode] = useState<"auto" | "mouse" | "touch">("auto");
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const toolbarHideTimerRef = useRef<number | null>(null);
+  const toolbarPinnedRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
   const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -184,6 +187,63 @@ export default function BoardCanvas({
   });
   const pinchRef = useRef<{ active: boolean; startDist: number }>({ active: false, startDist: 0 });
   const eraserPreviewRef = useRef<{ x: number; y: number } | null>(null);
+  const toolbarPinned =
+    (showPenPalette && mode === "draw") ||
+    (showLineSlider && mode === "line") ||
+    (showEraserSlider && mode === "erase") ||
+    showBoardSettings ||
+    showClearConfirm;
+  toolbarPinnedRef.current = toolbarPinned;
+
+  const clearToolbarHideTimer = () => {
+    if (toolbarHideTimerRef.current === null) return;
+    window.clearTimeout(toolbarHideTimerRef.current);
+    toolbarHideTimerRef.current = null;
+  };
+
+  const scheduleToolbarHide = () => {
+    clearToolbarHideTimer();
+    toolbarHideTimerRef.current = window.setTimeout(() => {
+      toolbarHideTimerRef.current = null;
+      if (toolbarPinnedRef.current || activePointerIdRef.current !== null) {
+        scheduleToolbarHide();
+        return;
+      }
+      setToolbarVisible(false);
+    }, 2500);
+  };
+
+  const revealToolbar = () => {
+    setToolbarVisible(true);
+    scheduleToolbarHide();
+  };
+
+  const revealToolbarNearBottom = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const nearBottom = event.clientY >= rect.bottom - 64 && event.clientY <= rect.bottom;
+    if (!nearBottom) return;
+    const wasHidden = !toolbarVisible;
+    revealToolbar();
+    if (wasHidden && event.type === "pointerdown") {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  useEffect(() => {
+    if (toolbarPinned) {
+      clearToolbarHideTimer();
+      setToolbarVisible(true);
+      return () => clearToolbarHideTimer();
+    }
+    scheduleToolbarHide();
+    return () => clearToolbarHideTimer();
+  }, [toolbarPinned]);
+
+  useEffect(() => {
+    revealToolbar();
+  }, [mode]);
 
   const isDarkBg = useMemo(() => {
     const hex = bg.replace("#", "");
@@ -1026,7 +1086,9 @@ export default function BoardCanvas({
   return (
     <div
       data-testid="board-canvas-root"
-      className={cn("glass flex h-full flex-col rounded-2xl shadow-glass", expanded ? "p-2" : "p-4")}
+      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-2 pt-2" : "px-4 pt-4")}
+      onPointerMoveCapture={revealToolbarNearBottom}
+      onPointerDownCapture={revealToolbarNearBottom}
     >
       <div ref={areaRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div className="absolute inset-0 flex items-stretch justify-stretch">
@@ -1084,7 +1146,17 @@ export default function BoardCanvas({
           </div>
         </div>
       </div>
-      <div data-testid="board-toolbar" className="scrollbar-hide mt-3 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0">
+      <div
+        data-testid="board-toolbar"
+        data-visible={toolbarVisible ? "true" : "false"}
+        className={cn(
+          "scrollbar-hide absolute bottom-0 z-40 flex flex-nowrap items-center gap-2 overflow-x-auto transition-[transform,opacity] duration-200 [&>*]:shrink-0",
+          expanded ? "left-2 right-2" : "left-4 right-4",
+          toolbarVisible ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none",
+        )}
+        onPointerMove={revealToolbar}
+        onPointerDown={revealToolbar}
+      >
         <Button variant="outline" size="sm" onClick={onTogglePanels}>
           <Menu size={14} className="mr-2" /> {tl("panels")}
         </Button>
