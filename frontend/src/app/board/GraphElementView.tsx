@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, MoveDiagonal2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Minus, MoveDiagonal2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useI18n } from "@/i18n";
 import type { GraphElement } from "./boardDocument";
 import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
 import GraphEditor from "./GraphEditor";
 import { TextOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
 import { getGraphDockPlacement } from "./graphDock";
+import { DEFAULT_GRAPH_VIEWPORT, formatGraphTick, getGraphTicks, getGraphTickStep, zoomGraphViewport, type GraphViewport } from "./graphViewport";
 
 type VisibleWorld = { left: number; top: number; right: number; bottom: number };
 
@@ -47,6 +48,15 @@ export default function GraphElementView(props: Props) {
     before: GraphElement;
     last: GraphElement;
   } | null>(null);
+  const wheelGestureRef = useRef<{ before: GraphElement; last: GraphElement; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{
+    before: GraphElement;
+    last: GraphElement;
+    viewport: GraphViewport;
+    distance: number;
+    anchor: { x: number; y: number };
+  } | null>(null);
 
   const controlSize = Math.max(28, 28 / Math.max(zoom, 0.1));
   const uiScale = 1 / Math.min(Math.max(zoom, 0.1), 1);
@@ -66,12 +76,10 @@ export default function GraphElementView(props: Props) {
   const axisStroke = isDarkBackground ? "rgba(255,255,255,0.68)" : "rgba(15,23,42,0.68)";
   const textFill = isDarkBackground ? "rgba(255,255,255,0.78)" : "rgba(15,23,42,0.8)";
 
-  const tickStep = graph.width < 330 ? 5 : graph.width < 620 ? 2 : 1;
-  const ticks = useMemo(() => {
-    const values: number[] = [];
-    for (let value = -10; value <= 10; value += tickStep) values.push(value);
-    return values;
-  }, [tickStep]);
+  const xTickStep = getGraphTickStep(graph.xMin, graph.xMax);
+  const yTickStep = getGraphTickStep(graph.yMin, graph.yMax);
+  const xTicks = useMemo(() => getGraphTicks(graph.xMin, graph.xMax, xTickStep), [graph.xMax, graph.xMin, xTickStep]);
+  const yTicks = useMemo(() => getGraphTicks(graph.yMin, graph.yMax, yTickStep), [graph.yMax, graph.yMin, yTickStep]);
 
   const curves = useMemo(() => graph.expressions.map((item) => {
     if (!item.visible) return { id: item.id, color: item.color, path: "" };
@@ -92,6 +100,105 @@ export default function GraphElementView(props: Props) {
       return { id: item.id, color: item.color, path: "" };
     }
   }), [graph.expressions, graph.height, graph.width, graph.xMax, graph.xMin, graph.yMax, graph.yMin]);
+
+  const viewportOf = (source: GraphElement): GraphViewport => ({
+    xMin: source.xMin, xMax: source.xMax, yMin: source.yMin, yMax: source.yMax,
+  });
+  const withViewport = (source: GraphElement, viewport: GraphViewport): GraphElement => ({ ...source, ...viewport });
+
+  const finishWheelGesture = () => {
+    const gesture = wheelGestureRef.current;
+    if (!gesture) return;
+    clearTimeout(gesture.timer);
+    wheelGestureRef.current = null;
+    onCommit(gesture.before, gesture.last);
+  };
+
+  const handleWheel = (event: React.WheelEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const anchor = {
+      x: rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5,
+      y: rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5,
+    };
+    const active = wheelGestureRef.current;
+    const base = active?.last ?? graph;
+    const before = active?.before ?? graph;
+    const viewport = zoomGraphViewport(viewportOf(base), Math.exp(event.deltaY * 0.0015), anchor);
+    const next = withViewport(base, viewport);
+    onPreview(next);
+    if (active) clearTimeout(active.timer);
+    const timer = setTimeout(() => {
+      const pending = wheelGestureRef.current;
+      if (!pending) return;
+      wheelGestureRef.current = null;
+      onCommit(pending.before, pending.last);
+    }, 220);
+    wheelGestureRef.current = { before, last: next, timer };
+  };
+
+  const pointerDistance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  const handlePlotPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType !== "touch") return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+    touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    if (touchPointsRef.current.size !== 2) return;
+    finishWheelGesture();
+    const [a, b] = Array.from(touchPointsRef.current.values());
+    const rect = event.currentTarget.getBoundingClientRect();
+    pinchRef.current = {
+      before: graph,
+      last: graph,
+      viewport: viewportOf(graph),
+      distance: Math.max(1, pointerDistance(a, b)),
+      anchor: {
+        x: rect.width > 0 ? ((a.x + b.x) / 2 - rect.left) / rect.width : 0.5,
+        y: rect.height > 0 ? ((a.y + b.y) / 2 - rect.top) / rect.height : 0.5,
+      },
+    };
+  };
+
+  const handlePlotPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!touchPointsRef.current.has(event.pointerId)) return;
+    touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const pinch = pinchRef.current;
+    if (!pinch || touchPointsRef.current.size < 2) return;
+    const [a, b] = Array.from(touchPointsRef.current.values());
+    const factor = pinch.distance / Math.max(1, pointerDistance(a, b));
+    const next = withViewport(pinch.before, zoomGraphViewport(pinch.viewport, factor, pinch.anchor));
+    pinch.last = next;
+    onPreview(next);
+  };
+
+  const handlePlotPointerEnd = (event: React.PointerEvent<SVGSVGElement>) => {
+    touchPointsRef.current.delete(event.pointerId);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    pinchRef.current = null;
+    if (pinch.last !== pinch.before) onCommit(pinch.before, pinch.last);
+  };
+
+  const commitZoom = (factor: number) => {
+    finishWheelGesture();
+    const after = withViewport(graph, zoomGraphViewport(viewportOf(graph), factor));
+    onPreview(after);
+    onCommit(graph, after);
+  };
+
+  const resetViewport = () => {
+    finishWheelGesture();
+    const after = withViewport(graph, DEFAULT_GRAPH_VIEWPORT);
+    if (graph.xMin === -10 && graph.xMax === 10 && graph.yMin === -10 && graph.yMax === 10) return;
+    onPreview(after);
+    onCommit(graph, after);
+  };
 
   const clampPosition = (next: GraphElement): GraphElement => ({
     ...next,
@@ -259,26 +366,36 @@ export default function GraphElementView(props: Props) {
       }}
     >
       <svg
+        data-testid="graph-plot"
         width={graph.width}
         height={graph.height}
         viewBox={`0 0 ${graph.width} ${graph.height}`}
         className={selected ? "overflow-hidden rounded-lg ring-2 ring-accent/80" : "overflow-hidden rounded-lg"}
-        style={{ backgroundColor }}
+        style={{ backgroundColor, touchAction: "none" }}
+        onWheel={handleWheel}
+        onPointerDown={handlePlotPointerDown}
+        onPointerMove={handlePlotPointerMove}
+        onPointerUp={handlePlotPointerEnd}
+        onPointerCancel={handlePlotPointerEnd}
       >
         <rect x={0} y={0} width={graph.width} height={graph.height} rx={8} fill={backgroundColor} />
-        {ticks.map((value) => (
-          <g key={`grid-${value}`}>
-            <line x1={mathToX(value)} y1={0} x2={mathToX(value)} y2={graph.height} stroke={gridStroke} strokeWidth={0.8} />
-            <line x1={0} y1={mathToY(value)} x2={graph.width} y2={mathToY(value)} stroke={gridStroke} strokeWidth={0.8} />
-          </g>
+        {xTicks.map((value) => (
+          <line key={`grid-x-${value}`} x1={mathToX(value)} y1={0} x2={mathToX(value)} y2={graph.height} stroke={gridStroke} strokeWidth={0.8} />
+        ))}
+        {yTicks.map((value) => (
+          <line key={`grid-y-${value}`} x1={0} y1={mathToY(value)} x2={graph.width} y2={mathToY(value)} stroke={gridStroke} strokeWidth={0.8} />
         ))}
         <line x1={axisX} y1={0} x2={axisX} y2={graph.height} stroke={axisStroke} strokeWidth={1.4} />
         <line x1={0} y1={axisY} x2={graph.width} y2={axisY} stroke={axisStroke} strokeWidth={1.4} />
-        {ticks.filter((value) => value !== 0).map((value) => (
-          <g key={`tick-label-${value}`}>
-            <text x={mathToX(value)} y={Math.min(graph.height - 4, axisY + 14)} textAnchor="middle" fontSize={9} fill={textFill}>{value}</text>
-            <text x={Math.max(4, axisX - 5)} y={mathToY(value) + 3} textAnchor="end" fontSize={9} fill={textFill}>{value}</text>
-          </g>
+        {xTicks.filter((value) => value !== 0).map((value) => (
+          <text key={`tick-x-${value}`} x={mathToX(value)} y={clamp(axisY + 14, 12, graph.height - 4)} textAnchor="middle" fontSize={9} fill={textFill}>
+            {formatGraphTick(value, xTickStep)}
+          </text>
+        ))}
+        {yTicks.filter((value) => value !== 0).map((value) => (
+          <text key={`tick-y-${value}`} x={clamp(axisX - 5, 24, graph.width - 4)} y={mathToY(value) + 3} textAnchor="end" fontSize={9} fill={textFill}>
+            {formatGraphTick(value, yTickStep)}
+          </text>
         ))}
         {curves.map((curve) => curve.path ? (
           <path
@@ -383,6 +500,15 @@ export default function GraphElementView(props: Props) {
         >
           <span className="px-2 text-[10px] font-semibold text-frost/70">{tl("graph")}</span>
           <div className="flex items-center gap-1" onPointerDown={(event) => event.stopPropagation()}>
+            <button data-testid="graph-zoom-in" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(0.5)} aria-label="Приблизить график">
+              <Plus size={14} />
+            </button>
+            <button data-testid="graph-zoom-out" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(2)} aria-label="Отдалить график">
+              <Minus size={14} />
+            </button>
+            <button data-testid="graph-zoom-reset" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={resetViewport} aria-label="Сбросить масштаб графика">
+              <RotateCcw size={13} />
+            </button>
             <button
               type="button"
               className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]"

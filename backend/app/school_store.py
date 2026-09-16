@@ -73,7 +73,12 @@ def _is_valid_graph(graph: object) -> bool:
         return False
     if any(not isinstance(graph.get(key), str) or len(graph[key]) > 32 for key in ("xLabel", "yLabel")):
         return False
-    if (graph.get("xMin"), graph.get("xMax"), graph.get("yMin"), graph.get("yMax")) != (-10, 10, -10, 10):
+    viewport = [graph.get(key) for key in ("xMin", "xMax", "yMin", "yMax")]
+    if any(not _is_number(value) for value in viewport):
+        return False
+    x_min, x_max, y_min, y_max = map(float, viewport)
+    x_span, y_span = x_max - x_min, y_max - y_min
+    if not (0.0025 <= x_span <= 1_000_000 and 0.0025 <= y_span <= 1_000_000):
         return False
     expressions = graph.get("expressions")
     if not isinstance(expressions, list) or not 1 <= len(expressions) <= 8:

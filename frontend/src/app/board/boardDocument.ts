@@ -15,10 +15,10 @@ export type GraphElement = {
   height: number;
   xLabel: string;
   yLabel: string;
-  xMin: -10;
-  xMax: 10;
-  yMin: -10;
-  yMax: 10;
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
   expressions: GraphExpression[];
 };
 

@@ -27,6 +27,17 @@ const props = {
 };
 
 beforeEach(() => {
+  class PointerEventStub extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? "mouse";
+    }
+  }
+  Object.defineProperty(window, "PointerEvent", { configurable: true, value: PointerEventStub });
+  Object.defineProperty(globalThis, "PointerEvent", { configurable: true, value: PointerEventStub });
   const values = new Map<string, string>();
   const storage = { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => values.set(k, v), removeItem: (k: string) => values.delete(k), clear: () => values.clear(), key: () => null, get length() { return values.size; } } as Storage;
   Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
@@ -100,4 +111,53 @@ it("keeps the side dock top aligned with a lower graph", () => {
   const dock = screen.getByTestId("graph-dock-panel");
   expect(dock).toHaveAttribute("data-side", "right");
   expect(dock).toHaveStyle({ top: "0px" });
+});
+
+it("zooms the mathematical viewport around the wheel pointer and commits once", () => {
+  vi.useFakeTimers();
+  const onPreview = vi.fn();
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onPreview={onPreview} onCommit={onCommit} /></I18nProvider>);
+  const plot = screen.getByTestId("graph-plot");
+  vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 420, height: 300, right: 420, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.wheel(plot, { deltaY: -120, clientX: 315, clientY: 75 });
+  const next = onPreview.mock.calls[0][0] as GraphElement;
+  expect(next.xMax - next.xMin).toBeLessThan(20);
+  expect(next.xMin + 0.75 * (next.xMax - next.xMin)).toBeCloseTo(5, 5);
+  expect(next.yMax - 0.25 * (next.yMax - next.yMin)).toBeCloseTo(5, 5);
+  expect(onCommit).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(300);
+  expect(onCommit).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+it("supports pinch zoom and commits when the gesture ends", () => {
+  const onPreview = vi.fn();
+  const onCommit = vi.fn();
+  render(<I18nProvider><GraphElementView {...props} onPreview={onPreview} onCommit={onCommit} /></I18nProvider>);
+  const plot = screen.getByTestId("graph-plot");
+  vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 420, height: 300, right: 420, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.pointerDown(plot, { pointerId: 1, pointerType: "touch", clientX: 100, clientY: 150 });
+  fireEvent.pointerDown(plot, { pointerId: 2, pointerType: "touch", clientX: 300, clientY: 150 });
+  fireEvent.pointerMove(plot, { pointerId: 2, pointerType: "touch", clientX: 350, clientY: 150 });
+  expect(onPreview).toHaveBeenCalled();
+  fireEvent.pointerUp(plot, { pointerId: 2, pointerType: "touch", clientX: 350, clientY: 150 });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+});
+
+it("shows zoom controls and resets the graph viewport", () => {
+  const onCommit = vi.fn();
+  const zoomed = { ...graph, xMin: -5, xMax: 5, yMin: -5, yMax: 5 };
+  render(<I18nProvider><GraphElementView {...props} graph={zoomed} onCommit={onCommit} /></I18nProvider>);
+  expect(screen.getByTestId("graph-zoom-in")).toBeInTheDocument();
+  expect(screen.getByTestId("graph-zoom-out")).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("graph-zoom-reset"));
+  const next = onCommit.mock.calls[0][1] as GraphElement;
+  expect([next.xMin, next.xMax, next.yMin, next.yMax]).toEqual([-10, 10, -10, 10]);
 });

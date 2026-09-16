@@ -135,3 +135,31 @@ def test_old_board_operation_check_is_migrated_without_losing_rows(tmp_path):
     assert rows == [(1, "old-1", "add", __import__("json").dumps({"stroke": stroke}))]
     assert legacy is None
     assert "idx_board_operations_lesson" in indexes
+
+
+def test_graph_viewport_accepts_safe_dynamic_ranges_and_rejects_invalid_spans(tmp_path):
+    client, _, _, room = registered_client(tmp_path)
+    lesson = create_lesson(client, room)
+    url = f"/api/lessons/{lesson['id']}/board/operations"
+
+    zoomed = graph_payload()
+    zoomed.update({"xMin": -2.5, "xMax": 7.5, "yMin": -1.25, "yMax": 3.75})
+    ok = client.post(url, json={"operations": [
+        {"client_operation_id": "zoom-ok", "op": "graph_add", "graph": zoomed}
+    ]})
+
+    zero_span = graph_payload("g2")
+    zero_span.update({"xMin": 1, "xMax": 1})
+    bad_zero = client.post(url, json={"operations": [
+        {"client_operation_id": "zoom-bad-zero", "op": "graph_add", "graph": zero_span}
+    ]})
+
+    huge_span = graph_payload("g3")
+    huge_span.update({"xMin": -1_000_000, "xMax": 1_000_000})
+    bad_huge = client.post(url, json={"operations": [
+        {"client_operation_id": "zoom-bad-huge", "op": "graph_add", "graph": huge_span}
+    ]})
+
+    assert ok.status_code == 200
+    assert bad_zero.status_code == 422
+    assert bad_huge.status_code == 422
