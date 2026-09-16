@@ -117,7 +117,6 @@ export default function TopBar({
   return (
     <div className="glass relative z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-visible rounded-2xl px-4 py-2.5 shadow-soft">
       <div className="flex min-w-0 items-center gap-3">
-        <Badge className="bg-white/10">{tl("open_lesson")}</Badge>
         <div className="min-w-0">
           <div className="truncate text-base font-semibold" title={lessonTitle}>{subjectName}</div>
           <div className="truncate text-[11px] text-frost/50">{schoolName} · кабинет {roomName} · {grade} класс</div>
@@ -148,15 +147,7 @@ export default function TopBar({
       </div>
       <div className="flex min-w-0 items-center justify-end gap-1.5">
         {showTimerControls && (
-          <>
-            <div className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold">{formatTime(seconds)}</div>
-            <Button variant="ghost" size="sm" onClick={onToggleRunning}>
-              {running ? <Pause size={16} /> : <Play size={16} />}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onReset}>
-              <RefreshCw size={16} />
-            </Button>
-          </>
+          <div className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold">{formatTime(seconds)}</div>
         )}
         {showPresentationControls && (
           <>
@@ -182,12 +173,6 @@ export default function TopBar({
         <Button variant="outline" size="sm" onClick={handleFullscreen} className={topActionBtnClass}>
           <Expand size={16} /> {tl("fullscreen")}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenHistory} aria-label="История уроков" title="История уроков">
-          <History size={16} />
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onChangeRoom} aria-label="Сменить кабинет" title="Сменить кабинет">
-          <DoorOpen size={16} />
-        </Button>
         <Button variant="outline" size="sm" onClick={onCompleteLesson} className="h-8 whitespace-nowrap px-2 text-[10px]" title="Завершить урок">
           <SquareCheckBig size={15} className="mr-1" /> Завершить
         </Button>
@@ -204,6 +189,26 @@ export default function TopBar({
 
           {settingsOpen && (
             <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-[220px] rounded-xl border border-white/10 bg-ink/95 p-2.5 shadow-soft backdrop-blur-md">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("lesson_controls")}</div>
+              <div className="mb-2.5 grid grid-cols-2 gap-1.5">
+                {showTimerControls && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={onToggleRunning} aria-label={running ? tl("pause") : tl("play")} className="h-8 justify-start px-2 text-[10px]">
+                      {running ? <Pause size={14} /> : <Play size={14} />} {running ? tl("pause") : tl("play")}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={onReset} aria-label={tl("reset")} className="h-8 justify-start px-2 text-[10px]">
+                      <RefreshCw size={14} /> {tl("reset")}
+                    </Button>
+                  </>
+                )}
+                <Button variant="ghost" size="sm" onClick={onOpenHistory} aria-label={tl("history")} className="h-8 justify-start px-2 text-[10px]">
+                  <History size={14} /> {tl("history")}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={onChangeRoom} aria-label={tl("change_room")} className="h-8 justify-start px-2 text-[10px]">
+                  <DoorOpen size={14} /> {tl("change_room")}
+                </Button>
+              </div>
+
               <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("language")}</div>
               <div className="mb-2.5 inline-flex h-7 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-0.5">
                 <button
