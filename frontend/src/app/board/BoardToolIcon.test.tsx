@@ -14,8 +14,11 @@ describe("BoardToolIcon", () => {
     expect(icon.tagName).toBe("svg");
     expect(icon).toHaveAttribute("aria-hidden", "true");
     expect(icon).not.toHaveAttribute("src");
-    expect(icon).toHaveAttribute("data-parallax-art", "true");
+    expect(icon).not.toHaveAttribute("data-parallax-art");
+    expect(icon.querySelector("filter")).not.toBeInTheDocument();
     expect(icon.querySelectorAll("path, rect, circle, line, polyline").length).toBeGreaterThan(2);
-    expect(icon).toHaveClass("board-tool-art", "h-14", "w-14");
+    expect(icon).toHaveClass("h-14", "w-14");
+    expect(icon.parentElement).toHaveAttribute("data-parallax-art", "true");
+    expect(icon.parentElement).toHaveClass("board-tool-art");
   });
 });
