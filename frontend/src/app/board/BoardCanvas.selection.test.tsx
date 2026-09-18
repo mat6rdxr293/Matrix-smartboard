@@ -165,8 +165,12 @@ it("renders toolbar settings outside the horizontally scrolling toolbar", () => 
 it("uses the two-level toolbar shell and local artwork for the drawing tools", () => {
   mount();
   const toolbar = screen.getByTestId("board-toolbar");
+  const primary = screen.getByTestId("board-toolbar-primary");
 
   expect(toolbar).toHaveAttribute("data-layout", "two-level");
+  expect(primary).toHaveClass("board-toolbar-primary-row", "overflow-x-auto", "[&_button]:min-h-11");
+  fireEvent.click(screen.getByRole("button", { name: /ручка|қалам/i }));
+  expect(screen.getByTestId("board-toolbar-popover-pen")).toHaveAttribute("data-toolbar-level", "context");
   for (const tool of ["pen", "line", "eraser", "graph"]) {
     expect(screen.getByTestId(`board-tool-icon-${tool}`)).toBeInTheDocument();
   }

@@ -180,7 +180,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   const listRef = useRef<HTMLDivElement | null>(null);
   const [boardHistory, setBoardHistory] = useState<BoardHistory>(() => createBoardHistory());
   const [boardPenColor, setBoardPenColor] = useState("#FF0000");
-  const [boardBgColor, setBoardBgColor] = useState("#0A0E14");
+  const [boardBgColor, setBoardBgColor] = useState(() => theme === "light" ? "#FFFFFF" : "#0A0E14");
   const [taskData, setTaskData] = useState<Task[]>(() => defaultTaskData);
   const [slideData, setSlideData] = useState<Slide[]>(() => defaultSlideData);
   const [presentationSource, setPresentationSource] = useState<PresentationSource>(DEFAULT_PRESENTATION_SOURCE);

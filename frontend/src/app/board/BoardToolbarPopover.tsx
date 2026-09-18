@@ -51,7 +51,8 @@ export default function BoardToolbarPopover({
     <div
       ref={panelRef}
       data-testid={testId}
-      className={cn("fixed z-[120]", className)}
+      data-toolbar-level="context"
+      className={cn("board-toolbar-context-row fixed z-[120]", className)}
       style={{ left: position.left, top: position.top, visibility: position.ready ? "visible" : "hidden" }}
     >
       {children}

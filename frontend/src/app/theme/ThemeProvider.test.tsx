@@ -73,4 +73,17 @@ describe("ThemeProvider", () => {
     expect(window.localStorage.getItem("practice.appearance.theme")).toBe("dark");
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
+
+  it("falls back to dark when browser storage is unavailable", () => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => { throw new DOMException("blocked", "SecurityError"); },
+        setItem: () => { throw new DOMException("blocked", "SecurityError"); },
+      },
+    });
+
+    expect(() => render(<ThemeProvider><ThemeProbe /></ThemeProvider>)).not.toThrow();
+    expect(screen.getByLabelText("current theme")).toHaveTextContent("dark");
+  });
 });

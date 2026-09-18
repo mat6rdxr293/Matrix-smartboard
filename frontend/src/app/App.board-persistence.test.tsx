@@ -81,6 +81,15 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("board replay persistence", () => {
+  it("uses a light board for a new lesson when the saved application theme is light", async () => {
+    window.localStorage.setItem("practice.appearance.theme", "light");
+    mocks.loadBoardReplay.mockResolvedValue({ operations: [] });
+    mount();
+
+    await waitFor(() => expect(mocks.boardProps).not.toBeNull());
+    expect(mocks.boardProps.initialBgColor).toBe("#FFFFFF");
+  });
+
   it("keeps strokes added while the initial replay request is still loading", async () => {
     const loading = deferred<{ operations: any[] }>();
     mocks.loadBoardReplay.mockReturnValueOnce(loading.promise);

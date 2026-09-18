@@ -1152,13 +1152,18 @@ export default function BoardCanvas({
         data-layout="two-level"
         data-visible={toolbarVisible ? "true" : "false"}
         className={cn(
-          "board-toolbar-dock scrollbar-hide absolute bottom-0 z-40 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-t-[22px] p-1.5 transition-[transform,opacity] duration-200 [&>*]:shrink-0",
+          "board-toolbar-dock absolute bottom-0 z-40 rounded-t-[22px] p-1.5 transition-[transform,opacity] duration-200",
           expanded ? "left-2 right-2" : "left-4 right-4",
           toolbarVisible ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none",
         )}
         onPointerMove={revealToolbar}
         onPointerDown={revealToolbar}
       >
+        <div
+          data-testid="board-toolbar-primary"
+          data-toolbar-level="primary"
+          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 [&_button]:min-h-11"
+        >
         <Button variant="outline" size="sm" onClick={onTogglePanels}>
           <Menu size={14} className="mr-2" /> {tl("panels")}
         </Button>
@@ -1642,6 +1647,7 @@ export default function BoardCanvas({
               {!compactToolbar && tl("ai_assistant")}
             </Button>
           )}
+        </div>
         </div>
       </div>
     </div>
