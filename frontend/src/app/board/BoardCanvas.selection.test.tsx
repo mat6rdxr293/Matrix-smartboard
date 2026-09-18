@@ -185,8 +185,24 @@ it("shows large icon-only controls without visible tool captions", () => {
     expect(button.textContent).toBe("");
     expect(button).toHaveAttribute("title", name);
   }
-  expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button");
+  expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button", "board-tool-unframed");
   expect(screen.getByRole("button", { name: "Панели" })).toHaveClass("board-utility-button");
+});
+
+it("tilts a large tool toward the pointer and resets it when the pointer leaves", () => {
+  mount();
+  const pen = screen.getByRole("button", { name: "Ручка" });
+  vi.spyOn(pen, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 68, height: 68, right: 68, bottom: 68, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.pointerMove(pen, { pointerId: 94, pointerType: "mouse", clientX: 58, clientY: 12 });
+  expect(pen.style.getPropertyValue("--tool-rotate-x")).not.toBe("0deg");
+  expect(pen.style.getPropertyValue("--tool-rotate-y")).not.toBe("0deg");
+
+  fireEvent.pointerLeave(pen, { pointerId: 94, pointerType: "mouse" });
+  expect(pen.style.getPropertyValue("--tool-rotate-x")).toBe("0deg");
+  expect(pen.style.getPropertyValue("--tool-rotate-y")).toBe("0deg");
 });
 
 it("auto-hides the board toolbar after inactivity and reveals it at the bottom edge", () => {

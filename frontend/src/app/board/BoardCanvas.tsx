@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
@@ -59,6 +59,21 @@ const BG_EXTRA = [
   { name: "Желтый", value: "#F6D365" },
 ];
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
+
+function updateToolParallax(event: ReactPointerEvent<HTMLButtonElement>) {
+  if (event.pointerType === "touch") return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+  const relativeX = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+  const relativeY = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
+  event.currentTarget.style.setProperty("--tool-rotate-x", `${((0.5 - relativeY) * 12).toFixed(2)}deg`);
+  event.currentTarget.style.setProperty("--tool-rotate-y", `${((relativeX - 0.5) * 14).toFixed(2)}deg`);
+}
+
+function resetToolParallax(event: ReactPointerEvent<HTMLButtonElement>) {
+  event.currentTarget.style.setProperty("--tool-rotate-x", "0deg");
+  event.currentTarget.style.setProperty("--tool-rotate-y", "0deg");
+}
 
 export default function BoardCanvas({
   onOcrText,
@@ -1168,11 +1183,14 @@ export default function BoardCanvas({
         </Button>
         <div ref={penToolbarAnchorRef} className="relative">
           <Button
-            variant={mode === "draw" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
-            className="board-tool-button"
+            className={cn("board-tool-button board-tool-unframed", mode === "draw" && "is-active")}
             aria-label={tl("pen")}
+            aria-pressed={mode === "draw"}
             title={tl("pen")}
+            onPointerMove={updateToolParallax}
+            onPointerLeave={resetToolParallax}
             onClick={() => {
               setMode("draw");
               setShowPenSlider(true);
@@ -1277,11 +1295,14 @@ export default function BoardCanvas({
         </div>
         <div ref={lineToolbarAnchorRef} className="relative">
           <Button
-            variant={mode === "line" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
-            className="board-tool-button"
+            className={cn("board-tool-button board-tool-unframed", mode === "line" && "is-active")}
             aria-label={tl("line")}
+            aria-pressed={mode === "line"}
             title={tl("line")}
+            onPointerMove={updateToolParallax}
+            onPointerLeave={resetToolParallax}
             onClick={() => {
               setMode("line");
               setShowLineSlider(true);
@@ -1326,11 +1347,14 @@ export default function BoardCanvas({
           </BoardToolbarPopover>
         </div>
         <Button
-          variant={mode === "graph" ? "accent" : "outline"}
+          variant="ghost"
           size="sm"
-          className="board-tool-button"
+          className={cn("board-tool-button board-tool-unframed", mode === "graph" && "is-active")}
           aria-label={tl("graph")}
+          aria-pressed={mode === "graph"}
           title={tl("graph")}
+          onPointerMove={updateToolParallax}
+          onPointerLeave={resetToolParallax}
           onClick={() => {
             setMode("graph");
             setShowPenSlider(false);
@@ -1374,11 +1398,14 @@ export default function BoardCanvas({
         </Button>
         <div ref={eraserToolbarAnchorRef} className="relative">
           <Button
-            variant={mode === "erase" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
-            className="board-tool-button"
+            className={cn("board-tool-button board-tool-unframed", mode === "erase" && "is-active")}
             aria-label={tl("eraser")}
+            aria-pressed={mode === "erase"}
             title={tl("eraser")}
+            onPointerMove={updateToolParallax}
+            onPointerLeave={resetToolParallax}
             onClick={() => {
             setMode("erase");
             setShowEraserSlider(true);

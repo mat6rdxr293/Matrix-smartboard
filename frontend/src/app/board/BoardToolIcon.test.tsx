@@ -8,12 +8,14 @@ import BoardToolIcon from "./BoardToolIcon";
 afterEach(() => cleanup());
 
 describe("BoardToolIcon", () => {
-  it.each(["pen", "line", "eraser", "graph"] as const)("renders the local %s asset", (tool) => {
+  it.each(["pen", "line", "eraser", "graph"] as const)("renders visible inline %s artwork", (tool) => {
     render(<BoardToolIcon tool={tool} />);
     const icon = screen.getByTestId(`board-tool-icon-${tool}`);
-    expect(icon.tagName).toBe("IMG");
+    expect(icon.tagName).toBe("svg");
     expect(icon).toHaveAttribute("aria-hidden", "true");
-    expect(icon).toHaveAttribute("src", expect.stringContaining(`${tool}.svg`));
-    expect(icon).toHaveClass("h-12", "w-12");
+    expect(icon).not.toHaveAttribute("src");
+    expect(icon).toHaveAttribute("data-parallax-art", "true");
+    expect(icon.querySelectorAll("path, rect, circle, line, polyline").length).toBeGreaterThan(2);
+    expect(icon).toHaveClass("board-tool-art", "h-14", "w-14");
   });
 });

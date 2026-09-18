@@ -129,6 +129,8 @@ textarea,
 }
 
 .board-tool-button {
+  --tool-rotate-x: 0deg;
+  --tool-rotate-y: 0deg;
   display: inline-flex;
   height: 68px;
   width: 68px;
@@ -136,8 +138,36 @@ textarea,
   align-items: center;
   justify-content: center;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 18px;
+  perspective: 280px;
+}
+
+.board-tool-unframed {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.board-tool-unframed.is-active {
+  background: rgb(var(--color-accent) / 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgb(var(--color-accent) / 0.16), 0 8px 24px rgb(var(--color-accent) / 0.12) !important;
+}
+
+.board-tool-art {
+  transform: perspective(280px) rotateX(var(--tool-rotate-x)) rotateY(var(--tool-rotate-y)) translate3d(0, 0, 12px);
+  transform-style: preserve-3d;
+  transform-origin: 50% 58%;
+  transition: transform 110ms ease-out, filter 160ms ease-out;
+  will-change: transform;
+}
+
+.board-tool-button:hover .board-tool-art {
+  filter: drop-shadow(0 9px 9px rgb(0 0 0 / 0.3));
+}
+
+.board-tool-button:active .board-tool-art {
+  transform: perspective(280px) rotateX(var(--tool-rotate-x)) rotateY(var(--tool-rotate-y)) translate3d(0, 2px, 4px) scale(0.96);
 }
 
 .board-utility-button {
@@ -177,6 +207,13 @@ textarea,
     height: 48px;
     width: 48px;
     min-width: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-tool-art {
+    transform: none;
+    transition: none;
   }
 }
 
