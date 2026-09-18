@@ -22,7 +22,7 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
           <h1 className="mt-2 text-3xl font-bold text-frost sm:text-4xl">Выберите предмет</h1>
           <p className="mt-2 text-frost/55">Для {grade} класса доступно предметов: {subjects.length}</p>
         </div>
-        {error && <p role="alert" className="mx-auto mb-4 max-w-xl rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-center text-sm text-rose-200">{error}</p>}
+        {error && <p role="alert" className="mx-auto mb-4 max-w-xl rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-center text-sm text-danger">{error}</p>}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {subjects.map((subject) => {
             const name = locale === "kk" ? subject.nameKk : subject.nameRu;

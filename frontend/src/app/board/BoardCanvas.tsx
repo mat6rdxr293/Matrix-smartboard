@@ -1,4 +1,4 @@
-﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
@@ -7,7 +7,8 @@ import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, MessageSquare, Minus, NotebookPen, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import BoardToolIcon from "@/app/board/BoardToolIcon";
+import { Grid3x3, Hand, Lock, Menu, MessageSquare, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 
@@ -1148,9 +1149,10 @@ export default function BoardCanvas({
       </div>
       <div
         data-testid="board-toolbar"
+        data-layout="two-level"
         data-visible={toolbarVisible ? "true" : "false"}
         className={cn(
-          "scrollbar-hide absolute bottom-0 z-40 flex flex-nowrap items-center gap-2 overflow-x-auto transition-[transform,opacity] duration-200 [&>*]:shrink-0",
+          "board-toolbar-dock scrollbar-hide absolute bottom-0 z-40 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-t-[22px] p-1.5 transition-[transform,opacity] duration-200 [&>*]:shrink-0",
           expanded ? "left-2 right-2" : "left-4 right-4",
           toolbarVisible ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none",
         )}
@@ -1164,6 +1166,7 @@ export default function BoardCanvas({
           <Button
             variant={mode === "draw" ? "accent" : "outline"}
             size="sm"
+            className="board-tool-button"
             onClick={() => {
               setMode("draw");
               setShowPenSlider(true);
@@ -1173,13 +1176,13 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <Paintbrush size={14} className="mr-2" /> {tl("pen")}
+            <BoardToolIcon tool="pen" /> <span className="board-tool-label">{tl("pen")}</span>
           </Button>
           <BoardToolbarPopover
             anchorRef={penToolbarAnchorRef}
             open={showPenPalette && mode === "draw"}
             testId="board-toolbar-popover-pen"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={schedulePenHide} onPointerUp={schedulePenHide} onPointerMove={schedulePenHide}>
                 {showPenSlider && (
@@ -1270,6 +1273,7 @@ export default function BoardCanvas({
           <Button
             variant={mode === "line" ? "accent" : "outline"}
             size="sm"
+            className="board-tool-button"
             onClick={() => {
               setMode("line");
               setShowLineSlider(true);
@@ -1280,13 +1284,13 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <Minus size={14} className="mr-2" /> {tl("line")}
+            <BoardToolIcon tool="line" /> <span className="board-tool-label">{tl("line")}</span>
           </Button>
           <BoardToolbarPopover
             anchorRef={lineToolbarAnchorRef}
             open={showLineSlider && mode === "line"}
             testId="board-toolbar-popover-line"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={scheduleLineHide} onPointerUp={scheduleLineHide} onPointerMove={scheduleLineHide}>
                 <div className="flex items-center gap-2">
@@ -1316,6 +1320,7 @@ export default function BoardCanvas({
         <Button
           variant={mode === "graph" ? "accent" : "outline"}
           size="sm"
+          className="board-tool-button"
           aria-label={tl("graph")}
           onClick={() => {
             setMode("graph");
@@ -1327,7 +1332,7 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <ChartSpline size={14} className="mr-2" /> {tl("graph")}
+          <BoardToolIcon tool="graph" /> <span className="board-tool-label">{tl("graph")}</span>
         </Button>
         <Button
           variant={mode === "pan" ? "accent" : "outline"}
@@ -1358,6 +1363,7 @@ export default function BoardCanvas({
           <Button
             variant={mode === "erase" ? "accent" : "outline"}
             size="sm"
+            className="board-tool-button"
             onClick={() => {
             setMode("erase");
             setShowEraserSlider(true);
@@ -1368,13 +1374,13 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <Eraser size={14} className="mr-2" /> {tl("eraser")}
+          <BoardToolIcon tool="eraser" /> <span className="board-tool-label">{tl("eraser")}</span>
         </Button>
           <BoardToolbarPopover
             anchorRef={eraserToolbarAnchorRef}
             open={showEraserSlider && mode === "erase"}
             testId="board-toolbar-popover-eraser"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={scheduleEraserHide} onPointerUp={scheduleEraserHide} onPointerMove={scheduleEraserHide}>
                 <div className="flex items-center gap-2">
@@ -1416,7 +1422,7 @@ export default function BoardCanvas({
             anchorRef={boardToolbarAnchorRef}
             open={showBoardSettings}
             testId="board-toolbar-popover-board"
-            className="rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-3 py-2 shadow-glass backdrop-blur"
           >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs text-frost/60">{tl("grid")}</span>
@@ -1516,7 +1522,7 @@ export default function BoardCanvas({
           <button
             className={cn(
               "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "auto" ? "text-ink" : "text-frost/70 hover:text-frost"
+              inputMode === "auto" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("auto")}
           >
@@ -1532,7 +1538,7 @@ export default function BoardCanvas({
           <button
             className={cn(
               "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "mouse" ? "text-ink" : "text-frost/70 hover:text-frost"
+              inputMode === "mouse" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("mouse")}
           >
@@ -1548,7 +1554,7 @@ export default function BoardCanvas({
           <button
             className={cn(
               "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "touch" ? "text-ink" : "text-frost/70 hover:text-frost"
+              inputMode === "touch" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("touch")}
           >
@@ -1587,7 +1593,7 @@ export default function BoardCanvas({
             open={showClearConfirm}
             align="right"
             testId="board-toolbar-popover-clear"
-            className="w-[260px] rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+            className="surface-popover w-[260px] rounded-xl px-3 py-2 shadow-glass backdrop-blur"
           >
                 <div className="mb-2 text-xs text-frost/70">{tl("slide_to_clear")}</div>
                 <input

@@ -1160,7 +1160,7 @@ export default function TeacherDashboard({
             <button
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "tasks" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                section === "tasks" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
               )}
               onClick={() => setSection("tasks")}
             >{
@@ -1169,7 +1169,7 @@ export default function TeacherDashboard({
             <button
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "slides" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                section === "slides" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
               )}
               onClick={() => setSection("slides")}
             >{
@@ -1178,7 +1178,7 @@ export default function TeacherDashboard({
             <button
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "replays" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                section === "replays" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
               )}
               onClick={() => setSection("replays")}
             >{
@@ -1743,7 +1743,7 @@ export default function TeacherDashboard({
                             className={cn(
                               "rounded-full px-3 py-1 text-xs font-semibold transition",
                               selectedElement.align === align
-                                ? "bg-accent text-ink"
+                                ? "bg-accent text-accentText"
                                 : "border border-white/10 text-frost/70 hover:text-frost"
                             )}
                             onClick={() => updateElement(selectedElement.id, { align })}
@@ -1845,7 +1845,7 @@ export default function TeacherDashboard({
                   <button
                     className={cn(
                       "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "solid" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                      siteBackground.mode === "solid" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                     )}
                     onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "solid" })}
                   >{
@@ -1854,7 +1854,7 @@ export default function TeacherDashboard({
                   <button
                     className={cn(
                       "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "gradient" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                      siteBackground.mode === "gradient" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                     )}
                     onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "gradient" })}
                   >{
@@ -1863,7 +1863,7 @@ export default function TeacherDashboard({
                   <button
                     className={cn(
                       "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "image" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                      siteBackground.mode === "image" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                     )}
                     onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "image" })}
                   >{

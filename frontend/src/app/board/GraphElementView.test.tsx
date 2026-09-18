@@ -67,6 +67,11 @@ describe("GraphElementView", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect((onCommit.mock.calls[0][1] as GraphElement).xLabel).toBe("t, с");
   });
+
+  it("uses semantic theme surfaces for graph controls", () => {
+    render(<I18nProvider><GraphElementView {...props} /></I18nProvider>);
+    expect(screen.getByTestId("graph-zoom-in")).toHaveClass("bg-graphite");
+  });
 });
 
 it("edits an axis label using the on-screen text keyboard", () => {

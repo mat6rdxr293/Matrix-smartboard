@@ -28,6 +28,7 @@ import { callAi, getStatus } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
+import { useTheme } from "@/app/theme/ThemeProvider";
 import { sessionApi } from "@/app/session/api";
 import type { Lesson, Room, School } from "@/app/session/types";
 
@@ -92,6 +93,7 @@ type LessonWorkspaceProps = {
 
 export default function App({ school, room, lesson, onComplete, onOpenHistory, onChangeRoom }: LessonWorkspaceProps) {
   const { locale, tl } = useI18n();
+  const { theme } = useTheme();
   const subjectId = lesson.subjectId;
   // Teacher tab is bound to verified practice token from main portal auth.
   const [hideTeacherTab, setHideTeacherTab] = useState(true);
@@ -744,8 +746,12 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
             backgroundRepeat: "no-repeat",
           }
         : { backgroundImage: siteBackground.gradient };
-  const effectiveSiteBgStyle: React.CSSProperties = ultraLite
-    ? { backgroundColor: "#0A0E14", backgroundImage: "none" }
+  const usesDefaultSiteBackground = siteBackground.mode === DEFAULT_SITE_BACKGROUND.mode
+    && siteBackground.color === DEFAULT_SITE_BACKGROUND.color
+    && siteBackground.gradient === DEFAULT_SITE_BACKGROUND.gradient
+    && !siteBackground.image;
+  const effectiveSiteBgStyle: React.CSSProperties = (ultraLite || (theme === "light" && usesDefaultSiteBackground))
+    ? { backgroundColor: "var(--app-background)", backgroundImage: "none" }
     : siteBgStyle;
 
   const addMessage = (msg: AssistantMessage) => {

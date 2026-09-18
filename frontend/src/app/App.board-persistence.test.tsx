@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
+import { ThemeProvider } from "@/app/theme/ThemeProvider";
 
 const mocks = vi.hoisted(() => ({
   loadBoardReplay: vi.fn(),
@@ -50,8 +51,8 @@ const deferred = <T,>() => {
 };
 
 const mount = (onComplete = vi.fn()) => render(
-  <I18nProvider><App school={school} room={room} lesson={lesson as any}
-    onComplete={onComplete} onOpenHistory={vi.fn()} onChangeRoom={vi.fn()} /></I18nProvider>
+  <ThemeProvider><I18nProvider><App school={school} room={room} lesson={lesson as any}
+    onComplete={onComplete} onOpenHistory={vi.fn()} onChangeRoom={vi.fn()} /></I18nProvider></ThemeProvider>
 );
 
 beforeEach(() => {

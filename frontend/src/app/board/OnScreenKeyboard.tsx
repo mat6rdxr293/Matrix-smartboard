@@ -19,7 +19,7 @@ function TouchKey({ label, ariaLabel, onPress, className = "" }: TouchKeyProps) 
       aria-label={ariaLabel ?? label}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onPress}
-      className={`flex h-11 min-w-11 select-none items-center justify-center rounded-lg border border-white/20 bg-[#151b24] px-2 text-sm font-semibold text-frost active:bg-accent active:text-ink ${className}`}
+      className={`flex h-11 min-w-11 select-none items-center justify-center rounded-lg border border-white/20 bg-graphite px-2 text-sm font-semibold text-frost active:bg-accent active:text-accentText ${className}`}
     >
       {label}
     </button>
@@ -58,7 +58,7 @@ export function MathOnScreenKeyboard({ onAction }: { onAction: (action: VirtualK
         <TouchKey label="⌫" ariaLabel={tl("backspace")} onPress={() => onAction({ type: "backspace" })} />
         <TouchKey label="C" ariaLabel={tl("clear_expression")} onPress={() => onAction({ type: "clear" })} />
         <TouchKey label={tl("cancel")} onPress={() => onAction({ type: "cancel" })} className="col-span-1" />
-        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="bg-accent text-ink" />
+        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="bg-accent text-accentText" />
       </div>
     </div>
   );
@@ -108,7 +108,7 @@ export function TextOnScreenKeyboard({ onAction }: { onAction: (action: VirtualK
       </div>
       <div className="mt-1 flex justify-end gap-1">
         <TouchKey label={tl("cancel")} onPress={() => onAction({ type: "cancel" })} className="min-w-[92px]" />
-        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="min-w-[92px] bg-accent text-ink" />
+        <TouchKey label={tl("done")} onPress={() => onAction({ type: "done" })} className="min-w-[92px] bg-accent text-accentText" />
       </div>
     </div>
   );

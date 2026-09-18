@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DoorOpen, Expand, History, Pause, Play, RefreshCw, Settings2, SquareCheckBig, Tv } from "lucide-react";
+import { DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Settings2, SquareCheckBig, Sun, Tv } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { useTheme } from "@/app/theme/ThemeProvider";
 
 export type ApiStatus = {
   ok: boolean;
@@ -76,6 +77,7 @@ export default function TopBar({
   onChangeRoom,
 }: TopBarProps) {
   const { locale, setLocale, tl } = useI18n();
+  const { theme, setTheme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
@@ -130,7 +132,7 @@ export default function TopBar({
               onClick={() => onChangeTab(tab.id)}
               className={cn(
                 "relative overflow-hidden rounded-full px-4 py-2 text-sm font-semibold transition",
-                currentTab === tab.id ? "text-ink" : "text-frost/70 hover:text-frost"
+                currentTab === tab.id ? "text-accentText" : "text-frost/70 hover:text-frost"
               )}
             >
               {currentTab === tab.id && (
@@ -182,13 +184,13 @@ export default function TopBar({
             variant="outline"
             size="sm"
             onClick={() => setSettingsOpen((v) => !v)}
-            className={`${topActionBtnClass} bg-white text-ink hover:bg-white/90 hover:text-ink`}
+            className={`${topActionBtnClass} bg-frost text-ink hover:bg-frost/90 hover:text-ink`}
           >
             <Settings2 size={16} /> {tl("settings")}
           </Button>
 
           {settingsOpen && (
-            <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-[220px] rounded-xl border border-white/10 bg-ink/95 p-2.5 shadow-soft backdrop-blur-md">
+            <div className="surface-popover absolute right-0 top-[calc(100%+8px)] z-40 w-[240px] rounded-xl p-2.5 shadow-soft backdrop-blur-md">
               <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("lesson_controls")}</div>
               <div className="mb-2.5 grid grid-cols-2 gap-1.5">
                 {showTimerControls && (
@@ -209,12 +211,38 @@ export default function TopBar({
                 </Button>
               </div>
 
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("appearance")}</div>
+              <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-full border border-white/10 bg-white/5 p-0.5">
+                <button
+                  type="button"
+                  aria-pressed={theme === "light"}
+                  className={cn(
+                    "flex h-7 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-semibold transition",
+                    theme === "light" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
+                  )}
+                  onClick={() => setTheme("light")}
+                >
+                  <Sun size={13} /> {tl("theme_light")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={theme === "dark"}
+                  className={cn(
+                    "flex h-7 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-semibold transition",
+                    theme === "dark" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
+                  )}
+                  onClick={() => setTheme("dark")}
+                >
+                  <Moon size={13} /> {tl("theme_dark")}
+                </button>
+              </div>
+
               <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("language")}</div>
               <div className="mb-2.5 inline-flex h-7 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-0.5">
                 <button
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition",
-                    locale === "ru" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                    locale === "ru" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                   )}
                   onClick={() => setLocale("ru")}
                 >
@@ -223,7 +251,7 @@ export default function TopBar({
                 <button
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition",
-                    locale === "kk" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                    locale === "kk" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                   )}
                   onClick={() => setLocale("kk")}
                 >
@@ -233,10 +261,10 @@ export default function TopBar({
 
               <div className="mb-1 text-[10px] uppercase tracking-wide text-frost/60">{tl("services")}</div>
               <div className="grid grid-cols-2 gap-1.5">
-                <Badge className={cn("justify-center bg-white/5 text-[11px]", apiStatus?.ai && "bg-emerald-500/15 text-emerald-200")}>
+                <Badge className={cn("justify-center bg-white/5 text-[11px]", apiStatus?.ai && "bg-emerald-500/15 text-success")}>
                   {tl("ai")}: {apiStatus ? (apiStatus.ai ? tl("on") : tl("off")) : "..."}
                 </Badge>
-                <Badge className={cn("justify-center bg-white/5 text-[11px]", apiStatus?.ocr && "bg-emerald-500/15 text-emerald-200")}>
+                <Badge className={cn("justify-center bg-white/5 text-[11px]", apiStatus?.ocr && "bg-emerald-500/15 text-success")}>
                   {tl("ocr")}: {apiStatus ? (apiStatus.ocr ? tl("on") : tl("off")) : "..."}
                 </Badge>
               </div>
@@ -245,7 +273,7 @@ export default function TopBar({
                 <button
                   className={cn(
                     "flex-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition",
-                    performanceMode === "quality" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                    performanceMode === "quality" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                   )}
                   onClick={() => onChangePerformanceMode("quality")}
                 >
@@ -254,7 +282,7 @@ export default function TopBar({
                 <button
                   className={cn(
                     "flex-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition",
-                    performanceMode === "balanced" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                    performanceMode === "balanced" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                   )}
                   onClick={() => onChangePerformanceMode("balanced")}
                 >
@@ -263,7 +291,7 @@ export default function TopBar({
                 <button
                   className={cn(
                     "flex-1 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none transition",
-                    performanceMode === "performance" ? "bg-accent text-ink" : "text-frost/70 hover:text-frost"
+                    performanceMode === "performance" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
                   )}
                   onClick={() => onChangePerformanceMode("performance")}
                 >

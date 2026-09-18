@@ -162,6 +162,16 @@ it("renders toolbar settings outside the horizontally scrolling toolbar", () => 
   }
 });
 
+it("uses the two-level toolbar shell and local artwork for the drawing tools", () => {
+  mount();
+  const toolbar = screen.getByTestId("board-toolbar");
+
+  expect(toolbar).toHaveAttribute("data-layout", "two-level");
+  for (const tool of ["pen", "line", "eraser", "graph"]) {
+    expect(screen.getByTestId(`board-tool-icon-${tool}`)).toBeInTheDocument();
+  }
+});
+
 it("auto-hides the board toolbar after inactivity and reveals it at the bottom edge", () => {
   vi.useFakeTimers();
   try {

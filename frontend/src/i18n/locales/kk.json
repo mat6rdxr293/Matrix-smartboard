@@ -260,7 +260,10 @@
     "shift": "Регистр",
     "cyrillic": "Кириллица",
     "latin": "Латын",
-    "space": "Бос орын"
+    "space": "Бос орын",
+    "appearance": "Көрініс",
+    "theme_light": "Жарық",
+    "theme_dark": "Қараңғы"
   },
   "defaults": {
     "slides": [

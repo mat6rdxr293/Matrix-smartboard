@@ -24,7 +24,7 @@ export default function LessonHistory({ room, lessons, loading = false, error, o
           <p className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.18em] text-accent"><History size={17} />Архив кабинета</p>
           <h1 className="mt-2 text-3xl font-bold text-frost">История уроков</h1>
         </div>
-        {error && <p role="alert" className="mb-4 text-rose-200">{error}</p>}
+        {error && <p role="alert" className="mb-4 text-danger">{error}</p>}
         {loading ? (
           <div className="glass rounded-2xl p-8 text-center text-frost/55">Загружаем уроки…</div>
         ) : lessons.length === 0 ? (

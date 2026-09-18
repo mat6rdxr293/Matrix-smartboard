@@ -586,18 +586,18 @@ export default function GraphElementView(props: Props) {
         >
           <span className="px-2 text-[10px] font-semibold text-frost/70">{tl("graph")}</span>
           <div className="flex items-center gap-1" onPointerDown={(event) => event.stopPropagation()}>
-            <button data-testid="graph-zoom-in" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(0.5)} aria-label="Приблизить график">
+            <button data-testid="graph-zoom-in" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-graphite" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(0.5)} aria-label="Приблизить график">
               <Plus size={14} />
             </button>
-            <button data-testid="graph-zoom-out" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(2)} aria-label="Отдалить график">
+            <button data-testid="graph-zoom-out" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-graphite" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(2)} aria-label="Отдалить график">
               <Minus size={14} />
             </button>
-            <button data-testid="graph-zoom-reset" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]" style={{ width: controlSize, height: controlSize }} onClick={resetViewport} aria-label="Сбросить масштаб графика">
+            <button data-testid="graph-zoom-reset" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-graphite" style={{ width: controlSize, height: controlSize }} onClick={resetViewport} aria-label="Сбросить масштаб графика">
               <RotateCcw size={13} />
             </button>
             <button
               type="button"
-              className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]"
+              className="flex items-center justify-center rounded-md border border-white/15 bg-graphite"
               style={{ width: controlSize, height: controlSize }}
               onClick={() => setEditorCollapsed((value) => !value)}
               aria-label={editorCollapsed ? tl("expand_graph_editor") : tl("collapse_graph_editor")}
@@ -606,7 +606,7 @@ export default function GraphElementView(props: Props) {
             </button>
             <button
               type="button"
-              className="flex items-center justify-center rounded-md border border-white/15 bg-[#151b24]"
+              className="flex items-center justify-center rounded-md border border-white/15 bg-graphite"
               style={{ width: controlSize, height: controlSize }}
               onClick={() => onDelete(graph)}
               aria-label={tl("delete_graph")}

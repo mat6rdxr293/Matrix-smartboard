@@ -28,7 +28,7 @@ export default function AuthScreen({ loading = false, error, onLogin, onRegister
     <main className="session-shell grid-overlay">
       <section className="glass w-full max-w-lg rounded-[28px] p-7 shadow-soft sm:p-9">
         <div className="mb-7 flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent text-ink"><GraduationCap size={30} /></div>
+          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent text-accentText"><GraduationCap size={30} /></div>
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-accent">Умная доска</p>
             <h1 className="text-2xl font-bold text-frost">Аккаунт школы</h1>
@@ -42,7 +42,7 @@ export default function AuthScreen({ loading = false, error, onLogin, onRegister
               type="button"
               role="tab"
               aria-selected={mode === item}
-              className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition ${mode === item ? "bg-accent text-ink" : "text-frost/65 hover:text-frost"}`}
+              className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition ${mode === item ? "bg-accent text-accentText" : "text-frost/65 hover:text-frost"}`}
               onClick={() => setMode(item)}
             >
               {item === "login" ? "Войти" : "Регистрация"}
@@ -73,7 +73,7 @@ export default function AuthScreen({ loading = false, error, onLogin, onRegister
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
-          {error && <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">{error}</p>}
+          {error && <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-danger">{error}</p>}
           <Button className="h-12 w-full" variant="accent" disabled={loading || !schoolName.trim() || password.length < 8}>
             {mode === "login" ? <LogIn size={18} className="mr-2" /> : <UserPlus size={18} className="mr-2" />}
             {loading ? "Подождите…" : mode === "login" ? "Войти в школу" : "Создать аккаунт школы"}

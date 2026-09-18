@@ -51,7 +51,7 @@ export default function RoomSetupScreen({ school, rooms, loading = false, error,
             <Input className="h-11 flex-1 bg-white/5" placeholder="Номер или название, например 20" value={name} onChange={(event) => setName(event.target.value)} />
             <Button variant="accent" className="h-11" disabled={loading || !name.trim()}><Plus size={17} className="mr-2" />{loading ? "Сохранение…" : "Создать и выбрать"}</Button>
           </div>
-          {error && <p role="alert" className="mt-3 text-sm text-rose-200">{error}</p>}
+          {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
         </form>
       </section>
     </main>
