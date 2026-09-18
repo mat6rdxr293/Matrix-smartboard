@@ -1162,7 +1162,7 @@ export default function BoardCanvas({
         <div
           data-testid="board-toolbar-primary"
           data-toolbar-level="primary"
-          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 [&_button]:min-h-11"
+          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
         >
         <Button variant="outline" size="sm" onClick={onTogglePanels}>
           <Menu size={14} className="mr-2" /> {tl("panels")}
