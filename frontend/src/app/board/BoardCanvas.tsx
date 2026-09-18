@@ -8,7 +8,7 @@ import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Lock, Menu, MessageSquare, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import { Grid3x3, Hand, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 
@@ -169,7 +169,6 @@ export default function BoardCanvas({
   const [dynamicSize, setDynamicSize] = useState({ w: 1600, h: 900 });
   const widthPx = dynamicSize.w;
   const heightPx = dynamicSize.h;
-  const compactToolbar = widthPx < 1750;
   const [zoom, setZoom] = useState(() => {
     if (typeof window === "undefined") return 1;
     const raw = window.localStorage.getItem("board.zoom");
@@ -1164,14 +1163,16 @@ export default function BoardCanvas({
           data-toolbar-level="primary"
           className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
         >
-        <Button variant="outline" size="sm" onClick={onTogglePanels}>
-          <Menu size={14} className="mr-2" /> {tl("panels")}
+        <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("panels")} title={tl("panels")} onClick={onTogglePanels}>
+          <Menu size={26} />
         </Button>
         <div ref={penToolbarAnchorRef} className="relative">
           <Button
             variant={mode === "draw" ? "accent" : "outline"}
             size="sm"
             className="board-tool-button"
+            aria-label={tl("pen")}
+            title={tl("pen")}
             onClick={() => {
               setMode("draw");
               setShowPenSlider(true);
@@ -1181,7 +1182,7 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <BoardToolIcon tool="pen" /> <span className="board-tool-label">{tl("pen")}</span>
+            <BoardToolIcon tool="pen" />
           </Button>
           <BoardToolbarPopover
             anchorRef={penToolbarAnchorRef}
@@ -1279,6 +1280,8 @@ export default function BoardCanvas({
             variant={mode === "line" ? "accent" : "outline"}
             size="sm"
             className="board-tool-button"
+            aria-label={tl("line")}
+            title={tl("line")}
             onClick={() => {
               setMode("line");
               setShowLineSlider(true);
@@ -1289,7 +1292,7 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <BoardToolIcon tool="line" /> <span className="board-tool-label">{tl("line")}</span>
+            <BoardToolIcon tool="line" />
           </Button>
           <BoardToolbarPopover
             anchorRef={lineToolbarAnchorRef}
@@ -1327,6 +1330,7 @@ export default function BoardCanvas({
           size="sm"
           className="board-tool-button"
           aria-label={tl("graph")}
+          title={tl("graph")}
           onClick={() => {
             setMode("graph");
             setShowPenSlider(false);
@@ -1337,11 +1341,14 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <BoardToolIcon tool="graph" /> <span className="board-tool-label">{tl("graph")}</span>
+          <BoardToolIcon tool="graph" />
         </Button>
         <Button
           variant={mode === "pan" ? "accent" : "outline"}
           size="sm"
+          className="board-utility-button"
+          aria-label={tl("moving")}
+          title={tl("moving")}
           disabled={boardLock}
           onClick={() => {
             setMode("pan");
@@ -1353,22 +1360,25 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <Hand size={14} className="mr-2" /> {tl("moving")}
+          <Hand size={27} />
         </Button>
         <Button
           variant={boardLock ? "accent" : "outline"}
           size="sm"
+          className="board-utility-button"
+          aria-label={tl("board_lock")}
           onClick={() => setBoardLock((v) => !v)}
-          title={boardLock ? tl("board_lock_on") : tl("board_lock_off")}
+          title={tl("board_lock")}
         >
-          {boardLock ? <Lock size={14} className="mr-2" /> : <Unlock size={14} className="mr-2" />}
-          {tl("board_lock")}
+          {boardLock ? <Lock size={26} /> : <Unlock size={26} />}
         </Button>
         <div ref={eraserToolbarAnchorRef} className="relative">
           <Button
             variant={mode === "erase" ? "accent" : "outline"}
             size="sm"
             className="board-tool-button"
+            aria-label={tl("eraser")}
+            title={tl("eraser")}
             onClick={() => {
             setMode("erase");
             setShowEraserSlider(true);
@@ -1379,7 +1389,7 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <BoardToolIcon tool="eraser" /> <span className="board-tool-label">{tl("eraser")}</span>
+          <BoardToolIcon tool="eraser" />
         </Button>
           <BoardToolbarPopover
             anchorRef={eraserToolbarAnchorRef}
@@ -1416,12 +1426,15 @@ export default function BoardCanvas({
           <Button
             variant="outline"
             size="sm"
+            className="board-utility-button"
+            aria-label={tl("board")}
+            title={tl("board")}
             onClick={() => {
               setShowBoardSettings((v) => !v);
               setShowAllBg(false);
             }}
           >
-            <Grid3x3 size={14} className="mr-2" /> {tl("board")}
+            <Grid3x3 size={26} />
           </Button>
           <BoardToolbarPopover
             anchorRef={boardToolbarAnchorRef}
@@ -1523,10 +1536,12 @@ export default function BoardCanvas({
                 </AnimatePresence>
           </BoardToolbarPopover>
         </div>
-        <div className="relative flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1">
+        <div className="board-input-mode relative flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 p-1">
           <button
+            aria-label={tl("auto")}
+            title={tl("auto")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
+              "board-segment-button relative z-10 rounded-xl transition",
               inputMode === "auto" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("auto")}
@@ -1538,11 +1553,13 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("auto")}</span>
+            <MousePointer2 size={24} className="relative z-10" />
           </button>
           <button
+            aria-label={tl("mouse")}
+            title={tl("mouse")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
+              "board-segment-button relative z-10 rounded-xl transition",
               inputMode === "mouse" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("mouse")}
@@ -1554,11 +1571,13 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("mouse")}</span>
+            <Mouse size={24} className="relative z-10" />
           </button>
           <button
+            aria-label={tl("touch_mode")}
+            title={tl("touch_mode")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
+              "board-segment-button relative z-10 rounded-xl transition",
               inputMode === "touch" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("touch")}
@@ -1570,28 +1589,29 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("touch_mode")}</span>
+            <Hand size={24} className="relative z-10" />
           </button>
         </div>
 
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")}>
-          <RotateCcw size={14} />
+        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
+          <RotateCcw size={25} />
         </Button>
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")}>
-          <RotateCw size={14} />
+        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
+          <RotateCw size={25} />
         </Button>
         <div ref={clearToolbarAnchorRef} className="relative flex items-center">
           <Button
             variant="ghost"
             size="sm"
-            className="flex h-8 w-8 items-center justify-center p-0"
+            className="board-utility-button"
             aria-label={tl("clear_board")}
+            title={tl("clear_board")}
             onClick={() => {
               setShowClearConfirm((v) => !v);
               setClearSlideValue(0);
             }}
           >
-            <Trash2 size={14} />
+            <Trash2 size={25} />
           </Button>
           <BoardToolbarPopover
             anchorRef={clearToolbarAnchorRef}
@@ -1623,28 +1643,29 @@ export default function BoardCanvas({
                 />
           </BoardToolbarPopover>
         </div>
-        <Button variant="outline" size="sm" onClick={handleSnapshot}>
-          <Save size={14} className="mr-2" /> {tl("snapshot")}
+        <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("snapshot")} title={tl("snapshot")} onClick={handleSnapshot}>
+          <Save size={26} />
         </Button>
         <Button
           variant={ocrEnabled ? "default" : "outline"}
           size="sm"
+          className="board-utility-button"
+          aria-label={tl("recognize")}
+          title={tl("recognize")}
           onClick={handleOcr}
           disabled={!ocrEnabled || loading}
         >
-          <Scan size={14} className="mr-2" /> {tl("recognize")}
+          <Scan size={26} />
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {onToggleTask && (
-            <Button variant={taskOpen ? "accent" : "outline"} size="sm" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
-              <NotebookPen size={16} className={compactToolbar ? "" : "mr-2"} />
-              {!compactToolbar && tl("exercise")}
+            <Button variant={taskOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
+              <NotebookPen size={26} />
             </Button>
           )}
           {onToggleAssistant && (
-            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
-              <MessageSquare size={16} className={compactToolbar ? "" : "mr-2"} />
-              {!compactToolbar && tl("ai_assistant")}
+            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
+              <MessageSquare size={26} />
             </Button>
           )}
         </div>

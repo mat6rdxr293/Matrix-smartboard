@@ -14,13 +14,13 @@ const assets: Record<BoardToolArtwork, string> = {
 };
 
 export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtwork; className?: string }) {
-  const mask = `url(${assets[tool]})`;
   return (
-    <span
+    <img
+      src={assets[tool]}
+      alt=""
       aria-hidden="true"
       data-testid={`board-tool-icon-${tool}`}
-      className={cn("inline-block h-7 w-7 shrink-0 bg-current", className)}
-      style={{ WebkitMaskImage: mask, maskImage: mask, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }}
+      className={cn("pointer-events-none h-12 w-12 shrink-0 object-contain drop-shadow-[0_5px_7px_rgba(0,0,0,0.28)]", className)}
     />
   );
 }

@@ -1,4 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <path d="m18 48-6-6a7 7 0 0 1 0-10l19-19a7 7 0 0 1 10 0l11 11a7 7 0 0 1 0 10L36 50H23a7 7 0 0 1-5-2Z" fill="currentColor"/>
-  <path d="m27 20 21 21M35 50h18" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity=".55"/>
+  <defs>
+    <linearGradient id="front" x1="13" y1="12" x2="47" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffd1cb"/><stop offset=".5" stop-color="#ec9e98"/><stop offset="1" stop-color="#c87572"/>
+    </linearGradient>
+    <linearGradient id="side" x1="47" y1="15" x2="54" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d88482"/><stop offset="1" stop-color="#a55455"/>
+    </linearGradient>
+    <filter id="shadow" x="5" y="5" width="54" height="55"><feDropShadow dx="0" dy="4" stdDeviation="3" flood-opacity=".35"/></filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M13 20c0-5 4-9 9-9h23c4 0 7 3 7 7v28c0 5-4 9-9 9H20c-4 0-7-3-7-7V20Z" fill="url(#front)"/>
+    <path d="M45 11c4 0 7 3 7 7v28c0 5-4 9-9 9h-4c5-2 7-6 7-11V17c0-3-1-5-3-6h2Z" fill="url(#side)" opacity=".85"/>
+    <path d="M18 19c1-3 3-4 7-4h13" stroke="#ffe9e5" stroke-width="4" stroke-linecap="round" opacity=".65"/>
+    <path d="M16 46c8 2 23 2 33-1" stroke="#b46263" stroke-width="2" opacity=".4"/>
+  </g>
 </svg>

@@ -1,5 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <path d="M12 49 51 14" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>
-  <circle cx="12" cy="49" r="5" fill="currentColor"/>
-  <circle cx="51" cy="14" r="5" fill="currentColor"/>
+  <defs>
+    <linearGradient id="metal" x1="15" y1="48" x2="49" y2="14" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17191d"/><stop offset=".24" stop-color="#5d6570"/><stop offset=".5" stop-color="#eef2f6"/><stop offset=".7" stop-color="#747d88"/><stop offset="1" stop-color="#111318"/>
+    </linearGradient>
+    <filter id="shadow" x="4" y="4" width="56" height="56"><feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-opacity=".4"/></filter>
+  </defs>
+  <g filter="url(#shadow)" transform="rotate(-45 32 32)">
+    <rect x="25" y="5" width="14" height="45" rx="6" fill="url(#metal)"/>
+    <rect x="27.5" y="8" width="3" height="35" rx="1.5" fill="#fff" opacity=".65"/>
+    <path d="M25 46h14l-3 10h-8l-3-10Z" fill="#24272d"/>
+    <path d="m28 56 4 6 4-6h-8Z" fill="#090a0c"/>
+  </g>
 </svg>

@@ -176,6 +176,19 @@ it("uses the two-level toolbar shell and local artwork for the drawing tools", (
   }
 });
 
+it("shows large icon-only controls without visible tool captions", () => {
+  mount();
+  const namedButtons = ["Панели", "Ручка", "Линия", "График", "Перемещение", "Лок", "Ластик", "Доска", "Снимок", "Распознать"];
+
+  for (const name of namedButtons) {
+    const button = screen.getByRole("button", { name });
+    expect(button.textContent).toBe("");
+    expect(button).toHaveAttribute("title", name);
+  }
+  expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button");
+  expect(screen.getByRole("button", { name: "Панели" })).toHaveClass("board-utility-button");
+});
+
 it("auto-hides the board toolbar after inactivity and reveals it at the bottom edge", () => {
   vi.useFakeTimers();
   try {
