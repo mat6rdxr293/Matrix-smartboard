@@ -18,6 +18,7 @@ export function drawStrokes(
     ratio?: number;
     gridColor?: string;
     gridStep?: number;
+    pattern?: "grid" | "lines";
   }
 ) {
   const {
@@ -29,6 +30,7 @@ export function drawStrokes(
     ratio = 1,
     gridColor = "rgba(255,255,255,0.06)",
     gridStep = 28,
+    pattern = "grid",
   } =
     options;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -68,12 +70,14 @@ export function drawStrokes(
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1 / zoom;
-    ctx.beginPath();
-    for (let x = startX; x <= right; x += step) {
-      ctx.moveTo(x, top);
-      ctx.lineTo(x, bottom);
+    if (pattern === "grid") {
+      ctx.beginPath();
+      for (let x = startX; x <= right; x += step) {
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.beginPath();
     for (let y = startY; y <= bottom; y += step) {
       ctx.moveTo(left, y);

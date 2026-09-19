@@ -36,15 +36,15 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const board = (initialStrokes: any[] = [], onChangeStrokes = vi.fn()) => (
+const board = (initialStrokes: any[] = [], onChangeStrokes = vi.fn(), boardProfile: "analytical" | "textual" | "universal" = "analytical") => (
   <I18nProvider><BoardCanvas
     onOcrText={vi.fn()} ocrEnabled={false} expanded={false} onTogglePanels={vi.fn()} onStartTimer={vi.fn()}
     initialStrokes={initialStrokes} onChangeStrokes={onChangeStrokes} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
     canUndo={false} canRedo={false} initialPenColor="#FF0000" onChangePenColor={vi.fn()}
-    initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={vi.fn()}
+    initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={vi.fn()} boardProfile={boardProfile}
   /></I18nProvider>
 );
-const mount = (initialStrokes: any[] = [], onChangeStrokes = vi.fn()) => render(board(initialStrokes, onChangeStrokes));
+const mount = (initialStrokes: any[] = [], onChangeStrokes = vi.fn(), boardProfile: "analytical" | "textual" | "universal" = "analytical") => render(board(initialStrokes, onChangeStrokes, boardProfile));
 it("hides graph HUD and editor when the board is pressed outside graph UI", () => {
   const view = mount();
   fireEvent.pointerDown(screen.getByTestId("graph-element-g1"), { pointerId: 1, pointerType: "mouse" });
@@ -168,7 +168,7 @@ it("uses the two-level toolbar shell and local artwork for the drawing tools", (
   const primary = screen.getByTestId("board-toolbar-primary");
 
   expect(toolbar).toHaveAttribute("data-layout", "two-level");
-  expect(primary).toHaveClass("board-toolbar-primary-row", "overflow-x-auto", "[&_button]:min-h-11", "[&_button]:min-w-11");
+  expect(primary).toHaveClass("board-toolbar-primary-row", "overflow-visible", "[&_button]:min-h-11", "[&_button]:min-w-11");
   fireEvent.click(screen.getByRole("button", { name: /ручка|қалам/i }));
   expect(screen.getByTestId("board-toolbar-popover-pen")).toHaveAttribute("data-toolbar-level", "context");
   for (const tool of ["pen", "line", "eraser", "graph"]) {
@@ -185,24 +185,22 @@ it("shows large icon-only controls without visible tool captions", () => {
     expect(button.textContent).toBe("");
     expect(button).toHaveAttribute("title", name);
   }
-  expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button", "board-tool-unframed");
+  expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button", "board-tool-embedded", "board-tool-unframed");
+  expect(screen.getByRole("button", { name: "Линия" })).toHaveClass("board-tool-embedded");
+  expect(screen.getByRole("button", { name: "Ластик" })).toHaveClass("board-tool-embedded");
+  expect(screen.getByRole("button", { name: "График" })).not.toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "Панели" })).toHaveClass("board-utility-button");
 });
 
-it("tilts a large tool toward the pointer and resets it when the pointer leaves", () => {
+it("keeps tool hover motion CSS-driven instead of pointer-driven parallax", () => {
   mount();
   const pen = screen.getByRole("button", { name: "Ручка" });
-  vi.spyOn(pen, "getBoundingClientRect").mockReturnValue({
-    left: 0, top: 0, width: 68, height: 68, right: 68, bottom: 68, x: 0, y: 0, toJSON: () => ({}),
-  });
 
   fireEvent.pointerMove(pen, { pointerId: 94, pointerType: "mouse", clientX: 58, clientY: 12 });
-  expect(pen.style.getPropertyValue("--tool-rotate-x")).not.toBe("0deg");
-  expect(pen.style.getPropertyValue("--tool-rotate-y")).not.toBe("0deg");
 
-  fireEvent.pointerLeave(pen, { pointerId: 94, pointerType: "mouse" });
-  expect(pen.style.getPropertyValue("--tool-rotate-x")).toBe("0deg");
-  expect(pen.style.getPropertyValue("--tool-rotate-y")).toBe("0deg");
+  expect(pen.style.getPropertyValue("--tool-rotate-x")).toBe("");
+  expect(pen.style.getPropertyValue("--tool-rotate-y")).toBe("");
+  expect(pen.querySelector('[data-tool-artwork="pen"]')).toHaveClass("board-tool-art");
 });
 
 it("auto-hides the board toolbar after inactivity and reveals it at the bottom edge", () => {
@@ -249,10 +247,11 @@ it("restarts toolbar auto-hide when a tool changes and keeps it visible while se
   }
 });
 
-it("overlays the toolbar at the bottom without reserving a bottom chin", () => {
+it("floats the toolbar over the board without reserving a bottom chin", () => {
   mount();
   expect(screen.getByTestId("board-canvas-root")).toHaveClass("pb-0");
-  expect(screen.getByTestId("board-toolbar")).toHaveClass("absolute", "bottom-0");
+  expect(screen.getByTestId("board-toolbar")).toHaveClass("absolute", "board-toolbar-dock");
+  expect(screen.getByTestId("board-toolbar")).not.toHaveClass("bottom-0");
 });
 
 it("uses a bottom-edge tap only to reveal a hidden toolbar, without drawing", () => {
@@ -277,4 +276,26 @@ it("uses a bottom-edge tap only to reveal a hidden toolbar, without drawing", ()
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("uses ruled paper and humanities tools for the textual board", () => {
+  vi.mocked(drawStrokes).mockClear();
+  mount([], vi.fn(), "textual");
+
+  expect(screen.queryByRole("button", { name: /график|график құралы/i })).not.toBeInTheDocument();
+  expect(screen.queryByTestId("graph-element-g1")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Маркер" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Подчёркивание" })).toBeInTheDocument();
+  expect(vi.mocked(drawStrokes)).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.any(Array),
+    expect.objectContaining({ pattern: "lines" }),
+  );
+});
+
+it("shows both graph and humanities tools on the universal board", () => {
+  mount([], vi.fn(), "universal");
+  expect(screen.getByRole("button", { name: /график|график құралы/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Маркер" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Подчёркивание" })).toBeInTheDocument();
 });

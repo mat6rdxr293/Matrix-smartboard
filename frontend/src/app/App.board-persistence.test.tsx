@@ -51,7 +51,7 @@ const deferred = <T,>() => {
 };
 
 const mount = (onComplete = vi.fn()) => render(
-  <ThemeProvider><I18nProvider><App school={school} room={room} lesson={lesson as any}
+  <ThemeProvider><I18nProvider><App school={school} room={room} lesson={lesson as any} boardProfile="analytical"
     onComplete={onComplete} onOpenHistory={vi.fn()} onChangeRoom={vi.fn()} /></I18nProvider></ThemeProvider>
 );
 

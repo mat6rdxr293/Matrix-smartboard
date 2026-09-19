@@ -7,37 +7,48 @@ function PenArtwork({ id }: { id: string }) {
   return (
     <>
       <defs>
-        <linearGradient id={`${id}-body`} x1="18" y1="8" x2="46" y2="52" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#ffffff" /><stop offset=".42" stopColor="#dfe4ea" /><stop offset=".72" stopColor="#ffffff" /><stop offset="1" stopColor="#aeb7c2" />
+        <linearGradient id={`${id}-body`} x1="23" y1="17" x2="41" y2="60" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#ffffff" />
+          <stop offset=".36" stopColor="#eef2f6" />
+          <stop offset=".72" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#b9c3ce" />
         </linearGradient>
-        <linearGradient id={`${id}-tip`} x1="26" y1="43" x2="38" y2="61" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#20242a" /><stop offset="1" stopColor="#050607" />
+        <linearGradient id={`${id}-collar`} x1="24" y1="12" x2="40" y2="23" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f8fafc" />
+          <stop offset=".48" stopColor="#c2cbd5" />
+          <stop offset="1" stopColor="#e8edf2" />
         </linearGradient>
       </defs>
       <g>
-        <path d="M22 13c0-5 4-9 10-9s10 4 10 9l-2 34H24L22 13Z" fill={`url(#${id}-body)`} />
-        <path d="M25 11c2-3 5-4 8-4" stroke="#fff" strokeWidth="3" strokeLinecap="round" opacity=".85" />
-        <path d="M24 43h16l-2 8H26l-2-8Z" fill="#c7ced7" />
-        <path d="m27 50 5 11 5-11H27Z" fill={`url(#${id}-tip)`} />
-        <path d="M32 61v-6" stroke="#050607" strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M27.3 14.5h9.4L34 3.8h-4l-2.7 10.7Z" fill="#23272d" />
+        <path d="M30.2 5.8h3.6L32 1.8l-1.8 4Z" fill="#050607" />
+        <path d="M24.3 14h15.4l-1.7 10.8H26L24.3 14Z" fill={`url(#${id}-collar)`} />
+        <rect x="23.5" y="21.5" width="17" height="40" rx="8.5" fill={`url(#${id}-body)`} />
+        <path d="M27 29c1.8-2.1 4-3.1 6.7-3.1" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" opacity=".9" />
       </g>
     </>
   );
 }
 
-function LineArtwork({ id }: { id: string }) {
+function RulerArtwork({ id }: { id: string }) {
   return (
     <>
       <defs>
-        <linearGradient id={`${id}-metal`} x1="15" y1="48" x2="49" y2="14" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#17191d" /><stop offset=".24" stopColor="#5d6570" /><stop offset=".5" stopColor="#eef2f6" /><stop offset=".7" stopColor="#747d88" /><stop offset="1" stopColor="#111318" />
+        <linearGradient id={`${id}-ruler`} x1="20" y1="4" x2="44" y2="60" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f6f9fc" />
+          <stop offset=".45" stopColor="#dce4ed" />
+          <stop offset="1" stopColor="#bac6d3" />
+        </linearGradient>
+        <linearGradient id={`${id}-edge`} x1="39" y1="5" x2="44" y2="60" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#c8d3df" />
+          <stop offset="1" stopColor="#94a3b3" />
         </linearGradient>
       </defs>
-      <g transform="rotate(-45 32 32)">
-        <rect x="25" y="5" width="14" height="45" rx="6" fill={`url(#${id}-metal)`} />
-        <rect x="27.5" y="8" width="3" height="35" rx="1.5" fill="#fff" opacity=".65" />
-        <path d="M25 46h14l-3 10h-8l-3-10Z" fill="#24272d" />
-        <path d="m28 56 4 6 4-6h-8Z" fill="#090a0c" />
+      <g>
+        <rect x="20" y="3" width="24" height="58" rx="5.5" fill={`url(#${id}-ruler)`} />
+        <path d="M40 5.5h1.4c1.4 0 2.6 1.2 2.6 2.6v47.8c0 1.4-1.2 2.6-2.6 2.6H40V5.5Z" fill={`url(#${id}-edge)`} opacity=".8" />
+        <path d="M24 11h10M24 17h6M24 23h10M24 29h6M24 35h10M24 41h6M24 47h10M24 53h6" stroke="#5c6978" strokeWidth="1.8" strokeLinecap="round" opacity=".88" />
+        <path d="M28.5 7.5v49" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity=".5" />
       </g>
     </>
   );
@@ -47,18 +58,22 @@ function EraserArtwork({ id }: { id: string }) {
   return (
     <>
       <defs>
-        <linearGradient id={`${id}-front`} x1="13" y1="12" x2="47" y2="54" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#ffd1cb" /><stop offset=".5" stopColor="#ec9e98" /><stop offset="1" stopColor="#c87572" />
+        <linearGradient id={`${id}-front`} x1="14" y1="7" x2="49" y2="57" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#ffc8c2" />
+          <stop offset=".48" stopColor="#ee9c98" />
+          <stop offset="1" stopColor="#cf7775" />
         </linearGradient>
-        <linearGradient id={`${id}-side`} x1="47" y1="15" x2="54" y2="49" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#d88482" /><stop offset="1" stopColor="#a55455" />
+        <linearGradient id={`${id}-side`} x1="43" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#dc8b88" />
+          <stop offset="1" stopColor="#af595c" />
         </linearGradient>
       </defs>
       <g>
-        <path d="M13 20c0-5 4-9 9-9h23c4 0 7 3 7 7v28c0 5-4 9-9 9H20c-4 0-7-3-7-7V20Z" fill={`url(#${id}-front)`} />
-        <path d="M45 11c4 0 7 3 7 7v28c0 5-4 9-9 9h-4c5-2 7-6 7-11V17c0-3-1-5-3-6h2Z" fill={`url(#${id}-side)`} opacity=".85" />
-        <path d="M18 19c1-3 3-4 7-4h13" stroke="#ffe9e5" strokeWidth="4" strokeLinecap="round" opacity=".65" />
-        <path d="M16 46c8 2 23 2 33-1" stroke="#b46263" strokeWidth="2" opacity=".4" />
+        <rect x="12.5" y="7.5" width="39" height="49" rx="10.5" fill={`url(#${id}-front)`} />
+        <path d="M43.5 7.5c5 0 8 3.6 8 8.5v29c0 6.8-4.2 11.5-10.8 11.5h-4.1c5-2.4 6.8-6.2 6.8-11.2V15c0-3.2-.8-5.5-2.8-7.5h2.9Z" fill={`url(#${id}-side)`} opacity=".92" />
+        <path d="M18.2 15.8c1.5-2.4 3.9-3.5 7.1-3.5h11.4" stroke="#ffe7e4" strokeWidth="3.6" strokeLinecap="round" opacity=".82" />
+        <path d="M16 20.5c8.8-2.2 22.7-2.2 33.2.6" stroke="#fff0ed" strokeWidth="1.8" strokeLinecap="round" opacity=".34" />
+        <path d="M16 47.5c8.8 2.5 22.7 2.6 33.2-.8" stroke="#b75f61" strokeWidth="1.9" strokeLinecap="round" opacity=".38" />
       </g>
     </>
   );
@@ -68,19 +83,23 @@ function GraphArtwork({ id }: { id: string }) {
   return (
     <>
       <defs>
-        <linearGradient id={`${id}-card`} x1="8" y1="7" x2="56" y2="57" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#f8fbff" /><stop offset="1" stopColor="#cdd8e8" />
+        <linearGradient id={`${id}-card`} x1="7" y1="6" x2="57" y2="58" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f4f8fd" />
+          <stop offset=".52" stopColor="#dce5f0" />
+          <stop offset="1" stopColor="#c5d1df" />
         </linearGradient>
-        <linearGradient id={`${id}-curve`} x1="13" y1="43" x2="52" y2="22" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#7c4dff" /><stop offset="1" stopColor="#3bbbea" />
+        <linearGradient id={`${id}-curve`} x1="13" y1="44" x2="52" y2="20" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#8d4ff0" />
+          <stop offset=".58" stopColor="#6e4eef" />
+          <stop offset="1" stopColor="#4b63ed" />
         </linearGradient>
       </defs>
       <g>
-        <rect x="7" y="7" width="50" height="50" rx="11" fill={`url(#${id}-card)`} />
-        <path d="M17 14v36M11 44h41" stroke="#536174" strokeWidth="2.5" strokeLinecap="round" />
-        <path d="M25 14v36M33 14v36M41 14v36M49 14v36M11 20h41M11 28h41M11 36h41" stroke="#8795a8" strokeWidth="1" opacity=".35" />
-        <path d="M12 42c8 0 10-20 18-20s9 20 21 20" stroke={`url(#${id}-curve)`} strokeWidth="4.5" strokeLinecap="round" fill="none" />
-        <circle cx="30" cy="22" r="3" fill="#7248ed" />
+        <rect x="6.5" y="6.5" width="51" height="51" rx="12.5" fill={`url(#${id}-card)`} />
+        <path d="M18 13.5v37M13.5 45h38.5" stroke="#526175" strokeWidth="2.2" strokeLinecap="round" opacity=".82" />
+        <path d="M26 13.5v37M34 13.5v37M42 13.5v37M50 13.5v37M13.5 21h38.5M13.5 29h38.5M13.5 37h38.5" stroke="#8190a3" strokeWidth=".95" opacity=".34" />
+        <path d="M13.5 43c7.8 0 10.1-20.3 18.1-20.3 7.7 0 8.9 20.3 20.1 20.3" stroke={`url(#${id}-curve)`} strokeWidth="4.5" strokeLinecap="round" fill="none" />
+        <circle cx="31.6" cy="22.7" r="2.8" fill="#754ce8" />
       </g>
     </>
   );
@@ -88,20 +107,20 @@ function GraphArtwork({ id }: { id: string }) {
 
 const artwork: Record<BoardToolArtwork, (props: { id: string }) => ReactNode> = {
   pen: PenArtwork,
-  line: LineArtwork,
+  line: RulerArtwork,
   eraser: EraserArtwork,
   graph: GraphArtwork,
 };
 
 export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtwork; className?: string }) {
-  const gradientId = `board-tool-${tool}-${useId().replaceAll(":", "")}`;
+  const gradientId = `board-tool-${tool}-${useId().replace(/:/g, "")}`;
   const Artwork = artwork[tool];
 
   return (
     <span
       aria-hidden="true"
-      data-parallax-art="true"
-      className={cn("board-tool-art pointer-events-none inline-flex h-14 w-14 shrink-0", className)}
+      data-tool-artwork={tool}
+      className={cn("board-tool-art pointer-events-none inline-flex h-16 w-16 shrink-0", className)}
     >
       <svg
         viewBox="0 0 64 64"
@@ -109,7 +128,7 @@ export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtw
         aria-hidden="true"
         focusable="false"
         data-testid={`board-tool-icon-${tool}`}
-        className="h-14 w-14"
+        className="h-16 w-16"
       >
         <Artwork id={gradientId} />
       </svg>

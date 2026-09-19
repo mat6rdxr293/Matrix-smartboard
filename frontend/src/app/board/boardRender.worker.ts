@@ -11,7 +11,8 @@ type RenderPayload = {
   ratio: number;
   gridColor: string;
   gridStep: number;
-  mode: "draw" | "erase" | "line" | "pan";
+  pattern: "grid" | "lines";
+  mode: "draw" | "erase" | "line" | "pan" | "graph";
   eraserWidth: number;
   isDarkBg: boolean;
   lowPowerMode: boolean;
@@ -49,6 +50,7 @@ const render = (payload: RenderPayload) => {
     ratio: payload.ratio,
     gridColor: payload.gridColor,
     gridStep: payload.gridStep,
+    pattern: payload.pattern,
   });
 
   if (!payload.lowPowerMode && payload.mode === "erase" && payload.eraserPreview) {

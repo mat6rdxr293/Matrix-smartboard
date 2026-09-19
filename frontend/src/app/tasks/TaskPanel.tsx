@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import type { Task } from "@/app/tasks/tasks";
 import type { AssistantMessage } from "@/app/ai/AIAssistant";
 import { callAi } from "@/app/ai/api";
@@ -169,66 +168,77 @@ export default function TaskPanel({
   };
 
   return (
-    <div className="glass flex h-full flex-col rounded-2xl p-4 shadow-soft">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-frost/50">{tl("task_id", { id: task.id })}</div>
-          <div className="text-lg font-semibold">
-            <MathText text={task.title} />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-white/10 px-1 pb-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[11px] font-medium text-frost/40">{tl("task_id", { id: task.id })}</div>
+            <div className="mt-1 text-[18px] font-semibold leading-tight tracking-[-0.02em] text-frost">
+              <MathText text={task.title} />
+            </div>
+          </div>
+          <div className="mt-0.5 flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-accent">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            {tl("active")}
           </div>
         </div>
-        <Badge className="bg-accent/20 text-accent">{tl("active")}</Badge>
+        <div className="mt-4 text-[14px] leading-6 text-frost/78">
+          <MathText text={task.problem} className="text-frost/90" />
+        </div>
       </div>
-      <div className="mb-3 text-sm text-frost/80">
-        <MathText text={task.problem} className="text-frost/90" />
-      </div>
-      <div className="flex flex-1 flex-col space-y-2 min-h-0">
-        <div className="flex items-center justify-between">
-          <div className="text-xs uppercase tracking-wider text-frost/50">{tl("student_solution")}</div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
+
+      <div className="flex min-h-0 flex-1 flex-col pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-medium text-frost/45">{tl("student_solution")}</div>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-frost/45 transition hover:bg-white/[0.05] hover:text-frost disabled:opacity-35"
             onClick={() => setAttempt("")}
             disabled={!attempt.trim() || loading !== null}
           >
-            <X size={14} className="mr-1" />
+            <X size={13} />
             {tl("clear_field")}
-          </Button>
+          </button>
         </div>
+
         <Textarea
           value={attempt}
           onChange={(e) => setAttempt(e.target.value)}
           placeholder={tl("enter_solution_or_ideas")}
-          className="flex-1 min-h-[120px]"
+          className="min-h-[150px] flex-1 resize-none rounded-[14px] border-white/10 bg-white/[0.025] p-4 text-[14px] leading-6 shadow-none focus:ring-1 focus:ring-accent/45"
         />
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <Button
-          variant="outline"
-          onClick={() => handleAsk("hint")}
-          disabled={loading !== null}
-        >
-          {tl("hint")}
-        </Button>
-        <Button
-          variant="default"
-          onClick={() => handleAsk("check")}
-          disabled={loading !== null}
-        >
-          {tl("check_solution")}
-        </Button>
-        <Button
-          variant="accent"
-          onClick={() => handleAsk("solution")}
-          disabled={loading !== null}
-        >
-          {tl("full_solution")}
-        </Button>
-      </div>
-      <div className="mt-2 min-h-[16px] text-xs">
-        {loading && <div className="thinking-shimmer">{tl("thinking")}</div>}
-        {error && <div className="text-ember">{error}</div>}
+
+        <div className="mt-4 grid grid-cols-[0.9fr_1.2fr_1fr] gap-2">
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl border-white/12 bg-transparent px-3 text-[12px] font-medium"
+            onClick={() => handleAsk("hint")}
+            disabled={loading !== null}
+          >
+            {tl("hint")}
+          </Button>
+          <Button
+            variant="default"
+            className="h-10 rounded-xl px-3 text-[12px] font-semibold"
+            onClick={() => handleAsk("check")}
+            disabled={loading !== null}
+          >
+            {tl("check_solution")}
+          </Button>
+          <Button
+            variant="ghost"
+            className="h-10 rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[12px] font-medium"
+            onClick={() => handleAsk("solution")}
+            disabled={loading !== null}
+          >
+            {tl("full_solution")}
+          </Button>
+        </div>
+
+        <div className="mt-2 min-h-[16px] text-[11px]">
+          {loading && <div className="thinking-shimmer">{tl("thinking")}</div>}
+          {error && <div className="text-ember">{error}</div>}
+        </div>
       </div>
     </div>
   );

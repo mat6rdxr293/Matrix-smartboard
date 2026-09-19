@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
@@ -8,9 +8,10 @@ import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import { Grid3x3, Hand, Highlighter, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
+import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
 
@@ -60,21 +61,6 @@ const BG_EXTRA = [
 ];
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
-function updateToolParallax(event: ReactPointerEvent<HTMLButtonElement>) {
-  if (event.pointerType === "touch") return;
-  const bounds = event.currentTarget.getBoundingClientRect();
-  if (!bounds.width || !bounds.height) return;
-  const relativeX = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-  const relativeY = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-  event.currentTarget.style.setProperty("--tool-rotate-x", `${((0.5 - relativeY) * 12).toFixed(2)}deg`);
-  event.currentTarget.style.setProperty("--tool-rotate-y", `${((relativeX - 0.5) * 14).toFixed(2)}deg`);
-}
-
-function resetToolParallax(event: ReactPointerEvent<HTMLButtonElement>) {
-  event.currentTarget.style.setProperty("--tool-rotate-x", "0deg");
-  event.currentTarget.style.setProperty("--tool-rotate-y", "0deg");
-}
-
 export default function BoardCanvas({
   onOcrText,
   ocrEnabled,
@@ -98,6 +84,7 @@ export default function BoardCanvas({
   assistantOpen,
   onToggleTask,
   onToggleAssistant,
+  boardProfile,
 }: {
   onOcrText: (text: string) => void;
   ocrEnabled: boolean;
@@ -121,8 +108,10 @@ export default function BoardCanvas({
   assistantOpen?: boolean;
   onToggleTask?: () => void;
   onToggleAssistant?: () => void;
+  boardProfile: BoardProfile;
 }) {
   const { tl } = useI18n();
+  const profileConfig = getBoardProfileConfig(boardProfile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -150,6 +139,7 @@ export default function BoardCanvas({
   const [width, setWidth] = useState(4);
   const [eraserWidth, setEraserWidth] = useState(16);
   const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph">("draw");
+  const [humanitiesPreset, setHumanitiesPreset] = useState<"highlight" | "underline" | null>(null);
   const [grid, setGrid] = useState(true);
   const [loading, setLoading] = useState(false);
   const [bg, setBg] = useState(initialBgColor);
@@ -309,7 +299,7 @@ export default function BoardCanvas({
   const minPointDistanceSq = lowPowerMode ? 1.4 : 0.64;
   const maxPointsPerStroke = lowPowerMode ? 1200 : 2200;
   const renderMinDeltaMs = lowPowerMode ? 60 : 16;
-  const gridStep = lowPowerMode ? 40 : 28;
+  const gridStep = profileConfig.backgroundPattern === "lines" ? (lowPowerMode ? 48 : 36) : (lowPowerMode ? 40 : 28);
   const lastRenderTsRef = useRef(0);
   const supportsOffscreenWorker = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -360,8 +350,6 @@ export default function BoardCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.style.width = `${widthPx}px`;
-    canvas.style.height = `${heightPx}px`;
     if (!workerEnabledRef.current) {
       const ratio = renderRatio;
       canvas.width = widthPx * ratio;
@@ -510,6 +498,7 @@ export default function BoardCanvas({
           ratio: renderRatio,
           gridColor,
           gridStep,
+          pattern: profileConfig.backgroundPattern,
           mode,
           eraserWidth,
           isDarkBg,
@@ -536,6 +525,7 @@ export default function BoardCanvas({
       ratio: renderRatio,
       gridColor,
       gridStep,
+      pattern: profileConfig.backgroundPattern,
     });
     const eraserPreview = eraserPreviewRef.current;
     if (!lowPowerMode && mode === "erase" && eraserPreview) {
@@ -612,10 +602,11 @@ export default function BoardCanvas({
   };
 
   const startStroke = (x: number, y: number) => {
-    const w = mode === "erase" ? eraserWidth : width;
+    const isHighlighter = humanitiesPreset === "highlight";
+    const w = mode === "erase" ? eraserWidth : isHighlighter ? 14 : width;
     strokesRef.current.push({
       points: [{ x, y }],
-      color,
+      color: isHighlighter ? "#F6D365A6" : color,
       width: w,
       mode: mode === "erase" ? "erase" : "draw",
     });
@@ -740,7 +731,7 @@ export default function BoardCanvas({
     }
     if (mode === "line") {
       lineStartRef.current = { x, y };
-      linePreviewRef.current = { points: [{ x, y }, { x, y }], color, width, mode: "draw" };
+      linePreviewRef.current = { points: [{ x, y }, { x, y }], color, width: humanitiesPreset === "underline" ? 3 : width, mode: "draw" };
       scheduleRender();
       return;
     }
@@ -819,7 +810,7 @@ export default function BoardCanvas({
     if (!points.length) return;
     const last = points[points.length - 1];
     if (mode === "line" && lineStartRef.current) {
-      linePreviewRef.current = { points: [lineStartRef.current, { x: last.x, y: last.y }], color, width, mode: "draw" };
+      linePreviewRef.current = { points: [lineStartRef.current, { x: last.x, y: last.y }], color, width: humanitiesPreset === "underline" ? 3 : width, mode: "draw" };
       scheduleRender();
       return;
     }
@@ -1101,19 +1092,15 @@ export default function BoardCanvas({
   return (
     <div
       data-testid="board-canvas-root"
-      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-2 pt-2" : "px-4 pt-4")}
+      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-1 pt-2" : "px-2 pt-4")}
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >
       <div ref={areaRef} className="relative flex-1 min-h-0 overflow-hidden">
-        <div className="absolute inset-0 flex items-stretch justify-stretch">
+        <div className="absolute inset-0">
           <div
-            className="relative rounded-2xl border border-white/10 overflow-hidden"
-            style={{
-              width: `${widthPx}px`,
-              height: `${heightPx}px`,
-              backgroundColor: bg,
-            }}
+            className="absolute inset-0 rounded-2xl border border-white/10 overflow-hidden"
+            style={{ backgroundColor: bg }}
           >
             <canvas
               ref={canvasRef}
@@ -1136,7 +1123,7 @@ export default function BoardCanvas({
                 transformOrigin: "0 0",
               }}
             >
-              {graphs.map((graph) => (
+              {profileConfig.graphTools && graphs.map((graph) => (
                 <GraphElementView
                   key={graph.id}
                   graph={graph}
@@ -1166,9 +1153,8 @@ export default function BoardCanvas({
         data-layout="two-level"
         data-visible={toolbarVisible ? "true" : "false"}
         className={cn(
-          "board-toolbar-dock absolute bottom-0 z-40 rounded-t-[22px] p-1.5 transition-[transform,opacity] duration-200",
-          expanded ? "left-2 right-2" : "left-4 right-4",
-          toolbarVisible ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none",
+          "board-toolbar-dock absolute z-40 rounded-[22px] px-1.5 pt-1.5 pb-0 transition-[transform,opacity] duration-200",
+          toolbarVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         )}
         onPointerMove={revealToolbar}
         onPointerDown={revealToolbar}
@@ -1176,22 +1162,21 @@ export default function BoardCanvas({
         <div
           data-testid="board-toolbar-primary"
           data-toolbar-level="primary"
-          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
+          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-visible [&>*]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
         >
         <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("panels")} title={tl("panels")} onClick={onTogglePanels}>
           <Menu size={26} />
         </Button>
-        <div ref={penToolbarAnchorRef} className="relative">
+        <div ref={penToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
             variant="ghost"
             size="sm"
-            className={cn("board-tool-button board-tool-unframed", mode === "draw" && "is-active")}
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "draw" && !humanitiesPreset && "is-active")}
             aria-label={tl("pen")}
             aria-pressed={mode === "draw"}
             title={tl("pen")}
-            onPointerMove={updateToolParallax}
-            onPointerLeave={resetToolParallax}
             onClick={() => {
+              setHumanitiesPreset(null);
               setMode("draw");
               setShowPenSlider(true);
               setShowPenPalette(true);
@@ -1293,17 +1278,16 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
-        <div ref={lineToolbarAnchorRef} className="relative">
+        <div ref={lineToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
             variant="ghost"
             size="sm"
-            className={cn("board-tool-button board-tool-unframed", mode === "line" && "is-active")}
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "line" && !humanitiesPreset && "is-active")}
             aria-label={tl("line")}
             aria-pressed={mode === "line"}
             title={tl("line")}
-            onPointerMove={updateToolParallax}
-            onPointerLeave={resetToolParallax}
             onClick={() => {
+              setHumanitiesPreset(null);
               setMode("line");
               setShowLineSlider(true);
               setShowPenPalette(false);
@@ -1346,67 +1330,16 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn("board-tool-button board-tool-unframed", mode === "graph" && "is-active")}
-          aria-label={tl("graph")}
-          aria-pressed={mode === "graph"}
-          title={tl("graph")}
-          onPointerMove={updateToolParallax}
-          onPointerLeave={resetToolParallax}
-          onClick={() => {
-            setMode("graph");
-            setShowPenSlider(false);
-            setShowPenPalette(false);
-            setShowAllPens(false);
-            setShowEraserSlider(false);
-            setShowLineSlider(false);
-            closeBoardSettings();
-          }}
-        >
-          <BoardToolIcon tool="graph" />
-        </Button>
-        <Button
-          variant={mode === "pan" ? "accent" : "outline"}
-          size="sm"
-          className="board-utility-button"
-          aria-label={tl("moving")}
-          title={tl("moving")}
-          disabled={boardLock}
-          onClick={() => {
-            setMode("pan");
-            setShowPenSlider(false);
-            setShowPenPalette(false);
-            setShowAllPens(false);
-            setShowEraserSlider(false);
-            setShowLineSlider(false);
-            closeBoardSettings();
-          }}
-        >
-          <Hand size={27} />
-        </Button>
-        <Button
-          variant={boardLock ? "accent" : "outline"}
-          size="sm"
-          className="board-utility-button"
-          aria-label={tl("board_lock")}
-          onClick={() => setBoardLock((v) => !v)}
-          title={tl("board_lock")}
-        >
-          {boardLock ? <Lock size={26} /> : <Unlock size={26} />}
-        </Button>
-        <div ref={eraserToolbarAnchorRef} className="relative">
+        <div ref={eraserToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
             variant="ghost"
             size="sm"
-            className={cn("board-tool-button board-tool-unframed", mode === "erase" && "is-active")}
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "erase" && "is-active")}
             aria-label={tl("eraser")}
             aria-pressed={mode === "erase"}
             title={tl("eraser")}
-            onPointerMove={updateToolParallax}
-            onPointerLeave={resetToolParallax}
             onClick={() => {
+            setHumanitiesPreset(null);
             setMode("erase");
             setShowEraserSlider(true);
             setShowPenPalette(false);
@@ -1449,6 +1382,98 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
+        {profileConfig.humanitiesTools && (
+          <>
+            <Button
+              variant={humanitiesPreset === "highlight" ? "accent" : "outline"}
+              size="sm"
+              className="board-utility-button"
+              aria-label="Маркер"
+              title="Маркер"
+              onClick={() => {
+                setHumanitiesPreset("highlight");
+                setMode("draw");
+                setShowPenSlider(false);
+                setShowPenPalette(false);
+                setShowAllPens(false);
+                setShowLineSlider(false);
+                closeBoardSettings();
+              }}
+            >
+              <Highlighter size={25} />
+            </Button>
+            <Button
+              variant={humanitiesPreset === "underline" ? "accent" : "outline"}
+              size="sm"
+              className="board-utility-button"
+              aria-label="Подчёркивание"
+              title="Подчёркивание"
+              onClick={() => {
+                setHumanitiesPreset("underline");
+                setMode("line");
+                setShowLineSlider(false);
+                setShowPenPalette(false);
+                setShowAllPens(false);
+                setShowPenSlider(false);
+                closeBoardSettings();
+              }}
+            >
+              <Underline size={25} />
+            </Button>
+          </>
+        )}
+        {profileConfig.graphTools && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("board-tool-button board-tool-unframed", mode === "graph" && "is-active")}
+            aria-label={tl("graph")}
+            aria-pressed={mode === "graph"}
+            title={tl("graph")}
+            onClick={() => {
+              setHumanitiesPreset(null);
+              setMode("graph");
+              setShowPenSlider(false);
+              setShowPenPalette(false);
+              setShowAllPens(false);
+              setShowEraserSlider(false);
+              setShowLineSlider(false);
+              closeBoardSettings();
+            }}
+          >
+            <BoardToolIcon tool="graph" />
+          </Button>
+        )}
+        <Button
+          variant={mode === "pan" ? "accent" : "outline"}
+          size="sm"
+          className="board-utility-button"
+          aria-label={tl("moving")}
+          title={tl("moving")}
+          disabled={boardLock}
+          onClick={() => {
+            setHumanitiesPreset(null);
+            setMode("pan");
+            setShowPenSlider(false);
+            setShowPenPalette(false);
+            setShowAllPens(false);
+            setShowEraserSlider(false);
+            setShowLineSlider(false);
+            closeBoardSettings();
+          }}
+        >
+          <Hand size={27} />
+        </Button>
+        <Button
+          variant={boardLock ? "accent" : "outline"}
+          size="sm"
+          className="board-utility-button"
+          aria-label={tl("board_lock")}
+          onClick={() => setBoardLock((v) => !v)}
+          title={tl("board_lock")}
+        >
+          {boardLock ? <Lock size={26} /> : <Unlock size={26} />}
+        </Button>
         <div ref={boardToolbarAnchorRef} className="relative">
           <Button
             variant="outline"
@@ -1470,9 +1495,11 @@ export default function BoardCanvas({
             className="surface-popover rounded-xl px-3 py-2 shadow-glass backdrop-blur"
           >
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs text-frost/60">{tl("grid")}</span>
+                  <span className="text-xs text-frost/60">
+                    {profileConfig.backgroundPattern === "lines" ? "Линии" : tl("grid")}
+                  </span>
                   <Button variant={grid ? "accent" : "outline"} size="sm" onClick={() => setGrid((v) => !v)}>
-                    {grid ? tl("grid_on") : tl("grid_off")}
+                    {grid ? "Вкл" : "Выкл"}
                   </Button>
                 </div>
                 <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
