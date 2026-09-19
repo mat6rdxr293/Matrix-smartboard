@@ -41,11 +41,8 @@ export default function AIAssistant({ messages, onContinue, canContinue, loading
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 items-center justify-between border-b border-white/10 px-1 pb-2">
-        <div className="text-[11px] font-medium text-frost/40">
-          {messages.length > 0 ? `${messages.length} ${tl("history").toLowerCase()}` : tl("history")}
-        </div>
-        {onContinue && canContinue && (
+      {onContinue && canContinue && (
+        <div className="flex justify-end pb-2">
           <Button
             size="sm"
             variant="ghost"
@@ -55,10 +52,10 @@ export default function AIAssistant({ messages, onContinue, canContinue, loading
           >
             {tl("continue")}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="scrollbar-hide min-h-0 flex-1 overflow-auto pt-3">
+      <div className="scrollbar-hide min-h-0 flex-1 overflow-auto">
         {messages.length === 0 ? (
           <div className="flex h-full min-h-[220px] items-center justify-center px-6">
             <div className="max-w-[280px] text-center">

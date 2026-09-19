@@ -170,16 +170,10 @@ export default function TaskPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-white/10 px-1 pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-[11px] font-medium text-frost/40">{tl("task_id", { id: task.id })}</div>
-            <div className="mt-1 text-[18px] font-semibold leading-tight tracking-[-0.02em] text-frost">
-              <MathText text={task.title} />
-            </div>
-          </div>
-          <div className="mt-0.5 flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-accent">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            {tl("active")}
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium text-frost/40">{tl("task_id", { id: task.id })}</div>
+          <div className="mt-1 text-[18px] font-semibold leading-tight tracking-[-0.02em] text-frost">
+            <MathText text={task.title} />
           </div>
         </div>
         <div className="mt-4 text-[14px] leading-6 text-frost/78">
