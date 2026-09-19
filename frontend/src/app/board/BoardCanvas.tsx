@@ -1,4 +1,4 @@
-﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
@@ -7,9 +7,11 @@ import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { GraphElement } from "@/app/board/boardDocument";
 import GraphElementView from "@/app/board/GraphElementView";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { ChartSpline, Eraser, Grid3x3, Hand, Lock, Menu, MessageSquare, Minus, NotebookPen, Paintbrush, RotateCcw, RotateCw, Scan, Save, Trash2, Unlock } from "lucide-react";
+import BoardToolIcon from "@/app/board/BoardToolIcon";
+import { Grid3x3, Hand, Highlighter, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
+import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
 
@@ -82,6 +84,7 @@ export default function BoardCanvas({
   assistantOpen,
   onToggleTask,
   onToggleAssistant,
+  boardProfile,
 }: {
   onOcrText: (text: string) => void;
   ocrEnabled: boolean;
@@ -105,8 +108,10 @@ export default function BoardCanvas({
   assistantOpen?: boolean;
   onToggleTask?: () => void;
   onToggleAssistant?: () => void;
+  boardProfile: BoardProfile;
 }) {
   const { tl } = useI18n();
+  const profileConfig = getBoardProfileConfig(boardProfile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -134,6 +139,7 @@ export default function BoardCanvas({
   const [width, setWidth] = useState(4);
   const [eraserWidth, setEraserWidth] = useState(16);
   const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph">("draw");
+  const [humanitiesPreset, setHumanitiesPreset] = useState<"highlight" | "underline" | null>(null);
   const [grid, setGrid] = useState(true);
   const [loading, setLoading] = useState(false);
   const [bg, setBg] = useState(initialBgColor);
@@ -168,7 +174,6 @@ export default function BoardCanvas({
   const [dynamicSize, setDynamicSize] = useState({ w: 1600, h: 900 });
   const widthPx = dynamicSize.w;
   const heightPx = dynamicSize.h;
-  const compactToolbar = widthPx < 1750;
   const [zoom, setZoom] = useState(() => {
     if (typeof window === "undefined") return 1;
     const raw = window.localStorage.getItem("board.zoom");
@@ -294,7 +299,7 @@ export default function BoardCanvas({
   const minPointDistanceSq = lowPowerMode ? 1.4 : 0.64;
   const maxPointsPerStroke = lowPowerMode ? 1200 : 2200;
   const renderMinDeltaMs = lowPowerMode ? 60 : 16;
-  const gridStep = lowPowerMode ? 40 : 28;
+  const gridStep = profileConfig.backgroundPattern === "lines" ? (lowPowerMode ? 48 : 36) : (lowPowerMode ? 40 : 28);
   const lastRenderTsRef = useRef(0);
   const supportsOffscreenWorker = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -345,8 +350,6 @@ export default function BoardCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.style.width = `${widthPx}px`;
-    canvas.style.height = `${heightPx}px`;
     if (!workerEnabledRef.current) {
       const ratio = renderRatio;
       canvas.width = widthPx * ratio;
@@ -495,6 +498,7 @@ export default function BoardCanvas({
           ratio: renderRatio,
           gridColor,
           gridStep,
+          pattern: profileConfig.backgroundPattern,
           mode,
           eraserWidth,
           isDarkBg,
@@ -521,6 +525,7 @@ export default function BoardCanvas({
       ratio: renderRatio,
       gridColor,
       gridStep,
+      pattern: profileConfig.backgroundPattern,
     });
     const eraserPreview = eraserPreviewRef.current;
     if (!lowPowerMode && mode === "erase" && eraserPreview) {
@@ -597,10 +602,11 @@ export default function BoardCanvas({
   };
 
   const startStroke = (x: number, y: number) => {
-    const w = mode === "erase" ? eraserWidth : width;
+    const isHighlighter = humanitiesPreset === "highlight";
+    const w = mode === "erase" ? eraserWidth : isHighlighter ? 14 : width;
     strokesRef.current.push({
       points: [{ x, y }],
-      color,
+      color: isHighlighter ? "#F6D365A6" : color,
       width: w,
       mode: mode === "erase" ? "erase" : "draw",
     });
@@ -725,7 +731,7 @@ export default function BoardCanvas({
     }
     if (mode === "line") {
       lineStartRef.current = { x, y };
-      linePreviewRef.current = { points: [{ x, y }, { x, y }], color, width, mode: "draw" };
+      linePreviewRef.current = { points: [{ x, y }, { x, y }], color, width: humanitiesPreset === "underline" ? 3 : width, mode: "draw" };
       scheduleRender();
       return;
     }
@@ -804,7 +810,7 @@ export default function BoardCanvas({
     if (!points.length) return;
     const last = points[points.length - 1];
     if (mode === "line" && lineStartRef.current) {
-      linePreviewRef.current = { points: [lineStartRef.current, { x: last.x, y: last.y }], color, width, mode: "draw" };
+      linePreviewRef.current = { points: [lineStartRef.current, { x: last.x, y: last.y }], color, width: humanitiesPreset === "underline" ? 3 : width, mode: "draw" };
       scheduleRender();
       return;
     }
@@ -1086,19 +1092,15 @@ export default function BoardCanvas({
   return (
     <div
       data-testid="board-canvas-root"
-      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-2 pt-2" : "px-4 pt-4")}
+      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-1 pt-2" : "px-2 pt-4")}
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >
       <div ref={areaRef} className="relative flex-1 min-h-0 overflow-hidden">
-        <div className="absolute inset-0 flex items-stretch justify-stretch">
+        <div className="absolute inset-0">
           <div
-            className="relative rounded-2xl border border-white/10 overflow-hidden"
-            style={{
-              width: `${widthPx}px`,
-              height: `${heightPx}px`,
-              backgroundColor: bg,
-            }}
+            className="absolute inset-0 rounded-2xl border border-white/10 overflow-hidden"
+            style={{ backgroundColor: bg }}
           >
             <canvas
               ref={canvasRef}
@@ -1121,7 +1123,7 @@ export default function BoardCanvas({
                 transformOrigin: "0 0",
               }}
             >
-              {graphs.map((graph) => (
+              {profileConfig.graphTools && graphs.map((graph) => (
                 <GraphElementView
                   key={graph.id}
                   graph={graph}
@@ -1148,23 +1150,33 @@ export default function BoardCanvas({
       </div>
       <div
         data-testid="board-toolbar"
+        data-layout="two-level"
         data-visible={toolbarVisible ? "true" : "false"}
         className={cn(
-          "scrollbar-hide absolute bottom-0 z-40 flex flex-nowrap items-center gap-2 overflow-x-auto transition-[transform,opacity] duration-200 [&>*]:shrink-0",
-          expanded ? "left-2 right-2" : "left-4 right-4",
-          toolbarVisible ? "translate-y-0 opacity-100 pointer-events-auto" : "translate-y-full opacity-0 pointer-events-none",
+          "board-toolbar-dock absolute z-40 rounded-[22px] px-1.5 pt-1.5 pb-0 transition-[transform,opacity] duration-200",
+          toolbarVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         )}
         onPointerMove={revealToolbar}
         onPointerDown={revealToolbar}
       >
-        <Button variant="outline" size="sm" onClick={onTogglePanels}>
-          <Menu size={14} className="mr-2" /> {tl("panels")}
+        <div
+          data-testid="board-toolbar-primary"
+          data-toolbar-level="primary"
+          className="board-toolbar-primary-row scrollbar-hide flex flex-nowrap items-center gap-1.5 overflow-visible [&>*]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
+        >
+        <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("panels")} title={tl("panels")} onClick={onTogglePanels}>
+          <Menu size={26} />
         </Button>
-        <div ref={penToolbarAnchorRef} className="relative">
+        <div ref={penToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
-            variant={mode === "draw" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "draw" && !humanitiesPreset && "is-active")}
+            aria-label={tl("pen")}
+            aria-pressed={mode === "draw"}
+            title={tl("pen")}
             onClick={() => {
+              setHumanitiesPreset(null);
               setMode("draw");
               setShowPenSlider(true);
               setShowPenPalette(true);
@@ -1173,13 +1185,13 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <Paintbrush size={14} className="mr-2" /> {tl("pen")}
+            <BoardToolIcon tool="pen" />
           </Button>
           <BoardToolbarPopover
             anchorRef={penToolbarAnchorRef}
             open={showPenPalette && mode === "draw"}
             testId="board-toolbar-popover-pen"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={schedulePenHide} onPointerUp={schedulePenHide} onPointerMove={schedulePenHide}>
                 {showPenSlider && (
@@ -1266,11 +1278,16 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
-        <div ref={lineToolbarAnchorRef} className="relative">
+        <div ref={lineToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
-            variant={mode === "line" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "line" && !humanitiesPreset && "is-active")}
+            aria-label={tl("line")}
+            aria-pressed={mode === "line"}
+            title={tl("line")}
             onClick={() => {
+              setHumanitiesPreset(null);
               setMode("line");
               setShowLineSlider(true);
               setShowPenPalette(false);
@@ -1280,13 +1297,13 @@ export default function BoardCanvas({
               closeBoardSettings();
             }}
           >
-            <Minus size={14} className="mr-2" /> {tl("line")}
+            <BoardToolIcon tool="line" />
           </Button>
           <BoardToolbarPopover
             anchorRef={lineToolbarAnchorRef}
             open={showLineSlider && mode === "line"}
             testId="board-toolbar-popover-line"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={scheduleLineHide} onPointerUp={scheduleLineHide} onPointerMove={scheduleLineHide}>
                 <div className="flex items-center gap-2">
@@ -1313,52 +1330,16 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
-        <Button
-          variant={mode === "graph" ? "accent" : "outline"}
-          size="sm"
-          aria-label={tl("graph")}
-          onClick={() => {
-            setMode("graph");
-            setShowPenSlider(false);
-            setShowPenPalette(false);
-            setShowAllPens(false);
-            setShowEraserSlider(false);
-            setShowLineSlider(false);
-            closeBoardSettings();
-          }}
-        >
-          <ChartSpline size={14} className="mr-2" /> {tl("graph")}
-        </Button>
-        <Button
-          variant={mode === "pan" ? "accent" : "outline"}
-          size="sm"
-          disabled={boardLock}
-          onClick={() => {
-            setMode("pan");
-            setShowPenSlider(false);
-            setShowPenPalette(false);
-            setShowAllPens(false);
-            setShowEraserSlider(false);
-            setShowLineSlider(false);
-            closeBoardSettings();
-          }}
-        >
-          <Hand size={14} className="mr-2" /> {tl("moving")}
-        </Button>
-        <Button
-          variant={boardLock ? "accent" : "outline"}
-          size="sm"
-          onClick={() => setBoardLock((v) => !v)}
-          title={boardLock ? tl("board_lock_on") : tl("board_lock_off")}
-        >
-          {boardLock ? <Lock size={14} className="mr-2" /> : <Unlock size={14} className="mr-2" />}
-          {tl("board_lock")}
-        </Button>
-        <div ref={eraserToolbarAnchorRef} className="relative">
+        <div ref={eraserToolbarAnchorRef} className="board-tool-embedded-anchor relative self-stretch">
           <Button
-            variant={mode === "erase" ? "accent" : "outline"}
+            variant="ghost"
             size="sm"
+            className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "erase" && "is-active")}
+            aria-label={tl("eraser")}
+            aria-pressed={mode === "erase"}
+            title={tl("eraser")}
             onClick={() => {
+            setHumanitiesPreset(null);
             setMode("erase");
             setShowEraserSlider(true);
             setShowPenPalette(false);
@@ -1368,13 +1349,13 @@ export default function BoardCanvas({
             closeBoardSettings();
           }}
         >
-          <Eraser size={14} className="mr-2" /> {tl("eraser")}
+          <BoardToolIcon tool="eraser" />
         </Button>
           <BoardToolbarPopover
             anchorRef={eraserToolbarAnchorRef}
             open={showEraserSlider && mode === "erase"}
             testId="board-toolbar-popover-eraser"
-            className="rounded-xl border border-white/10 bg-ink/95 px-2 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
             <div onPointerDown={scheduleEraserHide} onPointerUp={scheduleEraserHide} onPointerMove={scheduleEraserHide}>
                 <div className="flex items-center gap-2">
@@ -1401,27 +1382,124 @@ export default function BoardCanvas({
             </div>
           </BoardToolbarPopover>
         </div>
+        {profileConfig.humanitiesTools && (
+          <>
+            <Button
+              variant={humanitiesPreset === "highlight" ? "accent" : "outline"}
+              size="sm"
+              className="board-utility-button"
+              aria-label="Маркер"
+              title="Маркер"
+              onClick={() => {
+                setHumanitiesPreset("highlight");
+                setMode("draw");
+                setShowPenSlider(false);
+                setShowPenPalette(false);
+                setShowAllPens(false);
+                setShowLineSlider(false);
+                closeBoardSettings();
+              }}
+            >
+              <Highlighter size={25} />
+            </Button>
+            <Button
+              variant={humanitiesPreset === "underline" ? "accent" : "outline"}
+              size="sm"
+              className="board-utility-button"
+              aria-label="Подчёркивание"
+              title="Подчёркивание"
+              onClick={() => {
+                setHumanitiesPreset("underline");
+                setMode("line");
+                setShowLineSlider(false);
+                setShowPenPalette(false);
+                setShowAllPens(false);
+                setShowPenSlider(false);
+                closeBoardSettings();
+              }}
+            >
+              <Underline size={25} />
+            </Button>
+          </>
+        )}
+        {profileConfig.graphTools && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("board-tool-button board-tool-unframed", mode === "graph" && "is-active")}
+            aria-label={tl("graph")}
+            aria-pressed={mode === "graph"}
+            title={tl("graph")}
+            onClick={() => {
+              setHumanitiesPreset(null);
+              setMode("graph");
+              setShowPenSlider(false);
+              setShowPenPalette(false);
+              setShowAllPens(false);
+              setShowEraserSlider(false);
+              setShowLineSlider(false);
+              closeBoardSettings();
+            }}
+          >
+            <BoardToolIcon tool="graph" />
+          </Button>
+        )}
+        <Button
+          variant={mode === "pan" ? "accent" : "outline"}
+          size="sm"
+          className="board-utility-button"
+          aria-label={tl("moving")}
+          title={tl("moving")}
+          disabled={boardLock}
+          onClick={() => {
+            setHumanitiesPreset(null);
+            setMode("pan");
+            setShowPenSlider(false);
+            setShowPenPalette(false);
+            setShowAllPens(false);
+            setShowEraserSlider(false);
+            setShowLineSlider(false);
+            closeBoardSettings();
+          }}
+        >
+          <Hand size={27} />
+        </Button>
+        <Button
+          variant={boardLock ? "accent" : "outline"}
+          size="sm"
+          className="board-utility-button"
+          aria-label={tl("board_lock")}
+          onClick={() => setBoardLock((v) => !v)}
+          title={tl("board_lock")}
+        >
+          {boardLock ? <Lock size={26} /> : <Unlock size={26} />}
+        </Button>
         <div ref={boardToolbarAnchorRef} className="relative">
           <Button
             variant="outline"
             size="sm"
+            className="board-utility-button"
+            aria-label={tl("board")}
+            title={tl("board")}
             onClick={() => {
               setShowBoardSettings((v) => !v);
               setShowAllBg(false);
             }}
           >
-            <Grid3x3 size={14} className="mr-2" /> {tl("board")}
+            <Grid3x3 size={26} />
           </Button>
           <BoardToolbarPopover
             anchorRef={boardToolbarAnchorRef}
             open={showBoardSettings}
             testId="board-toolbar-popover-board"
-            className="rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+            className="surface-popover rounded-xl px-3 py-2 shadow-glass backdrop-blur"
           >
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs text-frost/60">{tl("grid")}</span>
+                  <span className="text-xs text-frost/60">
+                    {profileConfig.backgroundPattern === "lines" ? "Линии" : tl("grid")}
+                  </span>
                   <Button variant={grid ? "accent" : "outline"} size="sm" onClick={() => setGrid((v) => !v)}>
-                    {grid ? tl("grid_on") : tl("grid_off")}
+                    {grid ? "Вкл" : "Выкл"}
                   </Button>
                 </div>
                 <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
@@ -1512,11 +1590,13 @@ export default function BoardCanvas({
                 </AnimatePresence>
           </BoardToolbarPopover>
         </div>
-        <div className="relative flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1">
+        <div className="board-input-mode relative flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 p-1">
           <button
+            aria-label={tl("auto")}
+            title={tl("auto")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "auto" ? "text-ink" : "text-frost/70 hover:text-frost"
+              "board-segment-button relative z-10 rounded-xl transition",
+              inputMode === "auto" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("auto")}
           >
@@ -1527,12 +1607,14 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("auto")}</span>
+            <MousePointer2 size={24} className="relative z-10" />
           </button>
           <button
+            aria-label={tl("mouse")}
+            title={tl("mouse")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "mouse" ? "text-ink" : "text-frost/70 hover:text-frost"
+              "board-segment-button relative z-10 rounded-xl transition",
+              inputMode === "mouse" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("mouse")}
           >
@@ -1543,12 +1625,14 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("mouse")}</span>
+            <Mouse size={24} className="relative z-10" />
           </button>
           <button
+            aria-label={tl("touch_mode")}
+            title={tl("touch_mode")}
             className={cn(
-              "relative z-10 rounded-full px-3 py-1 text-xs font-semibold transition",
-              inputMode === "touch" ? "text-ink" : "text-frost/70 hover:text-frost"
+              "board-segment-button relative z-10 rounded-xl transition",
+              inputMode === "touch" ? "text-accentText" : "text-frost/70 hover:text-frost"
             )}
             onClick={() => setInputMode("touch")}
           >
@@ -1559,35 +1643,36 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <span className="relative z-10">{tl("touch_mode")}</span>
+            <Hand size={24} className="relative z-10" />
           </button>
         </div>
 
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")}>
-          <RotateCcw size={14} />
+        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
+          <RotateCcw size={25} />
         </Button>
-        <Button variant="ghost" size="sm" className="flex h-8 w-8 items-center justify-center p-0" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")}>
-          <RotateCw size={14} />
+        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
+          <RotateCw size={25} />
         </Button>
         <div ref={clearToolbarAnchorRef} className="relative flex items-center">
           <Button
             variant="ghost"
             size="sm"
-            className="flex h-8 w-8 items-center justify-center p-0"
+            className="board-utility-button"
             aria-label={tl("clear_board")}
+            title={tl("clear_board")}
             onClick={() => {
               setShowClearConfirm((v) => !v);
               setClearSlideValue(0);
             }}
           >
-            <Trash2 size={14} />
+            <Trash2 size={25} />
           </Button>
           <BoardToolbarPopover
             anchorRef={clearToolbarAnchorRef}
             open={showClearConfirm}
             align="right"
             testId="board-toolbar-popover-clear"
-            className="w-[260px] rounded-xl border border-white/10 bg-ink/95 px-3 py-2 shadow-glass backdrop-blur"
+            className="surface-popover w-[260px] rounded-xl px-3 py-2 shadow-glass backdrop-blur"
           >
                 <div className="mb-2 text-xs text-frost/70">{tl("slide_to_clear")}</div>
                 <input
@@ -1612,30 +1697,32 @@ export default function BoardCanvas({
                 />
           </BoardToolbarPopover>
         </div>
-        <Button variant="outline" size="sm" onClick={handleSnapshot}>
-          <Save size={14} className="mr-2" /> {tl("snapshot")}
+        <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("snapshot")} title={tl("snapshot")} onClick={handleSnapshot}>
+          <Save size={26} />
         </Button>
         <Button
           variant={ocrEnabled ? "default" : "outline"}
           size="sm"
+          className="board-utility-button"
+          aria-label={tl("recognize")}
+          title={tl("recognize")}
           onClick={handleOcr}
           disabled={!ocrEnabled || loading}
         >
-          <Scan size={14} className="mr-2" /> {tl("recognize")}
+          <Scan size={26} />
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {onToggleTask && (
-            <Button variant={taskOpen ? "accent" : "outline"} size="sm" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
-              <NotebookPen size={16} className={compactToolbar ? "" : "mr-2"} />
-              {!compactToolbar && tl("exercise")}
+            <Button variant={taskOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
+              <NotebookPen size={26} />
             </Button>
           )}
           {onToggleAssistant && (
-            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
-              <MessageSquare size={16} className={compactToolbar ? "" : "mr-2"} />
-              {!compactToolbar && tl("ai_assistant")}
+            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
+              <MessageSquare size={26} />
             </Button>
           )}
+        </div>
         </div>
       </div>
     </div>

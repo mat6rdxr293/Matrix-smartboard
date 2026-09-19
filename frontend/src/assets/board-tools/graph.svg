@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="card" x1="8" y1="7" x2="56" y2="57" gradientUnits="userSpaceOnUse"><stop stop-color="#f8fbff"/><stop offset="1" stop-color="#cdd8e8"/></linearGradient>
+    <linearGradient id="curve" x1="13" y1="43" x2="52" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#7c4dff"/><stop offset="1" stop-color="#3bbbea"/></linearGradient>
+    <filter id="shadow" x="3" y="3" width="58" height="58"><feDropShadow dx="0" dy="4" stdDeviation="3" flood-opacity=".3"/></filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="7" y="7" width="50" height="50" rx="11" fill="url(#card)"/>
+    <path d="M17 14v36M11 44h41" stroke="#536174" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M25 14v36M33 14v36M41 14v36M49 14v36M11 20h41M11 28h41M11 36h41" stroke="#8795a8" stroke-width="1" opacity=".35"/>
+    <path d="M12 42c8 0 10-20 18-20s9 20 21 20" stroke="url(#curve)" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="30" cy="22" r="3" fill="#7248ed"/>
+  </g>
+</svg>

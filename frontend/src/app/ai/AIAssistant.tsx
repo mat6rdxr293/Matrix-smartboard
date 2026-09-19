@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
+import { MessageSquareText } from "lucide-react";
 
 export type AssistantMessage = {
   id: string;
@@ -40,52 +40,78 @@ export default function AIAssistant({ messages, onContinue, canContinue, loading
   };
 
   return (
-    <div className="glass flex h-full flex-col rounded-2xl p-4 shadow-soft">
-      <div className="mb-3 flex items-center justify-end gap-2">
-        {onContinue && canContinue && (
-          <Button size="sm" variant="outline" onClick={onContinue} disabled={loading}>
+    <div className="flex h-full min-h-0 flex-col">
+      {onContinue && canContinue && (
+        <div className="flex justify-end pb-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 rounded-lg border border-white/10 bg-white/[0.025] px-2.5 text-[11px] font-medium"
+            onClick={onContinue}
+            disabled={loading}
+          >
             {tl("continue")}
           </Button>
-        )}
-        <Badge>{tl("history")}</Badge>
-      </div>
-      <div className="scrollbar-hide flex-1 space-y-3 overflow-auto pr-1">
+        </div>
+      )}
+
+      <div className="scrollbar-hide min-h-0 flex-1 overflow-auto">
         {messages.length === 0 ? (
-          <div className="text-sm text-frost/50">{tl("history_will_appear_after_first_hint")}</div>
+          <div className="flex h-full min-h-[220px] items-center justify-center px-6">
+            <div className="max-w-[280px] text-center">
+              <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/35">
+                <MessageSquareText size={18} />
+              </div>
+              <div className="mt-3 text-[13px] font-medium text-frost/55">Пока пусто</div>
+              <div className="mt-1.5 text-[12px] leading-5 text-frost/35">
+                {tl("history_will_appear_after_first_hint")}
+              </div>
+            </div>
+          </div>
         ) : (
-          messages.map((msg) => {
-            const className =
-              msg.role === "assistant"
-                ? "rounded-xl border border-white/10 bg-white/5 p-3 text-sm"
-                : "rounded-xl border border-accent/40 bg-accent/10 p-3 text-sm";
-            const content = (
-              <>
-                <div className="mb-1 flex items-center justify-between text-xs text-frost/50">
-                  <span>{msg.role === "assistant" ? tl("assistant") : tl("student")}</span>
-                  <span>
-                    {labelForMode(msg.mode)} {msg.timestamp}
-                  </span>
-                </div>
-                {msg.text.trim() === tl("thinking") ? (
-                  <div className="thinking-shimmer">{tl("thinking")}</div>
-                ) : (
-                  <MathText text={msg.text} className="text-frost/90" />
-                )}
-              </>
-            );
-            if (lowPowerMode) {
-              return (
-                <div key={msg.id} className={className}>
-                  {content}
-                </div>
+          <div className="divide-y divide-white/10">
+            {messages.map((msg) => {
+              const className =
+                msg.role === "assistant"
+                  ? "py-3.5 text-[13px]"
+                  : "border-l-2 border-l-accent/50 bg-accent/[0.045] px-3 py-3.5 text-[13px]";
+              const content = (
+                <>
+                  <div className="mb-2 flex items-center justify-between gap-3 text-[10px] text-frost/38">
+                    <span className="font-medium text-frost/50">{msg.role === "assistant" ? tl("assistant") : tl("student")}</span>
+                    <span className="shrink-0">
+                      {labelForMode(msg.mode)}{labelForMode(msg.mode) ? " · " : ""}{msg.timestamp}
+                    </span>
+                  </div>
+                  {msg.text.trim() === tl("thinking") ? (
+                    <div className="thinking-shimmer">{tl("thinking")}</div>
+                  ) : (
+                    <MathText text={msg.text} className="text-frost/88" />
+                  )}
+                </>
               );
-            }
-            return (
-              <motion.div key={msg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={className}>
-                {content}
-              </motion.div>
-            );
-          })
+
+              if (lowPowerMode) {
+                return (
+                  <div key={msg.id} className={className}>
+                    {content}
+                  </div>
+                );
+              }
+
+              return (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className={className}
+                >
+                  {content}
+                </motion.div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

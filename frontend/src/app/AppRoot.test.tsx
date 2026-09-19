@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
 
 const api = vi.hoisted(() => ({
@@ -30,6 +30,8 @@ const lesson = {
 const mount = () => render(<I18nProvider><AppRoot /></I18nProvider>);
 
 describe("AppRoot", () => {
+  afterEach(() => cleanup());
+
   beforeEach(() => {
     vi.clearAllMocks();
     const values = new Map<string, string>();
@@ -82,5 +84,24 @@ describe("AppRoot", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Начать новый" }));
     await waitFor(() => expect(api.completeLesson).toHaveBeenCalledWith(lesson.id));
     expect(await screen.findByRole("heading", { name: "Выберите класс" })).toBeInTheDocument();
+  });
+
+  it("selects a board profile before creating a lesson", async () => {
+    localStorage.setItem(`practice.room.${school.id}`, room.id);
+    api.currentSchool.mockResolvedValue(school);
+    api.createLesson.mockResolvedValue(lesson);
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "7 класс" }));
+    expect(await screen.findByRole("heading", { name: "Выберите предмет" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Физика" }));
+    expect(await screen.findByRole("heading", { name: "Выберите доску" })).toBeInTheDocument();
+    expect(api.createLesson).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Текстовая" }));
+    await waitFor(() => expect(api.createLesson).toHaveBeenCalledWith(room.id, 7, "physics"));
+    expect(localStorage.getItem(`practice.lesson.${lesson.id}.boardProfile`)).toBe("textual");
+    expect(await screen.findByTestId("workspace")).toHaveTextContent(lesson.id);
   });
 });

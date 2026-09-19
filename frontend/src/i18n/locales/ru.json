@@ -260,7 +260,10 @@
     "shift": "Регистр",
     "cyrillic": "Кириллица",
     "latin": "Латиница",
-    "space": "Пробел"
+    "space": "Пробел",
+    "appearance": "Оформление",
+    "theme_light": "Светлая",
+    "theme_dark": "Тёмная"
   },
   "defaults": {
     "slides": [

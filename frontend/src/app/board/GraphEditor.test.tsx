@@ -94,6 +94,11 @@ it("uses opaque touch keys for the math keyboard", () => {
   const input = screen.getByRole("textbox", { name: /функц|function/i });
   fireEvent.focus(input);
   const sin = screen.getByRole("button", { name: "sin" });
-  expect(sin.className).toContain("bg-[#151b24]");
+  expect(sin.className).toContain("bg-graphite");
   expect(sin.className).not.toContain("bg-white/5");
+});
+
+it("uses semantic theme surfaces for expression controls", () => {
+  mount();
+  expect(screen.getByRole("textbox", { name: /функц|function/i })).toHaveClass("bg-ink");
 });

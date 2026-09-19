@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
+import { ThemeProvider } from "@/app/theme/ThemeProvider";
 import TopBar from "./TopBar";
 
 const callbacks = {
@@ -36,9 +37,11 @@ const props = {
 };
 
 const mount = () => render(
-  <I18nProvider>
-    <TopBar {...props} />
-  </I18nProvider>,
+  <ThemeProvider>
+    <I18nProvider>
+      <TopBar {...props} />
+    </I18nProvider>
+  </ThemeProvider>,
 );
 
 afterEach(() => cleanup());
@@ -84,5 +87,17 @@ describe("TopBar lesson UI", () => {
     expect(callbacks.onReset).toHaveBeenCalledOnce();
     expect(callbacks.onOpenHistory).toHaveBeenCalledOnce();
     expect(callbacks.onChangeRoom).toHaveBeenCalledOnce();
+  });
+
+  it("switches the application theme from settings", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+
+    const lightButton = screen.getByRole("button", { name: "Светлая" });
+    expect(lightButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(lightButton);
+
+    expect(lightButton).toHaveAttribute("aria-pressed", "true");
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
   });
 });

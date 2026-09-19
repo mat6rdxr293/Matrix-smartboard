@@ -57,6 +57,7 @@ describe("BoardCanvas graph tool", () => {
           initialPenColor="#FF0000" onChangePenColor={vi.fn()}
           initialBgColor="#0A0E14" onChangeBgColor={vi.fn()}
           onReplayOp={onReplayOp}
+          boardProfile="analytical"
         />
       </I18nProvider>,
     );
@@ -99,6 +100,7 @@ describe("BoardCanvas mixed clear", () => {
           initialPenColor="#FF0000" onChangePenColor={vi.fn()}
           initialBgColor="#0A0E14" onChangeBgColor={vi.fn()}
           onReplayOp={(op) => events.push(`op:${op.op}`)}
+          boardProfile="analytical"
         />
       </I18nProvider>,
     );

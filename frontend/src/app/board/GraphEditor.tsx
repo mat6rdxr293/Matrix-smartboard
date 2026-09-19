@@ -192,7 +192,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
         <span className="text-xs font-semibold text-frost/70">{tl("graph_functions")}</span>
         <button
           type="button"
-          className="flex min-h-7 min-w-7 items-center justify-center rounded-lg border border-white/15 bg-[#151b24] disabled:opacity-40"
+          className="flex min-h-7 min-w-7 items-center justify-center rounded-lg border border-white/15 bg-graphite disabled:opacity-40"
           onClick={addExpression}
           disabled={draft.expressions.length >= 8}
           aria-label={tl("add_function")}
@@ -205,7 +205,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
           const error = errors.get(item.id);
           const errorId = `graph-expression-error-${item.id}`;
           return (
-            <div key={item.id} className="rounded-lg border border-white/15 bg-[#111720] p-2">
+            <div key={item.id} className="rounded-lg border border-white/15 bg-graphite p-2">
               <div className="flex items-center gap-1.5">
                 <span className="w-5 text-[10px] text-frost/50">{index + 1}</span>
                 <input
@@ -234,7 +234,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
                   aria-label={`${tl("function")} ${index + 1}`}
                   aria-invalid={!!error}
                   aria-describedby={error ? errorId : undefined}
-                  className="min-w-0 flex-1 rounded-md border border-white/15 bg-[#0c1118] px-2 py-1 text-xs text-frost outline-none focus:border-accent/70"
+                  className="min-w-0 flex-1 rounded-md border border-white/15 bg-ink px-2 py-1 text-xs text-frost outline-none focus:border-accent/70"
                 />
                 <input
                   type="color"
@@ -246,7 +246,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
                 />
                 <button
                   type="button"
-                  className="flex min-h-7 min-w-7 items-center justify-center rounded-md border border-white/15 bg-[#151b24]"
+                  className="flex min-h-7 min-w-7 items-center justify-center rounded-md border border-white/15 bg-graphite"
                   onClick={() => updateExpression(item.id, { visible: !item.visible }, true)}
                   aria-label={`${item.visible ? tl("hide_function") : tl("show_function")} ${index + 1}`}
                 >
@@ -254,7 +254,7 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
                 </button>
                 <button
                   type="button"
-                  className="flex min-h-7 min-w-7 items-center justify-center rounded-md border border-white/15 bg-[#151b24] disabled:opacity-35"
+                  className="flex min-h-7 min-w-7 items-center justify-center rounded-md border border-white/15 bg-graphite disabled:opacity-35"
                   onClick={() => removeExpression(item.id)}
                   disabled={draft.expressions.length <= 1}
                   aria-label={`${tl("delete_function")} ${index + 1}`}

@@ -28,8 +28,10 @@ import { callAi, getStatus } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
+import { useTheme } from "@/app/theme/ThemeProvider";
 import { sessionApi } from "@/app/session/api";
 import type { Lesson, Room, School } from "@/app/session/types";
+import type { BoardProfile } from "@/app/board/boardProfiles";
 
 const TeacherDashboard = lazy(() => import("@/app/teacher/TeacherDashboard"));
 
@@ -85,13 +87,15 @@ type LessonWorkspaceProps = {
   school: School;
   room: Room;
   lesson: Lesson;
+  boardProfile: BoardProfile;
   onComplete: () => void;
   onOpenHistory: () => void;
   onChangeRoom: () => void;
 };
 
-export default function App({ school, room, lesson, onComplete, onOpenHistory, onChangeRoom }: LessonWorkspaceProps) {
+export default function App({ school, room, lesson, boardProfile, onComplete, onOpenHistory, onChangeRoom }: LessonWorkspaceProps) {
   const { locale, tl } = useI18n();
+  const { theme } = useTheme();
   const subjectId = lesson.subjectId;
   // Teacher tab is bound to verified practice token from main portal auth.
   const [hideTeacherTab, setHideTeacherTab] = useState(true);
@@ -178,7 +182,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
   const listRef = useRef<HTMLDivElement | null>(null);
   const [boardHistory, setBoardHistory] = useState<BoardHistory>(() => createBoardHistory());
   const [boardPenColor, setBoardPenColor] = useState("#FF0000");
-  const [boardBgColor, setBoardBgColor] = useState("#0A0E14");
+  const [boardBgColor, setBoardBgColor] = useState(() => theme === "light" ? "#FFFFFF" : "#0A0E14");
   const [taskData, setTaskData] = useState<Task[]>(() => defaultTaskData);
   const [slideData, setSlideData] = useState<Slide[]>(() => defaultSlideData);
   const [presentationSource, setPresentationSource] = useState<PresentationSource>(DEFAULT_PRESENTATION_SOURCE);
@@ -744,8 +748,12 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
             backgroundRepeat: "no-repeat",
           }
         : { backgroundImage: siteBackground.gradient };
-  const effectiveSiteBgStyle: React.CSSProperties = ultraLite
-    ? { backgroundColor: "#0A0E14", backgroundImage: "none" }
+  const usesDefaultSiteBackground = siteBackground.mode === DEFAULT_SITE_BACKGROUND.mode
+    && siteBackground.color === DEFAULT_SITE_BACKGROUND.color
+    && siteBackground.gradient === DEFAULT_SITE_BACKGROUND.gradient
+    && !siteBackground.image;
+  const effectiveSiteBgStyle: React.CSSProperties = (ultraLite || (theme === "light" && usesDefaultSiteBackground))
+    ? { backgroundColor: "var(--app-background)", backgroundImage: "none" }
     : siteBgStyle;
 
   const addMessage = (msg: AssistantMessage) => {
@@ -1066,11 +1074,11 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
     <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
     <div
       ref={appRef}
-      className="h-screen overflow-hidden px-1 py-2"
+      className="h-screen overflow-hidden px-1 pt-2"
       onContextMenu={(e) => e.preventDefault()}
       style={effectiveSiteBgStyle}
     >
-      <div className="mx-auto flex h-full w-full max-w-[1850px] min-h-0 flex-col gap-3">
+      <div className="mx-auto flex h-full w-full max-w-[1920px] min-h-0 flex-col gap-3">
         <TopBar
           apiStatus={apiStatus}
           lessonTitle={lessonTitle}
@@ -1135,6 +1143,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                       assistantOpen={assistantOpen}
                       onToggleTask={() => setTaskOpen((v) => !v)}
                       onToggleAssistant={() => setAssistantOpen((v) => !v)}
+                      boardProfile={boardProfile}
                     />
                   </motion.div>
                 ) : (
@@ -1235,6 +1244,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                         assistantOpen={assistantOpen}
                         onToggleTask={() => setTaskOpen((v) => !v)}
                         onToggleAssistant={() => setAssistantOpen((v) => !v)}
+                        boardProfile={boardProfile}
                       />
                     </motion.div>
                   </motion.div>
@@ -1257,22 +1267,23 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                     exit={{ opacity: 0, scale: 0.98, y: 8 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <div className="glass relative flex h-full flex-col rounded-2xl shadow-glass">
+                    <div className="surface-popover relative flex h-full flex-col overflow-hidden rounded-[18px] shadow-[0_18px_46px_rgb(0_0_0/0.14)]">
                       <div
-                        className="modal-handle flex items-center justify-between border-b border-white/10 px-4 py-3 cursor-grab active:cursor-grabbing"
+                        className="modal-handle flex h-12 cursor-grab items-center justify-between border-b border-white/10 px-4 active:cursor-grabbing"
                         onPointerDown={(e) => taskDragControls.start(e)}
                       >
-                        <div className="text-sm font-semibold uppercase tracking-wider text-frost/70">
+                        <div className="text-[12px] font-semibold text-frost/65">
                           {tl("exercise")}
                         </div>
                         <button
-                          className="rounded-lg border border-white/10 px-2 py-1 text-xs text-frost/70 hover:text-frost"
+                          className="grid h-8 w-8 place-items-center rounded-lg text-frost/45 transition hover:bg-white/[0.06] hover:text-frost"
                           onClick={() => setTaskOpen(false)}
+                          aria-label="Закрыть"
                         >
-                          <X size={14} />
+                          <X size={16} />
                         </button>
                       </div>
-                      <div className="flex-1 overflow-auto p-4">
+                      <div className="min-h-0 flex-1 overflow-auto p-4">
                         <TaskPanel
                           task={selectedTask}
                           subjectName={subjectName}
@@ -1287,7 +1298,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                         />
                       </div>
                       <div
-                        className="absolute bottom-2 right-2 h-4 w-4 cursor-se-resize rounded-sm border border-white/20 bg-white/10 touch-none"
+                        className="absolute bottom-1.5 right-1.5 h-4 w-4 cursor-se-resize touch-none opacity-35 after:absolute after:bottom-0 after:right-0 after:h-2.5 after:w-2.5 after:border-b after:border-r after:border-frost/50"
                         onPointerDown={startResize("task")}
                         title={tl("resize")}
                       />
@@ -1311,22 +1322,23 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                     exit={{ opacity: 0, scale: 0.98, y: 8 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <div className="glass relative flex h-full flex-col rounded-2xl shadow-glass">
+                    <div className="surface-popover relative flex h-full flex-col overflow-hidden rounded-[18px] shadow-[0_18px_46px_rgb(0_0_0/0.14)]">
                       <div
-                        className="modal-handle flex items-center justify-between border-b border-white/10 px-4 py-3 cursor-grab active:cursor-grabbing"
+                        className="modal-handle flex h-12 cursor-grab items-center justify-between border-b border-white/10 px-4 active:cursor-grabbing"
                         onPointerDown={(e) => assistantDragControls.start(e)}
                       >
-                        <div className="text-sm font-semibold uppercase tracking-wider text-frost/70">
+                        <div className="text-[12px] font-semibold text-frost/65">
                           {tl("ai_assistant")}
                         </div>
                         <button
-                          className="rounded-lg border border-white/10 px-2 py-1 text-xs text-frost/70 hover:text-frost"
+                          className="grid h-8 w-8 place-items-center rounded-lg text-frost/45 transition hover:bg-white/[0.06] hover:text-frost"
                           onClick={() => setAssistantOpen(false)}
+                          aria-label="Закрыть"
                         >
-                          <X size={14} />
+                          <X size={16} />
                         </button>
                       </div>
-                      <div className="flex-1 overflow-hidden">
+                      <div className="min-h-0 flex-1 overflow-hidden p-4">
                         <AIAssistant
                           messages={messages}
                           onContinue={handleContinue}
@@ -1336,7 +1348,7 @@ export default function App({ school, room, lesson, onComplete, onOpenHistory, o
                         />
                       </div>
                       <div
-                        className="absolute bottom-2 right-2 h-4 w-4 cursor-se-resize rounded-sm border border-white/20 bg-white/10 touch-none"
+                        className="absolute bottom-1.5 right-1.5 h-4 w-4 cursor-se-resize touch-none opacity-35 after:absolute after:bottom-0 after:right-0 after:h-2.5 after:w-2.5 after:border-b after:border-r after:border-frost/50"
                         onPointerDown={startResize("assistant")}
                         title={tl("resize")}
                       />

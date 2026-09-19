@@ -12,7 +12,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       default: "bg-frost text-ink hover:bg-white",
       outline: "border border-white/20 text-frost hover:border-white/40",
       ghost: "text-frost/80 hover:text-frost hover:bg-white/10",
-      accent: "bg-accent text-ink hover:bg-neon",
+      accent: "bg-accent text-accentText hover:bg-neon",
     };
     const sizes = {
       sm: "h-8 px-3 text-xs",

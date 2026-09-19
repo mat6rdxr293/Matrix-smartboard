@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
+import { ThemeProvider } from "@/app/theme/ThemeProvider";
 
 const mocks = vi.hoisted(() => ({
   loadBoardReplay: vi.fn(),
@@ -50,8 +51,8 @@ const deferred = <T,>() => {
 };
 
 const mount = (onComplete = vi.fn()) => render(
-  <I18nProvider><App school={school} room={room} lesson={lesson as any}
-    onComplete={onComplete} onOpenHistory={vi.fn()} onChangeRoom={vi.fn()} /></I18nProvider>
+  <ThemeProvider><I18nProvider><App school={school} room={room} lesson={lesson as any} boardProfile="analytical"
+    onComplete={onComplete} onOpenHistory={vi.fn()} onChangeRoom={vi.fn()} /></I18nProvider></ThemeProvider>
 );
 
 beforeEach(() => {
@@ -80,6 +81,15 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("board replay persistence", () => {
+  it("uses a light board for a new lesson when the saved application theme is light", async () => {
+    window.localStorage.setItem("practice.appearance.theme", "light");
+    mocks.loadBoardReplay.mockResolvedValue({ operations: [] });
+    mount();
+
+    await waitFor(() => expect(mocks.boardProps).not.toBeNull());
+    expect(mocks.boardProps.initialBgColor).toBe("#FFFFFF");
+  });
+
   it("keeps strokes added while the initial replay request is still loading", async () => {
     const loading = deferred<{ operations: any[] }>();
     mocks.loadBoardReplay.mockReturnValueOnce(loading.promise);
