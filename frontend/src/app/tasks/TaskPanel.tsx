@@ -1,175 +1,17 @@
-import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import type { Task } from "@/app/tasks/tasks";
-import type { AssistantMessage } from "@/app/ai/AIAssistant";
-import { callAi } from "@/app/ai/api";
 import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
-import { X } from "lucide-react";
 
 export type TaskPanelProps = {
   task: Task;
-  subjectName: string;
-  lessonId: string;
-  attempt: string;
-  setAttempt: (value: string) => void;
-  addMessage: (msg: AssistantMessage) => void;
-  updateMessage: (id: string, text: string) => void;
-  appendStudentAttempt: (text: string) => void;
-  onStopTimer: () => void;
-  onShowCheckScore?: (percent: number) => void;
 };
 
-function nowLabel(locale: "ru" | "kk") {
-  const d = new Date();
-  return d.toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
-
-function typeText(
-  text: string,
-  onUpdate: (partial: string) => void,
-  shouldCancel: () => boolean,
-  prefix = ""
-) {
-  return new Promise<void>((resolve) => {
-    let index = 0;
-    let last = 0;
-    const charsPerSecond = 140;
-    const step = (ts: number) => {
-      if (shouldCancel()) return resolve();
-      if (!last) last = ts;
-      const delta = ts - last;
-      last = ts;
-      const add = Math.max(1, Math.floor((delta * charsPerSecond) / 1000));
-      index = Math.min(text.length, index + add);
-      onUpdate(prefix + text.slice(0, index));
-      if (index >= text.length) return resolve();
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  });
-}
-
-const shouldContinue = (text: string) => {
-  const t = text.trim().toLowerCase();
-  if (!t) return false;
-  if (t.endsWith("...") || t.endsWith("…")) return true;
-  if (t.includes("обрыв") || t.includes("нет итогов")) return true;
-  return false;
-};
-
-export default function TaskPanel({
-  task,
-  subjectName,
-  lessonId,
-  attempt,
-  setAttempt,
-  addMessage,
-  updateMessage,
-  appendStudentAttempt,
-  onStopTimer,
-  onShowCheckScore,
-}: TaskPanelProps) {
-  const { locale, tl } = useI18n();
-  const [loading, setLoading] = useState<null | "hint" | "check" | "solution">(null);
-  const [error, setError] = useState<string | null>(null);
-  const typingTokenRef = useRef(0);
-
-  const extractCheckPercent = (text: string): number | null => {
-    const normalized = text.replace(",", ".");
-    const strict = /(?:^|\n)\s*\**\s*выполнено\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
-    const strictMatch = normalized.match(strict);
-    if (strictMatch) {
-      const value = Number(strictMatch[1]);
-      if (Number.isFinite(value)) return Math.max(0, Math.min(100, Math.round(value)));
-    }
-
-    const contextual = /(?:выполн(?:ено|ен[ао])|процент(?: выполнения)?|итог|оценка)\D{0,24}(\d{1,3}(?:\.\d+)?)\s*%/gi;
-    const contextualMatches = Array.from(normalized.matchAll(contextual));
-    if (contextualMatches.length > 0) {
-      const value = Number(contextualMatches[contextualMatches.length - 1][1]);
-      if (Number.isFinite(value)) return Math.max(0, Math.min(100, Math.round(value)));
-    }
-
-    const generic = /(\d{1,3}(?:\.\d+)?)\s*%/g;
-    const genericMatches = Array.from(normalized.matchAll(generic))
-      .map((m) => Number(m[1]))
-      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 100);
-    if (genericMatches.length > 0) {
-      return Math.round(genericMatches[genericMatches.length - 1]);
-    }
-    return null;
-  };
-
-  const handleAsk = async (mode: "hint" | "check" | "solution") => {
-    setError(null);
-    setLoading(mode);
-    typingTokenRef.current += 1;
-    const token = typingTokenRef.current;
-    if (mode !== "hint") {
-      onStopTimer();
-    }
-    if (attempt.trim()) {
-      appendStudentAttempt(attempt.trim());
-    }
-    const id = `${Date.now()}-${Math.random()}`;
-    addMessage({
-      id,
-      role: "assistant",
-      text: tl("thinking"),
-      mode,
-      timestamp: nowLabel(locale),
-    });
-
-    try {
-      let fullText = "";
-      const res = await callAi(mode, task.problem, attempt.trim() || undefined, undefined, false, subjectName, lessonId, crypto.randomUUID());
-      fullText = res.text || "";
-      await typeText(
-        fullText,
-        (partial) => updateMessage(id, partial),
-        () => typingTokenRef.current !== token
-      );
-      let guard = 0;
-      while (guard < 2 && shouldContinue(fullText) && typingTokenRef.current === token) {
-        guard += 1;
-        const cont = await callAi(
-          mode,
-          task.problem,
-          attempt.trim() || undefined,
-          fullText,
-          true,
-          subjectName,
-          lessonId,
-          crypto.randomUUID(),
-        );
-        const next = cont.text || "";
-        if (!next.trim()) break;
-        await typeText(
-          next,
-          (partial) => updateMessage(id, partial),
-          () => typingTokenRef.current !== token,
-          `${fullText}\n`
-        );
-        fullText = `${fullText}\n${next}`;
-      }
-      if (mode === "check" && onShowCheckScore) {
-        const percent = extractCheckPercent(fullText);
-        if (percent !== null) onShowCheckScore(percent);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : tl("unknown_error");
-      updateMessage(id, `${tl("error")}: ${message}`);
-      setError(`${tl("error")}: ${message}`);
-    } finally {
-      setLoading(null);
-    }
-  };
+export default function TaskPanel({ task }: TaskPanelProps) {
+  const { tl } = useI18n();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-white/10 px-1 pb-4">
+      <div className="px-1 pb-4">
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-frost/40">{tl("task_id", { id: task.id })}</div>
           <div className="mt-1 text-[18px] font-semibold leading-tight tracking-[-0.02em] text-frost">
@@ -181,58 +23,8 @@ export default function TaskPanel({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col pt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[11px] font-medium text-frost/45">{tl("student_solution")}</div>
-          <button
-            type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-frost/45 transition hover:bg-white/[0.05] hover:text-frost disabled:opacity-35"
-            onClick={() => setAttempt("")}
-            disabled={!attempt.trim() || loading !== null}
-          >
-            <X size={13} />
-            {tl("clear_field")}
-          </button>
-        </div>
-
-        <Textarea
-          value={attempt}
-          onChange={(e) => setAttempt(e.target.value)}
-          placeholder={tl("enter_solution_or_ideas")}
-          className="min-h-[150px] flex-1 resize-none rounded-[14px] border-white/10 bg-white/[0.025] p-4 text-[14px] leading-6 shadow-none focus:ring-1 focus:ring-accent/45"
-        />
-
-        <div className="mt-4 grid grid-cols-[0.9fr_1.2fr_1fr] gap-2">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl border-white/12 bg-transparent px-3 text-[12px] font-medium"
-            onClick={() => handleAsk("hint")}
-            disabled={loading !== null}
-          >
-            {tl("hint")}
-          </Button>
-          <Button
-            variant="default"
-            className="h-10 rounded-xl px-3 text-[12px] font-semibold"
-            onClick={() => handleAsk("check")}
-            disabled={loading !== null}
-          >
-            {tl("check_solution")}
-          </Button>
-          <Button
-            variant="ghost"
-            className="h-10 rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[12px] font-medium"
-            onClick={() => handleAsk("solution")}
-            disabled={loading !== null}
-          >
-            {tl("full_solution")}
-          </Button>
-        </div>
-
-        <div className="mt-2 min-h-[16px] text-[11px]">
-          {loading && <div className="thinking-shimmer">{tl("thinking")}</div>}
-          {error && <div className="text-ember">{error}</div>}
-        </div>
+      <div className="mt-auto border-t border-white/10 px-1 pt-4 text-[12px] leading-5 text-frost/45">
+        {tl("solve_on_board_ai")}
       </div>
     </div>
   );

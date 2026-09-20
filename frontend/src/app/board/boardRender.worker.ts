@@ -12,7 +12,7 @@ type RenderPayload = {
   gridColor: string;
   gridStep: number;
   pattern: "grid" | "lines";
-  mode: "draw" | "erase" | "line" | "pan" | "graph";
+  mode: "draw" | "erase" | "line" | "pan" | "graph" | "lasso";
   eraserWidth: number;
   isDarkBg: boolean;
   lowPowerMode: boolean;

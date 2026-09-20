@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Minus, MoveDiagonal2, Plus, RotateCcw, Trash2 }
 import { useI18n } from "@/i18n";
 import type { GraphElement } from "./boardDocument";
 import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
+import { findGraphIntersections, formatIntersectionCoordinate } from "./graphIntersections";
 import GraphEditor from "./GraphEditor";
 import { TextOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyboard";
 import { getGraphDockPlacement } from "./graphDock";
@@ -33,6 +34,7 @@ export default function GraphElementView(props: Props) {
   const [editingLabel, setEditingLabel] = useState<"x" | "y" | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
   const [plotDragging, setPlotDragging] = useState(false);
+  const [showIntersections, setShowIntersections] = useState(false);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const labelSelectionRef = useRef({ start: 0, end: 0 });
   const dragRef = useRef<{
@@ -110,6 +112,18 @@ export default function GraphElementView(props: Props) {
       return { id: item.id, color: item.color, path: "" };
     }
   }), [graph.expressions, graph.height, graph.width, graph.xMax, graph.xMin, graph.yMax, graph.yMin]);
+
+  const intersections = useMemo(
+    () => showIntersections
+      ? findGraphIntersections(graph.expressions, {
+          xMin: graph.xMin,
+          xMax: graph.xMax,
+          yMin: graph.yMin,
+          yMax: graph.yMax,
+        }, Math.max(700, Math.round(graph.width * 2)))
+      : [],
+    [graph.expressions, graph.width, graph.xMax, graph.xMin, graph.yMax, graph.yMin, showIntersections],
+  );
 
   const viewportOf = (source: GraphElement): GraphViewport => ({
     xMin: source.xMin, xMax: source.xMax, yMin: source.yMin, yMax: source.yMax,
@@ -497,6 +511,46 @@ export default function GraphElementView(props: Props) {
           />
         ) : null)}
 
+        {intersections.map((point, index) => {
+          const x = mathToX(point.x);
+          const y = mathToY(point.y);
+          const nearRight = x > graph.width - 95;
+          const labelX = nearRight ? x - 7 : x + 7;
+          const labelY = clamp(y - 8, 12, graph.height - 6);
+          const label = `(${formatIntersectionCoordinate(point.x)}; ${formatIntersectionCoordinate(point.y)})`;
+          return (
+            <g
+              key={`${point.expressionAId}-${point.expressionBId}-${index}`}
+              data-testid="graph-intersection"
+              pointerEvents="none"
+            >
+              <circle
+                cx={x}
+                cy={y}
+                r={4}
+                fill={backgroundColor}
+                style={{ stroke: "rgb(var(--color-accent))" }}
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={labelX}
+                y={labelY}
+                textAnchor={nearRight ? "end" : "start"}
+                fontSize={9}
+                fontWeight={600}
+                fill={textFill}
+                stroke={backgroundColor}
+                strokeWidth={3}
+                paintOrder="stroke"
+                strokeLinejoin="round"
+              >
+                {label}
+              </text>
+            </g>
+          );
+        })}
+
         {editingLabel !== "x" && (
           <text
             data-testid="graph-x-label"
@@ -630,7 +684,7 @@ export default function GraphElementView(props: Props) {
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {!editorCollapsed && <GraphEditor graph={graph} onPreview={onPreview} onCommit={onCommit} />}
+          {!editorCollapsed && <GraphEditor graph={graph} onPreview={onPreview} onCommit={onCommit} showIntersections={showIntersections} onShowIntersectionsChange={setShowIntersections} />}
           {editingLabel && <TextOnScreenKeyboard onAction={handleTextKeyboard} />}
         </div>
       )}

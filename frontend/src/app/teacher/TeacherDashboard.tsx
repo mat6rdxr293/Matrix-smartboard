@@ -3,7 +3,6 @@ import type { Task } from "@/app/tasks/tasks";
 import type { Slide, SlideElement } from "@/app/presentation/Slides";
 import { DEFAULT_PRESENTATION_SOURCE, type PresentationSource } from "@/app/presentation/presentationSource";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
@@ -205,7 +204,8 @@ export default function TeacherDashboard({
     connected: boolean;
     user?: { displayName?: string | null; userPrincipalName?: string | null } | null;
   } | null>(null);
-  const [showSlideMeta, setShowSlideMeta] = useState(true);
+  const [showSlideMeta, setShowSlideMeta] = useState(false);
+  const [showPresentationImport, setShowPresentationImport] = useState(false);
   const [replaysLoading, setReplaysLoading] = useState(false);
   const [replayItems, setReplayItems] = useState<ReplayItem[]>([]);
   const [selectedReplay, setSelectedReplay] = useState<ReplayDetail | null>(null);
@@ -349,10 +349,10 @@ export default function TeacherDashboard({
   };
 
   const deleteTask = () => {
-    if (!activeTask || tasks.length <= 1) return;
+    if (!activeTask) return;
     const next = tasks.filter((_, i) => i !== taskIndex);
     onChangeTasks(next);
-    setTaskIndex(Math.max(0, taskIndex - 1));
+    setTaskIndex(Math.max(0, Math.min(taskIndex, next.length - 1)));
   };
 
   const addSlide = () => {
@@ -1111,14 +1111,6 @@ export default function TeacherDashboard({
   };
 
   const selectedElement = elements.find((el) => el.id === selectedElementId) ?? null;
-  const formatAutosaveTime = (ts: number | null) =>
-    ts
-      ? new Date(ts).toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-      : tl("not_available");
   const bgPresets = [
     {
       label: tl("bg_preset_light_gradient"),
@@ -1138,385 +1130,446 @@ export default function TeacherDashboard({
   ];
 
   return (
-    <div className={cn("glass flex flex-col rounded-2xl shadow-glass", fullPage ? "h-full" : "h-full max-h-[92vh]")}>
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden border border-white/10 bg-graphite/95",
+        fullPage ? "h-full rounded-none border-x-0 border-b-0" : "h-full max-h-[92vh] rounded-xl shadow-soft"
+      )}
+    >
       <div
         className={cn(
-          "modal-handle flex items-center justify-between border-b border-white/10 px-4 py-3",
+          "modal-handle flex h-12 items-center justify-between border-b border-white/10 px-4",
           onDragHandlePointerDown ? "cursor-grab active:cursor-grabbing" : ""
         )}
         onPointerDown={onDragHandlePointerDown}
       >
-        <div className="text-sm font-semibold uppercase tracking-wider text-frost/70">{tl("teacher_dashboard")}</div>
+        <div className="text-[13px] font-semibold text-frost">{tl("teacher_dashboard")}</div>
         <button
-          className="rounded-lg border border-white/10 px-2 py-1 text-xs text-frost/70 hover:text-frost"
+          className="h-8 px-2 text-[12px] font-medium text-frost/55 transition hover:text-frost"
           onClick={onClose}
-        >{
-          tl("close")
-        }</button>
+        >
+          {tl("close")}
+        </button>
       </div>
-      <div className="flex-1 overflow-auto">
-        <div className="flex items-center justify-between px-4 pt-3">
-          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1">
-            <button
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "tasks" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-              )}
-              onClick={() => setSection("tasks")}
-            >{
-              tl("tasks")
-            }</button>
-            <button
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "slides" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-              )}
-              onClick={() => setSection("slides")}
-            >{
-              tl("presentation")
-            }</button>
-            <button
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold transition",
-                section === "replays" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-              )}
-              onClick={() => setSection("replays")}
-            >{
-              tl("replays")
-            }</button>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-12 items-end justify-between gap-4 border-b border-white/10 px-4">
+          <div className="flex h-full items-end gap-5">
+            {([
+              ["tasks", tl("tasks")],
+              ["slides", tl("presentation")],
+              ["replays", tl("replays")],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                className={cn(
+                  "relative h-11 px-0 text-[12px] font-medium transition",
+                  section === id ? "text-frost" : "text-frost/50 hover:text-frost/80"
+                )}
+                onClick={() => setSection(id)}
+              >
+                {label}
+                {section === id && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={handleSaveServer} disabled={serverLoading}>{
-              tl("save_to_server")
-            }</Button>
-            <Button size="sm" variant="outline" onClick={handleDownloadPptx} disabled={exportLoading}>{
-              tl("download_pptx")
-            }</Button>
-            <Button size="sm" variant="outline" onClick={handleSavePptxServer} disabled={exportLoading}>{
-              tl("save_pptx")
-            }</Button>
-            <Badge className="bg-white/5">{tl("editor")}</Badge>
+
+          <div className="flex h-11 items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-md px-2.5 text-[11px]"
+              onClick={handleSaveServer}
+              disabled={serverLoading}
+            >
+              {tl("save_to_server")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-md px-2.5 text-[11px]"
+              onClick={handleDownloadPptx}
+              disabled={exportLoading}
+            >
+              {tl("download_pptx")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-md px-2.5 text-[11px]"
+              onClick={handleSavePptxServer}
+              disabled={exportLoading}
+            >
+              {tl("save_pptx")}
+            </Button>
           </div>
         </div>
-        {autosaveInfo && (
-          <div className="px-4 pt-2 text-[11px] text-frost/60">
-            {tl("autosave_server_every_secs_server_server_local_draft_local", {
-              sec: autosaveInfo.intervalSec,
-              server: formatAutosaveTime(autosaveInfo.lastServerSaveAt),
-              local: formatAutosaveTime(autosaveInfo.lastLocalBackupAt),
-            })}
+
+        {serverMessage && (
+          <div className="flex min-h-8 items-center border-b border-white/[0.06] px-4 text-[10px] text-frost/55">
+            {serverMessage}
           </div>
         )}
-        {serverMessage && <div className="px-4 pt-2 text-xs text-frost/60">{serverMessage}</div>}
+
+        <div className="min-h-0 flex-1 overflow-auto">
 
         {section === "tasks" && (
-          <div className="grid gap-4 p-4 lg:grid-cols-[220px_1fr]">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("list")}</div>
-                <Button size="sm" variant="outline" onClick={addTask}>{
-                  tl("add")
-                }</Button>
+          <div className="grid min-h-full lg:grid-cols-[264px_minmax(0,1fr)]">
+            <aside className="border-r border-white/10">
+              <div className="flex h-12 items-center justify-between border-b border-white/[0.06] px-4">
+                <div className="text-[12px] font-medium text-frost/60">{tl("list")}</div>
+                <button
+                  type="button"
+                  className="text-[12px] font-medium text-accent transition hover:opacity-80"
+                  onClick={addTask}
+                >
+                  + {tl("add")}
+                </button>
               </div>
-              <div className="max-h-[50vh] space-y-2 overflow-auto pr-1">
-                {tasks.map((task, idx) => (
-                  <button
-                    key={task.id}
-                    className={cn(
-                      "w-full rounded-xl border px-3 py-2 text-left text-xs transition",
-                      idx === taskIndex
-                        ? "border-accent/60 bg-accent/10"
-                        : "border-white/10 hover:border-white/30"
-                    )}
-                    onClick={() => setTaskIndex(idx)}
-                  >
-                    <div className="font-semibold">
-                      #{task.id} {task.title}
-                    </div>
-                    <div className="text-[11px] text-frost/60">{task.tags.join(", ")}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("task_editor")}</div>
-                <Button size="sm" variant="ghost" onClick={deleteTask} disabled={!activeTask || tasks.length <= 1}>{
-                  tl("delete")
-                }</Button>
+              <div className="max-h-[calc(100vh-220px)] overflow-auto py-1">
+                {tasks.length === 0 ? (
+                  <div className="px-4 py-5 text-[12px] leading-5 text-frost/40">{tl("no_tasks")}</div>
+                ) : (
+                  tasks.map((task, idx) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={cn(
+                        "relative block w-full border-b border-white/[0.055] px-4 py-3 text-left transition",
+                        idx === taskIndex
+                          ? "bg-white/[0.055] text-frost"
+                          : "text-frost/75 hover:bg-white/[0.03]"
+                      )}
+                      onClick={() => setTaskIndex(idx)}
+                    >
+                      {idx === taskIndex && <span className="absolute inset-y-2 left-0 w-0.5 bg-accent" />}
+                      <div className="truncate text-[12px] font-semibold">
+                        #{task.id} {task.title}
+                      </div>
+                      {task.tags.length > 0 && (
+                        <div className="mt-1 truncate text-[10px] text-frost/38">{task.tags.join(", ")}</div>
+                      )}
+                    </button>
+                  ))
+                )}
               </div>
-              {activeTask ? (
-                <div className="grid gap-3">
-                  <label className="text-xs text-frost/60">{
-                    tl("heading")
-                    }<input
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                      value={activeTask.title}
-                      onChange={(e) => updateTask({ title: e.target.value })}
-                    />
-                  </label>
-                  <label className="text-xs text-frost/60">{
-                    tl("condition_latex_support")
-                    }<textarea
-                      className="mt-1 h-28 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                      value={activeTask.problem}
-                      onChange={(e) => updateTask({ problem: e.target.value })}
-                    />
-                  </label>
-                  <label className="text-xs text-frost/60">{
-                    tl("tags_separated_by_commas")
-                    }<input
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                      value={activeTask.tags.join(", ")}
-                      onChange={(e) =>
-                        updateTask({
-                          tags: e.target.value
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </label>
+            </aside>
+
+            <section className="min-w-0 px-6 py-5">
+              <div className="mx-auto max-w-[980px]">
+                <div className="mb-5 flex items-center justify-between border-b border-white/[0.07] pb-3">
+                  <div className="text-[13px] font-semibold text-frost">{tl("task_editor")}</div>
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-frost/38 transition hover:text-ember disabled:cursor-default disabled:opacity-30"
+                    onClick={deleteTask}
+                    disabled={!activeTask}
+                  >
+                    {tl("delete")}
+                  </button>
                 </div>
-              ) : (
-                <div className="text-sm text-frost/50">{tl("no_tasks")}</div>
-              )}
-            </div>
+
+                {activeTask ? (
+                  <div className="grid gap-5">
+                    <label className="block text-[11px] font-medium text-frost/45">
+                      {tl("heading")}
+                      <input
+                        className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-transparent px-3 text-[13px] text-frost outline-none transition focus:border-white/25"
+                        value={activeTask.title}
+                        onChange={(e) => updateTask({ title: e.target.value })}
+                      />
+                    </label>
+
+                    <label className="block text-[11px] font-medium text-frost/45">
+                      {tl("condition_latex_support")}
+                      <textarea
+                        className="mt-1.5 min-h-[150px] w-full resize-y rounded-md border border-white/10 bg-transparent px-3 py-2.5 text-[13px] leading-5 text-frost outline-none transition focus:border-white/25"
+                        value={activeTask.problem}
+                        onChange={(e) => updateTask({ problem: e.target.value })}
+                      />
+                    </label>
+
+                    <label className="block text-[11px] font-medium text-frost/45">
+                      {tl("tags_separated_by_commas")}
+                      <input
+                        className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-transparent px-3 text-[13px] text-frost outline-none transition focus:border-white/25"
+                        value={activeTask.tags.join(", ")}
+                        onChange={(e) =>
+                          updateTask({
+                            tags: e.target.value
+                              .split(",")
+                              .map((t) => t.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <div className="py-16 text-center text-[12px] text-frost/40">{tl("no_tasks")}</div>
+                )}
+              </div>
+            </section>
           </div>
         )}
 
         {section === "slides" && (
-          <div className="grid gap-4 p-4 lg:grid-cols-[220px_1fr_260px]">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("slides")}</div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  <Button size="sm" variant="outline" onClick={addSlide}>{
-                    tl("add")
-                  }</Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="whitespace-normal leading-tight"
-                    onClick={() => {
-                      setPptxMode("full");
-                      setPptxWithBackground(false);
-                      pptxInputRef.current?.click();
-                    }}
-                    disabled={pptxLoading}
+          <div className={cn("grid min-h-full", selectedElement || showSlideMeta ? "lg:grid-cols-[224px_minmax(0,1fr)_248px]" : "lg:grid-cols-[224px_minmax(0,1fr)]")}>
+            <aside className="border-r border-white/10">
+              <div className="flex h-12 items-center justify-between border-b border-white/[0.06] px-4">
+                <div className="text-[12px] font-medium text-frost/60">{tl("slides")}</div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-frost/45 transition hover:text-frost/75"
+                    onClick={() => setShowPresentationImport((prev) => !prev)}
                   >
-                    {pptxLoading ? tl("import_menu") : tl("import_pptx_as_picture")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="whitespace-normal leading-tight"
-                    onClick={() => {
-                      setPptxMode("editable");
-                      setPptxWithBackground(true);
-                      pptxInputRef.current?.click();
-                    }}
-                    disabled={pptxLoading}
-                  >{
-                    tl("import_background")
-                  }</Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="whitespace-normal leading-tight"
-                    onClick={() => {
-                      setPptxMode("stickers");
-                      setPptxWithBackground(false);
-                      pptxInputRef.current?.click();
-                    }}
-                    disabled={pptxLoading}
-                  >{
-                    tl("import_stickers_slow")
-                  }</Button>
+                    {showPresentationImport ? "Скрыть импорт" : "Импорт"}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[12px] font-medium text-accent transition hover:opacity-80"
+                    onClick={addSlide}
+                  >
+                    + {tl("add")}
+                  </button>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs uppercase tracking-wider text-frost/60">Microsoft 365</div>
-                  <Badge className="bg-white/10">
-                    {m365StatusLoading
-                      ? tl("loading")
-                      : m365Status?.connected
-                        ? "Connected"
-                        : m365Status?.configured
-                          ? "Not connected"
-                          : "Not configured"}
-                  </Badge>
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleM365Connect}
-                    disabled={m365Loading || m365StatusLoading || !m365Status?.configured}
-                  >
-                    Connect M365
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => m365PptxInputRef.current?.click()}
-                    disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
-                  >
-                    Upload PPTX to M365
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void handleM365SessionUpdate({
-                        mode: presentationSource.mode === "edit" ? "view" : "edit",
-                        access: presentationSource.access,
-                      })
-                    }
-                    disabled={
-                      m365Loading ||
-                      m365StatusLoading ||
-                      !m365Status?.connected ||
-                      !presentationSource.fileId
-                    }
-                  >
-                    {presentationSource.mode === "edit" ? "Mode: Edit" : "Mode: View"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void handleM365SessionUpdate({
-                        mode: presentationSource.mode,
-                        access: presentationSource.access === "public" ? "private" : "public",
-                      })
-                    }
-                    disabled={
-                      m365Loading ||
-                      m365StatusLoading ||
-                      !m365Status?.connected ||
-                      !presentationSource.fileId
-                    }
-                  >
-                    {presentationSource.access === "public" ? "Access: Public" : "Access: Private"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleM365Disconnect}
-                    disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
-                  >
-                    Disconnect M365
-                  </Button>
-                </div>
-                {!!m365Status?.user && (
-                  <div className="mt-2 text-[11px] text-frost/60">
-                    {m365Status.user.displayName || m365Status.user.userPrincipalName}
+              {showPresentationImport && (
+                <div className="border-b border-white/[0.07] px-3 py-3">
+                  <div className="grid gap-1">
+                    <button
+                      type="button"
+                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
+                      onClick={() => {
+                        setPptxMode("full");
+                        setPptxWithBackground(false);
+                        pptxInputRef.current?.click();
+                      }}
+                      disabled={pptxLoading}
+                    >
+                      {pptxLoading ? tl("import_menu") : tl("import_pptx_as_picture")}
+                    </button>
+                    <button
+                      type="button"
+                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
+                      onClick={() => {
+                        setPptxMode("editable");
+                        setPptxWithBackground(true);
+                        pptxInputRef.current?.click();
+                      }}
+                      disabled={pptxLoading}
+                    >
+                      {tl("import_background")}
+                    </button>
+                    <button
+                      type="button"
+                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
+                      onClick={() => {
+                        setPptxMode("stickers");
+                        setPptxWithBackground(false);
+                        pptxInputRef.current?.click();
+                      }}
+                      disabled={pptxLoading}
+                    >
+                      {tl("import_stickers_slow")}
+                    </button>
                   </div>
-                )}
-              </div>
 
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs uppercase tracking-wider text-frost/60">Office Viewer (no M365)</div>
-                  <Badge className="bg-white/10">{presentationSource.type === "office" ? "Active" : "Inactive"}</Badge>
-                </div>
-                <div className="mt-2 flex gap-2">
-                  <input
-                    type="url"
-                    className="h-8 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 text-xs"
-                    placeholder="Вставьте публичную ссылку PPTX/OneDrive"
-                    value={officeViewerLink}
-                    onChange={(e) => setOfficeViewerLink(e.target.value)}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void handleOfficeViewerLinkApply()}
-                    disabled={m365Loading}
-                  >
-                    Применить
-                  </Button>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => officeViewerInputRef.current?.click()}
-                    disabled={m365Loading}
-                  >
-                    Import to Office Viewer
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => onChangePresentationSource(DEFAULT_PRESENTATION_SOURCE)}
-                    disabled={m365Loading || presentationSource.type !== "office"}
-                  >
-                    Disable Office Viewer
-                  </Button>
-                </div>
-              </div>
+                  <details className="mt-3 border-t border-white/[0.06] pt-2">
+                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/45">
+                      Microsoft 365
+                      <span className="ml-2 text-frost/30">
+                        {m365StatusLoading
+                          ? tl("loading")
+                          : m365Status?.connected
+                            ? "подключён"
+                            : m365Status?.configured
+                              ? "не подключён"
+                              : "не настроен"}
+                      </span>
+                    </summary>
+                    <div className="mt-2 grid gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 justify-start rounded-md px-2 text-[11px]"
+                        onClick={handleM365Connect}
+                        disabled={m365Loading || m365StatusLoading || !m365Status?.configured}
+                      >
+                        Подключить M365
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 justify-start rounded-md px-2 text-[11px]"
+                        onClick={() => m365PptxInputRef.current?.click()}
+                        disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
+                      >
+                        Загрузить PPTX в M365
+                      </Button>
+                      {!!presentationSource.fileId && (
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            className="h-8 rounded-md px-2 text-left text-[10px] text-frost/55 hover:bg-white/[0.04]"
+                            onClick={() =>
+                              void handleM365SessionUpdate({
+                                mode: presentationSource.mode === "edit" ? "view" : "edit",
+                                access: presentationSource.access,
+                              })
+                            }
+                            disabled={m365Loading || !m365Status?.connected}
+                          >
+                            {presentationSource.mode === "edit" ? "Режим: редактирование" : "Режим: просмотр"}
+                          </button>
+                          <button
+                            type="button"
+                            className="h-8 rounded-md px-2 text-left text-[10px] text-frost/55 hover:bg-white/[0.04]"
+                            onClick={() =>
+                              void handleM365SessionUpdate({
+                                mode: presentationSource.mode,
+                                access: presentationSource.access === "public" ? "private" : "public",
+                              })
+                            }
+                            disabled={m365Loading || !m365Status?.connected}
+                          >
+                            {presentationSource.access === "public" ? "Доступ: публичный" : "Доступ: закрытый"}
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="h-8 px-2 text-left text-[10px] text-frost/38 transition hover:text-frost/65 disabled:opacity-30"
+                        onClick={handleM365Disconnect}
+                        disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
+                      >
+                        Отключить M365
+                      </button>
+                    </div>
+                  </details>
 
-              <div className="max-h-[50vh] space-y-2 overflow-auto pr-1">
+                  <details className="mt-2 border-t border-white/[0.06] pt-2">
+                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/45">
+                      Office Viewer
+                      <span className="ml-2 text-frost/30">
+                        {presentationSource.type === "office" ? "активен" : "неактивен"}
+                      </span>
+                    </summary>
+                    <div className="mt-2 grid gap-1.5">
+                      <div className="flex gap-1">
+                        <input
+                          type="url"
+                          className="h-8 min-w-0 flex-1 rounded-md border border-white/10 bg-transparent px-2 text-[10px] outline-none focus:border-white/25"
+                          placeholder="Ссылка PPTX / OneDrive"
+                          value={officeViewerLink}
+                          onChange={(e) => setOfficeViewerLink(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 rounded-md px-2 text-[10px]"
+                          onClick={() => void handleOfficeViewerLinkApply()}
+                          disabled={m365Loading}
+                        >
+                          Открыть
+                        </Button>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 justify-start rounded-md px-2 text-[11px]"
+                        onClick={() => officeViewerInputRef.current?.click()}
+                        disabled={m365Loading}
+                      >
+                        Импортировать файл
+                      </Button>
+                      {presentationSource.type === "office" && (
+                        <button
+                          type="button"
+                          className="h-8 px-2 text-left text-[10px] text-frost/38 transition hover:text-frost/65"
+                          onClick={() => onChangePresentationSource(DEFAULT_PRESENTATION_SOURCE)}
+                          disabled={m365Loading}
+                        >
+                          Отключить Office Viewer
+                        </button>
+                      )}
+                    </div>
+                  </details>
+
+                  {pptxError && <div className="mt-2 text-[10px] text-ember">{pptxError}</div>}
+                </div>
+              )}
+
+              <div className="max-h-[calc(100vh-190px)] overflow-auto py-1">
                 {slides.map((slide, idx) => (
                   <button
                     key={slide.id}
+                    type="button"
                     className={cn(
-                      "w-full rounded-xl border px-3 py-2 text-left text-xs transition",
-                      idx === slideIndex ? "border-neon/40 bg-white/10" : "border-white/10 hover:border-white/30"
+                      "relative block w-full border-b border-white/[0.055] px-4 py-3 text-left transition",
+                      idx === slideIndex
+                        ? "bg-white/[0.055] text-frost"
+                        : "text-frost/75 hover:bg-white/[0.03]"
                     )}
                     onClick={() => setSlideIndex(idx)}
                   >
-                    <div className="font-semibold">
-                      #{slide.id} {slide.title}
+                    {idx === slideIndex && <span className="absolute inset-y-2 left-0 w-0.5 bg-accent" />}
+                    <div className="truncate text-[12px] font-semibold">
+                      {idx + 1}. {slide.title || tl("slide")}
                     </div>
-                    <div className="text-[11px] text-frost/60">{slide.notes ? tl("has_notes") : tl("no_notes")}</div>
+                    {slide.notes && <div className="mt-1 truncate text-[10px] text-frost/35">{tl("has_notes")}</div>}
                   </button>
                 ))}
               </div>
-              {pptxError && <div className="mt-2 text-xs text-ember">{pptxError}</div>}
-            </div>
+            </aside>
 
-            <div className="space-y-3">
-              <div className="text-xs uppercase tracking-wider text-frost/60">{tl("slide_designer")}</div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={addTextElement}>{
-                  tl("text")
-                }</Button>
-                <Button size="sm" variant="outline" onClick={() => handlePickImage()}>{
-                  tl("picture")
-                }</Button>
-                <Button size="sm" variant="outline" onClick={() => addShapeElement("rect")}>{
-                  tl("rectangular")
-                }</Button>
-                <Button size="sm" variant="outline" onClick={() => addShapeElement("round")}>{
-                  tl("rounded")
-                }</Button>
-                <Button size="sm" variant="outline" onClick={() => addShapeElement("ellipse")}>{
-                  tl("circle")
-                }</Button>
-                {activeSlide?.background && (
-                  <Button size="sm" variant="outline" onClick={() => updateSlide({ background: "" })}>{
-                    tl("reset_background")
-                  }</Button>
-                )}
-                <Button size="sm" variant="outline" onClick={() => setShowSlideMeta((prev) => !prev)}>
-                  {showSlideMeta ? tl("hide_fields") : tl("show_fields")}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={deleteSlide} disabled={!activeSlide || slides.length <= 1}>{
-                  tl("delete")
-                }</Button>
+            <section className="min-w-0 border-r border-white/10">
+              <div className="flex h-12 items-center justify-between border-b border-white/[0.07] px-4">
+                <details className="group relative">
+                  <summary className="flex h-8 cursor-pointer list-none items-center rounded-md px-2.5 text-[11px] font-medium text-frost/70 transition hover:bg-white/[0.045] hover:text-frost">
+                    + {tl("add")}
+                  </summary>
+                  <div className="absolute left-0 top-9 z-40 min-w-[170px] overflow-hidden rounded-lg border border-white/10 bg-graphite py-1 shadow-soft">
+                    <button type="button" className="block h-8 w-full px-3 text-left text-[11px] text-frost/70 hover:bg-white/[0.05]" onClick={addTextElement}>
+                      {tl("text")}
+                    </button>
+                    <button type="button" className="block h-8 w-full px-3 text-left text-[11px] text-frost/70 hover:bg-white/[0.05]" onClick={() => handlePickImage()}>
+                      {tl("picture")}
+                    </button>
+                    <div className="my-1 border-t border-white/[0.07]" />
+                    <button type="button" className="block h-8 w-full px-3 text-left text-[11px] text-frost/60 hover:bg-white/[0.05]" onClick={() => addShapeElement("rect")}>
+                      {tl("rectangular")}
+                    </button>
+                    <button type="button" className="block h-8 w-full px-3 text-left text-[11px] text-frost/60 hover:bg-white/[0.05]" onClick={() => addShapeElement("round")}>
+                      {tl("rounded")}
+                    </button>
+                    <button type="button" className="block h-8 w-full px-3 text-left text-[11px] text-frost/60 hover:bg-white/[0.05]" onClick={() => addShapeElement("ellipse")}>
+                      {tl("circle")}
+                    </button>
+                  </div>
+                </details>
+
+                <button
+                  type="button"
+                  className={cn(
+                    "h-8 rounded-md px-2.5 text-[11px] font-medium transition",
+                    showSlideMeta ? "bg-white/[0.06] text-frost" : "text-frost/45 hover:bg-white/[0.04] hover:text-frost/75"
+                  )}
+                  onClick={() => {
+                    setSelectedElementId(null);
+                    setShowSlideMeta((prev) => !prev);
+                  }}
+                >
+                  Слайд
+                </button>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-white/5 p-2 overflow-auto">
+              <div className="flex min-h-[600px] items-start justify-center overflow-auto bg-ink/20 p-5">
                 <div
-                  className="relative rounded-lg border border-white/10 bg-ink/60 overflow-hidden"
+                  className="relative overflow-hidden border border-white/10 bg-graphite shadow-soft"
                   style={{
                     width: STAGE_W,
                     height: STAGE_H,
@@ -1538,6 +1591,7 @@ export default function TeacherDashboard({
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         setSelectedElementId(el.id);
+                        setShowSlideMeta(false);
                       }}
                     >
                       {el.type === "text" ? (
@@ -1587,345 +1641,419 @@ export default function TeacherDashboard({
                           }}
                         />
                       )}
-                      <div
-                        className="absolute -top-3 left-1/2 h-4 w-12 -translate-x-1/2 cursor-move rounded-full border border-white/30 bg-white/10"
-                        onPointerDown={(e) => startDrag(el, "move", e)}
-                        title={tl("drag")}
-                      />
-                      <div
-                        className="absolute -top-2 -left-2 h-4 w-4 cursor-nwse-resize rounded-sm border border-white/30 bg-white/10"
-                        onPointerDown={(e) => startDrag(el, "resize", e, "nw")}
-                        title={tl("resize")}
-                      />
-                      <div
-                        className="absolute -top-2 -right-2 h-4 w-4 cursor-nesw-resize rounded-sm border border-white/30 bg-white/10"
-                        onPointerDown={(e) => startDrag(el, "resize", e, "ne")}
-                        title={tl("resize")}
-                      />
-                      <div
-                        className="absolute -bottom-2 -left-2 h-4 w-4 cursor-nesw-resize rounded-sm border border-white/30 bg-white/10"
-                        onPointerDown={(e) => startDrag(el, "resize", e, "sw")}
-                        title={tl("resize")}
-                      />
-                      <div
-                        className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-sm border border-white/30 bg-white/10"
-                        onPointerDown={(e) => startDrag(el, "resize", e, "se")}
-                        title={tl("resize")}
-                      />
+                      {selectedElementId === el.id && (
+                        <>
+                          <div
+                            className="absolute -top-3 left-1/2 h-3 w-10 -translate-x-1/2 cursor-move border border-accent/60 bg-graphite"
+                            onPointerDown={(e) => startDrag(el, "move", e)}
+                            title={tl("drag")}
+                          />
+                          {(["nw", "ne", "sw", "se"] as const).map((handle) => (
+                            <div
+                              key={handle}
+                              className={cn(
+                                "absolute h-3 w-3 border border-accent bg-graphite",
+                                handle === "nw" && "-left-1.5 -top-1.5 cursor-nwse-resize",
+                                handle === "ne" && "-right-1.5 -top-1.5 cursor-nesw-resize",
+                                handle === "sw" && "-bottom-1.5 -left-1.5 cursor-nesw-resize",
+                                handle === "se" && "-bottom-1.5 -right-1.5 cursor-nwse-resize"
+                              )}
+                              onPointerDown={(e) => startDrag(el, "resize", e, handle)}
+                              title={tl("resize")}
+                            />
+                          ))}
+                        </>
+                      )}
                     </div>
                   ))}
-                  {showSlideMeta && (
-                    <div
-                      className="absolute bottom-2 left-1/2 w-[92%] -translate-x-1/2 rounded-xl border border-white/10 bg-black/50 backdrop-blur-md p-3 max-h-[42%] overflow-auto"
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      <div className="grid gap-2">
-                        <label className="text-[10px] uppercase tracking-wider text-frost/60">{
-                          tl("heading")
-                          }<input
-                            className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                            value={activeSlide?.title ?? ""}
-                            onChange={(e) => updateSlide({ title: e.target.value })}
-                          />
-                        </label>
-                        <div className="grid gap-2 md:grid-cols-2">
-                          <label className="text-[10px] uppercase tracking-wider text-frost/60">{
-                            tl("notes")
-                            }<textarea
-                              className="mt-1 h-16 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                </div>
+              </div>
+
+            </section>
+
+            {(selectedElement || showSlideMeta) && (
+              <aside className="min-w-0">
+                <div className="flex h-12 items-center justify-between border-b border-white/[0.07] px-4">
+                  <div className="text-[12px] font-medium text-frost/60">
+                    {selectedElement ? tl("properties") : "Слайд"}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-[11px] text-frost/35 transition hover:text-frost/65"
+                    onClick={() => {
+                      setSelectedElementId(null);
+                      setShowSlideMeta(false);
+                    }}
+                  >
+                    {tl("close")}
+                  </button>
+                </div>
+
+                <div className="max-h-[calc(100vh-180px)] overflow-auto p-4">
+                  {selectedElement ? (
+                    <div className="space-y-4">
+                      {selectedElement.type === "text" ? (
+                        <>
+                          <label className="block text-[10px] font-medium text-frost/45">
+                            {tl("text")}
+                            <textarea
+                              className="mt-1.5 h-24 w-full resize-none rounded-md border border-white/10 bg-transparent px-3 py-2 text-[12px] leading-5 text-frost outline-none focus:border-white/25"
+                              value={selectedElement.text}
+                              onChange={(e) => updateElement(selectedElement.id, { text: e.target.value })}
+                            />
+                          </label>
+
+                          <label className="block text-[10px] font-medium text-frost/45">
+                            {tl("font")}
+                            <select
+                              className="mt-1.5 h-9 w-full rounded-md border border-white/10 bg-transparent px-2 text-[11px] text-frost outline-none"
+                              value={selectedElement.fontFamily ?? "Montserrat"}
+                              onChange={(e) => updateElement(selectedElement.id, { fontFamily: e.target.value })}
+                            >
+                              {FONT_OPTIONS.map((font) => (
+                                <option key={font} value={font}>{font}</option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label className="block text-[10px] font-medium text-frost/45">
+                            {tl("font_size")}
+                            <input
+                              type="range"
+                              min={12}
+                              max={72}
+                              value={selectedElement.fontSize ?? 22}
+                              className="mt-2 w-full"
+                              onChange={(e) => updateElement(selectedElement.id, { fontSize: Number(e.target.value) })}
+                            />
+                          </label>
+
+                          <div className="flex items-end justify-between gap-3">
+                            <label className="text-[10px] font-medium text-frost/45">
+                              {tl("color")}
+                              <input
+                                type="color"
+                                className="mt-1 block h-8 w-10 border-0 bg-transparent p-0"
+                                value={selectedElement.color ?? "#E7F2FF"}
+                                onChange={(e) => updateElement(selectedElement.id, { color: e.target.value })}
+                              />
+                            </label>
+                            <div className="flex items-center gap-1">
+                              {(["left", "center", "right"] as const).map((align) => (
+                                <button
+                                  key={align}
+                                  type="button"
+                                  className={cn(
+                                    "h-7 rounded-md px-2 text-[10px] transition",
+                                    selectedElement.align === align
+                                      ? "bg-white/[0.08] text-frost"
+                                      : "text-frost/45 hover:bg-white/[0.04] hover:text-frost/70"
+                                  )}
+                                  onClick={() => updateElement(selectedElement.id, { align })}
+                                >
+                                  {align === "left" ? tl("left") : align === "center" ? tl("centered") : tl("right")}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <details className="border-t border-white/[0.07] pt-3">
+                            <summary className="cursor-pointer list-none text-[11px] font-medium text-frost/45">
+                              Дополнительно
+                            </summary>
+                            <div className="mt-3 space-y-3">
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-frost/40">
+                                  {tl("stroke")}
+                                  <input
+                                    type="color"
+                                    className="mt-1 block h-8 w-10 border-0 bg-transparent p-0"
+                                    value={selectedElement.strokeColor ?? "#0A0E14"}
+                                    onChange={(e) => updateElement(selectedElement.id, { strokeColor: e.target.value })}
+                                  />
+                                </label>
+                                <label className="text-[10px] text-frost/40">
+                                  {tl("stroke_thickness")}
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={6}
+                                    className="mt-2 w-full"
+                                    value={selectedElement.strokeWidth ?? 0}
+                                    onChange={(e) => updateElement(selectedElement.id, { strokeWidth: Number(e.target.value) })}
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-frost/40">
+                                  W
+                                  <input
+                                    type="number"
+                                    className="mt-1 h-8 w-full rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                    value={Math.round(selectedElement.w)}
+                                    onChange={(e) => updateElement(selectedElement.id, { w: Number(e.target.value) })}
+                                  />
+                                </label>
+                                <label className="text-[10px] text-frost/40">
+                                  H
+                                  <input
+                                    type="number"
+                                    className="mt-1 h-8 w-full rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                    value={Math.round(selectedElement.h)}
+                                    onChange={(e) => updateElement(selectedElement.id, { h: Number(e.target.value) })}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          </details>
+                        </>
+                      ) : selectedElement.type === "shape" ? (
+                        <>
+                          <label className="block text-[10px] font-medium text-frost/45">
+                            {tl("shape_type")}
+                            <select
+                              className="mt-1.5 h-9 w-full rounded-md border border-white/10 bg-transparent px-2 text-[11px] text-frost outline-none"
+                              value={selectedElement.shape}
+                              onChange={(e) =>
+                                updateElement(selectedElement.id, {
+                                  shape: e.target.value as "rect" | "round" | "ellipse",
+                                })
+                              }
+                            >
+                              <option value="rect">{tl("rectangle")}</option>
+                              <option value="round">{tl("rounded_shape")}</option>
+                              <option value="ellipse">{tl("circle_oval")}</option>
+                            </select>
+                          </label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <label className="text-[10px] font-medium text-frost/45">
+                              {tl("fill")}
+                              <input
+                                type="color"
+                                className="mt-1 block h-8 w-10 border-0 bg-transparent p-0"
+                                value={selectedElement.fill ?? "#1B2332"}
+                                onChange={(e) => updateElement(selectedElement.id, { fill: e.target.value })}
+                              />
+                            </label>
+                            <label className="text-[10px] font-medium text-frost/45">
+                              {tl("stroke")}
+                              <input
+                                type="color"
+                                className="mt-1 block h-8 w-10 border-0 bg-transparent p-0"
+                                value={selectedElement.strokeColor ?? "#7C8BA1"}
+                                onChange={(e) => updateElement(selectedElement.id, { strokeColor: e.target.value })}
+                              />
+                            </label>
+                          </div>
+                          <details className="border-t border-white/[0.07] pt-3">
+                            <summary className="cursor-pointer list-none text-[11px] font-medium text-frost/45">
+                              Размер и обводка
+                            </summary>
+                            <div className="mt-3 space-y-3">
+                              <input
+                                type="range"
+                                min={0}
+                                max={12}
+                                className="w-full"
+                                value={selectedElement.strokeWidth ?? 2}
+                                onChange={(e) => updateElement(selectedElement.id, { strokeWidth: Number(e.target.value) })}
+                              />
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="number"
+                                  className="h-8 rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                  value={Math.round(selectedElement.w)}
+                                  onChange={(e) => updateElement(selectedElement.id, { w: Number(e.target.value) })}
+                                />
+                                <input
+                                  type="number"
+                                  className="h-8 rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                  value={Math.round(selectedElement.h)}
+                                  onChange={(e) => updateElement(selectedElement.id, { h: Number(e.target.value) })}
+                                />
+                              </div>
+                            </div>
+                          </details>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="h-9 w-full rounded-md border border-white/10 text-[11px] text-frost/65 transition hover:bg-white/[0.04]"
+                            onClick={() => handlePickImage(selectedElement.id)}
+                          >
+                            {tl("replace_image")}
+                          </button>
+                          <details className="border-t border-white/[0.07] pt-3">
+                            <summary className="cursor-pointer list-none text-[11px] font-medium text-frost/45">
+                              Размер
+                            </summary>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                className="h-8 rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                value={Math.round(selectedElement.w)}
+                                onChange={(e) => updateElement(selectedElement.id, { w: Number(e.target.value) })}
+                              />
+                              <input
+                                type="number"
+                                className="h-8 rounded-md border border-white/10 bg-transparent px-2 text-[11px]"
+                                value={Math.round(selectedElement.h)}
+                                onChange={(e) => updateElement(selectedElement.id, { h: Number(e.target.value) })}
+                              />
+                            </div>
+                          </details>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        className="border-t border-white/[0.07] pt-3 text-left text-[10px] font-medium text-frost/35 transition hover:text-ember"
+                        onClick={deleteElement}
+                      >
+                        {tl("remove_element")}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <label className="block text-[10px] font-medium text-frost/45">
+                        {tl("heading")}
+                        <input
+                          className="mt-1.5 h-9 w-full rounded-md border border-white/10 bg-transparent px-3 text-[12px] text-frost outline-none focus:border-white/25"
+                          value={activeSlide?.title ?? ""}
+                          onChange={(e) => updateSlide({ title: e.target.value })}
+                        />
+                      </label>
+
+                      <details>
+                        <summary className="cursor-pointer list-none text-[11px] font-medium text-frost/45">
+                          Текст и заметки
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          <label className="block text-[10px] text-frost/40">
+                            {tl("notes")}
+                            <textarea
+                              className="mt-1 h-20 w-full resize-none rounded-md border border-white/10 bg-transparent px-2 py-2 text-[11px] leading-4 outline-none"
                               value={activeSlide?.notes ?? ""}
                               onChange={(e) => updateSlide({ notes: e.target.value })}
                             />
                           </label>
-                          <label className="text-[10px] uppercase tracking-wider text-frost/60">{
-                            tl("content_if_without_elements")
-                            }<textarea
-                              className="mt-1 h-16 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                          <label className="block text-[10px] text-frost/40">
+                            {tl("content_if_without_elements")}
+                            <textarea
+                              className="mt-1 h-20 w-full resize-none rounded-md border border-white/10 bg-transparent px-2 py-2 text-[11px] leading-4 outline-none"
                               value={activeSlide?.content ?? ""}
                               onChange={(e) => updateSlide({ content: e.target.value })}
                             />
                           </label>
                         </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+                      </details>
 
-              <div className="text-xs text-frost/60">{
-                tl("slide_size_16_9_960_540_drag_blocks_and_resize_corners")
-              }</div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="text-xs uppercase tracking-wider text-frost/60">{tl("properties")}</div>
-              {selectedElement ? (
-                <div className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-frost/60">
-                    {tl("type")}{" "}
-                    {selectedElement.type === "text"
-                      ? tl("text")
-                      : selectedElement.type === "shape"
-                        ? tl("figure")
-                        : tl("image")}
-                  </div>
-                  {selectedElement.type === "text" ? (
-                    <>
-                      <label className="text-xs text-frost/60">{
-                        tl("text")
-                        }<textarea
-                          className="mt-1 h-24 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                          value={selectedElement.text}
-                          onChange={(e) => updateElement(selectedElement.id, { text: e.target.value })}
-                        />
-                      </label>
-                      <label className="text-xs text-frost/60">{
-                        tl("font")
-                        }<select
-                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                          value={selectedElement.fontFamily ?? "Montserrat"}
-                          onChange={(e) => updateElement(selectedElement.id, { fontFamily: e.target.value })}
-                        >
-                          {FONT_OPTIONS.map((font) => (
-                            <option key={font} value={font}>
-                              {font}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="text-xs text-frost/60">{
-                        tl("font_size")
-                        }<input
-                          type="range"
-                          min={12}
-                          max={72}
-                          value={selectedElement.fontSize ?? 22}
-                          onChange={(e) => updateElement(selectedElement.id, { fontSize: Number(e.target.value) })}
-                        />
-                      </label>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-frost/60">
-                        <label>{
-                          tl("color")
-                          }<input
-                            type="color"
-                            className="mt-1 h-8 w-full rounded border border-white/10 bg-white/5"
-                            value={selectedElement.color ?? "#E7F2FF"}
-                            onChange={(e) => updateElement(selectedElement.id, { color: e.target.value })}
-                          />
-                        </label>
-                        <label>{
-                          tl("stroke")
-                          }<input
-                            type="color"
-                            className="mt-1 h-8 w-full rounded border border-white/10 bg-white/5"
-                            value={selectedElement.strokeColor ?? "#0A0E14"}
-                            onChange={(e) => updateElement(selectedElement.id, { strokeColor: e.target.value })}
-                          />
-                        </label>
-                      </div>
-                      <label className="text-xs text-frost/60">{
-                        tl("stroke_thickness")
-                        }<input
-                          type="range"
-                          min={0}
-                          max={6}
-                          value={selectedElement.strokeWidth ?? 0}
-                          onChange={(e) =>
-                            updateElement(selectedElement.id, { strokeWidth: Number(e.target.value) })
-                          }
-                        />
-                      </label>
-                      <div className="flex items-center gap-2 text-xs text-frost/60">
-                        <span>{tl("alignment")}</span>
-                        {["left", "center", "right"].map((align) => (
-                          <button
-                            key={align}
-                            className={cn(
-                              "rounded-full px-3 py-1 text-xs font-semibold transition",
-                              selectedElement.align === align
-                                ? "bg-accent text-accentText"
-                                : "border border-white/10 text-frost/70 hover:text-frost"
-                            )}
-                            onClick={() => updateElement(selectedElement.id, { align })}
-                          >
-                            {align === "left" ? tl("left") : align === "center" ? tl("centered") : tl("right")}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  ) : selectedElement.type === "shape" ? (
-                    <>
-                      <label className="text-xs text-frost/60">{
-                        tl("shape_type")
-                        }<select
-                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-                          value={selectedElement.shape}
-                          onChange={(e) =>
-                            updateElement(selectedElement.id, {
-                              shape: e.target.value as "rect" | "round" | "ellipse",
-                            })
-                          }
-                        >
-                          <option value="rect">{tl("rectangle")}</option>
-                          <option value="round">{tl("rounded_shape")}</option>
-                          <option value="ellipse">{tl("circle_oval")}</option>
-                        </select>
-                      </label>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-frost/60">
-                        <label>{
-                          tl("fill")
-                          }<input
-                            type="color"
-                            className="mt-1 h-8 w-full rounded border border-white/10 bg-white/5"
-                            value={selectedElement.fill ?? "#1B2332"}
-                            onChange={(e) => updateElement(selectedElement.id, { fill: e.target.value })}
-                          />
-                        </label>
-                        <label>{
-                          tl("stroke")
-                          }<input
-                            type="color"
-                            className="mt-1 h-8 w-full rounded border border-white/10 bg-white/5"
-                            value={selectedElement.strokeColor ?? "#7C8BA1"}
-                            onChange={(e) => updateElement(selectedElement.id, { strokeColor: e.target.value })}
-                          />
-                        </label>
-                      </div>
-                      <label className="text-xs text-frost/60">{
-                        tl("stroke_thickness")
-                        }<input
-                          type="range"
-                          min={0}
-                          max={12}
-                          value={selectedElement.strokeWidth ?? 2}
-                          onChange={(e) =>
-                            updateElement(selectedElement.id, { strokeWidth: Number(e.target.value) })
-                          }
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => handlePickImage(selectedElement.id)}>{
-                      tl("replace_image")
-                    }</Button>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 text-xs text-frost/60">
-                    <label>
-                      W
-                      <input
-                        type="number"
-                        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1"
-                        value={Math.round(selectedElement.w)}
-                        onChange={(e) => updateElement(selectedElement.id, { w: Number(e.target.value) })}
-                      />
-                    </label>
-                    <label>
-                      H
-                      <input
-                        type="number"
-                        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1"
-                        value={Math.round(selectedElement.h)}
-                        onChange={(e) => updateElement(selectedElement.id, { h: Number(e.target.value) })}
-                      />
-                    </label>
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={deleteElement}>{
-                    tl("remove_element")
-                  }</Button>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-frost/50">{
-                  tl("select_an_element_on_the_slide")
-                }</div>
-              )}
-
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("website_background")}</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "solid" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-                    )}
-                    onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "solid" })}
-                  >{
-                    tl("fill")
-                  }</button>
-                  <button
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "gradient" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-                    )}
-                    onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "gradient" })}
-                  >{
-                    tl("gradient")
-                  }</button>
-                  <button
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      siteBackground.mode === "image" ? "bg-accent text-accentText" : "text-frost/70 hover:text-frost"
-                    )}
-                    onClick={() => onChangeSiteBackground({ ...siteBackground, mode: "image" })}
-                  >{
-                    tl("picture")
-                  }</button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-frost/60">{tl("color")}</span>
-                  <input
-                    type="color"
-                    value={siteBackground.color}
-                    onChange={(e) => onChangeSiteBackground({ ...siteBackground, color: e.target.value })}
-                    className="h-7 w-10 rounded border border-white/10 bg-white/5"
-                  />
-                  <input
-                    type="text"
-                    value={siteBackground.color}
-                    onChange={(e) => onChangeSiteBackground({ ...siteBackground, color: e.target.value })}
-                    className="w-28 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs"
-                  />
-                </div>
-                {siteBackground.mode === "gradient" && (
-                  <div className="space-y-2">
-                    <div className="text-xs text-frost/60">{tl("presets")}</div>
-                    <div className="grid gap-2">
-                      {bgPresets.map((preset) => (
+                      {activeSlide?.background && (
                         <button
-                          key={preset.label}
-                          className={cn(
-                            "rounded-lg border border-white/10 px-3 py-2 text-left text-xs transition",
-                            siteBackground.gradient === preset.value
-                              ? "border-accent/60 bg-accent/10"
-                              : "hover:border-white/30"
-                          )}
-                          onClick={() =>
-                            onChangeSiteBackground({ ...siteBackground, mode: "gradient", gradient: preset.value })
-                          }
+                          type="button"
+                          className="text-left text-[10px] text-frost/40 transition hover:text-frost/70"
+                          onClick={() => updateSlide({ background: "" })}
                         >
-                          {preset.label}
+                          {tl("reset_background")}
                         </button>
-                      ))}
+                      )}
+
+                      <details className="border-t border-white/[0.07] pt-3">
+                        <summary className="cursor-pointer list-none text-[11px] font-medium text-frost/45">
+                          {tl("website_background")}
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          <div className="flex gap-1">
+                            {([
+                              ["solid", tl("fill")],
+                              ["gradient", tl("gradient")],
+                              ["image", tl("picture")],
+                            ] as const).map(([mode, label]) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                className={cn(
+                                  "h-7 rounded-md px-2 text-[10px] transition",
+                                  siteBackground.mode === mode
+                                    ? "bg-white/[0.08] text-frost"
+                                    : "text-frost/45 hover:bg-white/[0.04] hover:text-frost/70"
+                                )}
+                                onClick={() => onChangeSiteBackground({ ...siteBackground, mode })}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {siteBackground.mode !== "image" && (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={siteBackground.color}
+                                onChange={(e) => onChangeSiteBackground({ ...siteBackground, color: e.target.value })}
+                                className="h-8 w-10 border-0 bg-transparent p-0"
+                              />
+                              <input
+                                type="text"
+                                value={siteBackground.color}
+                                onChange={(e) => onChangeSiteBackground({ ...siteBackground, color: e.target.value })}
+                                className="h-8 min-w-0 flex-1 rounded-md border border-white/10 bg-transparent px-2 text-[10px]"
+                              />
+                            </div>
+                          )}
+
+                          {siteBackground.mode === "gradient" && (
+                            <div className="grid gap-1">
+                              {bgPresets.map((preset) => (
+                                <button
+                                  key={preset.label}
+                                  type="button"
+                                  className={cn(
+                                    "h-8 rounded-md px-2 text-left text-[10px] transition",
+                                    siteBackground.gradient === preset.value
+                                      ? "bg-white/[0.07] text-frost"
+                                      : "text-frost/45 hover:bg-white/[0.04] hover:text-frost/70"
+                                  )}
+                                  onClick={() =>
+                                    onChangeSiteBackground({ ...siteBackground, mode: "gradient", gradient: preset.value })
+                                  }
+                                >
+                                  {preset.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {siteBackground.mode === "image" && (
+                            <button
+                              type="button"
+                              className="h-8 w-full rounded-md border border-white/10 text-[10px] text-frost/60 transition hover:bg-white/[0.04]"
+                              onClick={() => {
+                                setBgImageTarget(true);
+                                setImageTargetId(null);
+                                fileInputRef.current?.click();
+                              }}
+                            >
+                              {tl("upload_background")}
+                            </button>
+                          )}
+                        </div>
+                      </details>
+
+                      <button
+                        type="button"
+                        className="border-t border-white/[0.07] pt-3 text-left text-[10px] font-medium text-frost/30 transition hover:text-ember disabled:opacity-20"
+                        onClick={deleteSlide}
+                        disabled={!activeSlide || slides.length <= 1}
+                      >
+                        {tl("delete")}
+                      </button>
                     </div>
-                  </div>
-                )}
-                {siteBackground.mode === "image" && (
-                  <div className="space-y-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setBgImageTarget(true);
-                        setImageTargetId(null);
-                        fileInputRef.current?.click();
-                      }}
-                    >{
-                      tl("upload_background")
-                    }</Button>
-                    {siteBackground.image && <div className="text-xs text-frost/60">{tl("image_uploaded")}</div>}
-                  </div>
-                )}
-              </div>
-            </div>
+                  )}
+                </div>
+              </aside>
+            )}
 
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
             <input ref={pptxInputRef} type="file" accept=".pptx" className="hidden" onChange={handlePptxImport} />
@@ -1937,7 +2065,7 @@ export default function TeacherDashboard({
           <div className="grid gap-4 p-4 lg:grid-cols-[320px_1fr]">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("board_replays")}</div>
+                <div className="text-[12px] font-medium text-frost/55">{tl("board_replays")}</div>
                 <Button size="sm" variant="outline" onClick={() => void fetchReplayItems()} disabled={replaysLoading}>
                   <RefreshCw size={14} className="mr-2" />
                   {tl("refresh")}
@@ -1982,7 +2110,7 @@ export default function TeacherDashboard({
               </div>
 
               <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs uppercase tracking-wider text-frost/60">{tl("ai_assistant_history")}</div>
+                <div className="text-[12px] font-medium text-frost/55">{tl("ai_assistant_history")}</div>
                 <div className="max-h-[30vh] space-y-2 overflow-auto pr-1">
                   {aiHistoryLoading && aiHistory.length === 0 && (
                     <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-xs text-frost/60">
@@ -1998,9 +2126,9 @@ export default function TeacherDashboard({
                     <div key={`${item.ts}-${idx}`} className="rounded-lg border border-white/10 bg-white/5 p-2 text-xs">
                       <div className="flex items-center justify-between gap-2 text-frost/70">
                         <span>{formatDateTime(item.ts, locale)}</span>
-                        <Badge className={item.ok ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"}>
+                        <span className={cn("text-[10px] font-medium", item.ok ? "text-emerald-400" : "text-red-400")}>
                           {item.ok ? tl("status_ok") : tl("status_error")}
-                        </Badge>
+                        </span>
                       </div>
                       <div className="mt-1 text-frost/70">{tl("mode_label", { mode: item.mode })}</div>
                       <div className="mt-1 line-clamp-2 text-frost/80">{item.problem}</div>
@@ -2020,7 +2148,7 @@ export default function TeacherDashboard({
             </div>
 
             <div className="space-y-3">
-              <div className="text-xs uppercase tracking-wider text-frost/60">{tl("replay_viewer")}</div>
+              <div className="text-[12px] font-medium text-frost/55">{tl("replay_viewer")}</div>
               <div className="rounded-xl border border-white/10 bg-ink/60 p-3">
                 <canvas ref={replayCanvasRef} className="max-w-full rounded-lg border border-white/10 bg-ink" />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2079,6 +2207,7 @@ export default function TeacherDashboard({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

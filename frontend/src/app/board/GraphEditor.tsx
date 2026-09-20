@@ -7,10 +7,12 @@ import { MathOnScreenKeyboard, type VirtualKeyboardAction } from "./OnScreenKeyb
 
 const GRAPH_COLORS = ["#4DA3FF", "#FF5A5F", "#5BE7C4", "#F6D365", "#C084FC", "#FF9F43", "#E7F2FF", "#111827"];
 
-export default function GraphEditor({ graph, onPreview, onCommit }: {
+export default function GraphEditor({ graph, onPreview, onCommit, showIntersections = false, onShowIntersectionsChange }: {
   graph: GraphElement;
   onPreview: (graph: GraphElement) => void;
   onCommit: (before: GraphElement, after: GraphElement) => void;
+  showIntersections?: boolean;
+  onShowIntersectionsChange?: (value: boolean) => void;
 }) {
   const { tl } = useI18n();
   const [draft, setDraft] = useState(graph);
@@ -271,6 +273,18 @@ export default function GraphEditor({ graph, onPreview, onCommit }: {
           );
         })}
       </div>
+      {draft.expressions.filter((item) => item.visible && !errors.has(item.id)).length >= 1 && onShowIntersectionsChange && (
+        <label className="mt-2 flex cursor-pointer items-center justify-between border-t border-white/10 pt-2 text-[11px] text-frost/60">
+          <span>{tl("graph_intersections")}</span>
+          <input
+            type="checkbox"
+            checked={showIntersections}
+            onChange={(event) => onShowIntersectionsChange(event.target.checked)}
+            className="h-4 w-4 accent-[rgb(var(--color-accent))]"
+            aria-label={tl("show_graph_intersections")}
+          />
+        </label>
+      )}
       </div>
       {activeExpressionId && <MathOnScreenKeyboard onAction={handleMathKeyboard} />}
     </div>

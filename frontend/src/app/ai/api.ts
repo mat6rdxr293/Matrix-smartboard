@@ -9,6 +9,7 @@ export async function callAi(
   subject?: string,
   lessonId?: string,
   clientMessageId?: string,
+  boardContext?: boolean,
 ) {
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -22,6 +23,7 @@ export async function callAi(
       subject: subject || null,
       lesson_id: lessonId || null,
       client_message_id: clientMessageId || null,
+      board_context: !!boardContext,
     }),
   });
   if (!res.ok) {

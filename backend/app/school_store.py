@@ -32,9 +32,9 @@ class InvalidLesson(ValueError):
 
 
 BOARD_OPERATION_TYPES = {
-    "add", "graph_add", "graph_update", "graph_delete", "undo", "redo", "clear"
+    "add", "stroke_move", "stroke_delete", "graph_add", "graph_update", "graph_delete", "undo", "redo", "clear"
 }
-BOARD_SCHEMA_VERSION = "2"
+BOARD_SCHEMA_VERSION = "4"
 MAX_BOARD_OPERATION_JSON_BYTES = 512_000
 
 
@@ -232,7 +232,7 @@ class SchoolStore:
                     lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL,
                     client_operation_id TEXT NOT NULL,
-                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
                     payload_json TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL,
                     UNIQUE(lesson_id, sequence),
@@ -272,9 +272,9 @@ class SchoolStore:
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'board_operations'"
         ).fetchone()
         ddl = row["sql"] if row and isinstance(row["sql"], str) else ""
-        connection.execute("SAVEPOINT board_operations_v2")
+        connection.execute("SAVEPOINT board_operations_v4")
         try:
-            if "graph_add" not in ddl:
+            if "stroke_delete" not in ddl:
                 legacy = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
                 ).fetchone()
@@ -288,7 +288,7 @@ class SchoolStore:
                         lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                         sequence INTEGER NOT NULL,
                         client_operation_id TEXT NOT NULL,
-                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
+                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
                         payload_json TEXT NOT NULL,
                         occurred_at INTEGER NOT NULL,
                         UNIQUE(lesson_id, sequence),
@@ -319,10 +319,10 @@ class SchoolStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (BOARD_SCHEMA_VERSION,),
             )
-            connection.execute("RELEASE SAVEPOINT board_operations_v2")
+            connection.execute("RELEASE SAVEPOINT board_operations_v4")
         except Exception:
-            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v2")
-            connection.execute("RELEASE SAVEPOINT board_operations_v2")
+            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v4")
+            connection.execute("RELEASE SAVEPOINT board_operations_v4")
             raise
 
     @staticmethod
@@ -581,6 +581,38 @@ class SchoolStore:
                     if not _is_valid_board_stroke(stroke):
                         raise ValueError("add operation requires valid stroke")
                     payload = {"stroke": stroke}
+                elif op_type == "stroke_move":
+                    indexes = operation.get("indexes")
+                    dx = operation.get("dx")
+                    dy = operation.get("dy")
+                    if (
+                        not isinstance(indexes, list)
+                        or not indexes
+                        or len(indexes) > 5000
+                        or any(not isinstance(index, int) or isinstance(index, bool) or index < 0 for index in indexes)
+                        or len(set(indexes)) != len(indexes)
+                        or not _is_number(dx)
+                        or not _is_number(dy)
+                        or abs(float(dx)) > 1_000_000
+                        or abs(float(dy)) > 1_000_000
+                    ):
+                        raise ValueError("stroke_move operation requires valid indexes and delta")
+                    payload = {"indexes": indexes, "dx": float(dx), "dy": float(dy)}
+                elif op_type == "stroke_delete":
+                    indexes = operation.get("indexes")
+                    strokes = operation.get("strokes")
+                    if (
+                        not isinstance(indexes, list)
+                        or not indexes
+                        or len(indexes) > 5000
+                        or any(not isinstance(index, int) or isinstance(index, bool) or index < 0 for index in indexes)
+                        or len(set(indexes)) != len(indexes)
+                        or not isinstance(strokes, list)
+                        or len(strokes) != len(indexes)
+                        or any(not _is_valid_board_stroke(stroke) for stroke in strokes)
+                    ):
+                        raise ValueError("stroke_delete operation requires matching valid indexes and strokes")
+                    payload = {"indexes": indexes, "strokes": strokes}
                 elif op_type in {"graph_add", "graph_delete"}:
                     graph = operation.get("graph")
                     if not _is_valid_graph(graph):
@@ -632,6 +664,13 @@ class SchoolStore:
             }
             if row["op_type"] == "add":
                 item["stroke"] = payload.get("stroke")
+            elif row["op_type"] == "stroke_move":
+                item["indexes"] = payload.get("indexes")
+                item["dx"] = payload.get("dx")
+                item["dy"] = payload.get("dy")
+            elif row["op_type"] == "stroke_delete":
+                item["indexes"] = payload.get("indexes")
+                item["strokes"] = payload.get("strokes")
             elif row["op_type"] in {"graph_add", "graph_delete"}:
                 item["graph"] = payload.get("graph")
             elif row["op_type"] == "graph_update":

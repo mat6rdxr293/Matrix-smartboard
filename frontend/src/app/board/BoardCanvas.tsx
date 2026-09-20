@@ -1,14 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { GraphElement } from "@/app/board/boardDocument";
+import { getSelectionBounds, selectGraphIds, selectStrokeIndices, translateBounds, translateStroke, type LassoBounds } from "@/app/board/lasso";
 import GraphElementView from "@/app/board/GraphElementView";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Highlighter, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, RotateCcw, RotateCw, Scan, Save, Trash2, Underline, Unlock } from "lucide-react";
+import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
@@ -61,7 +62,9 @@ const BG_EXTRA = [
 ];
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
-export default function BoardCanvas({
+export type BoardCanvasHandle = { recognize: () => Promise<string> };
+
+const BoardCanvas = forwardRef(function BoardCanvas({
   onOcrText,
   ocrEnabled,
   expanded,
@@ -86,7 +89,7 @@ export default function BoardCanvas({
   onToggleAssistant,
   boardProfile,
 }: {
-  onOcrText: (text: string) => void;
+  onOcrText?: (text: string) => void;
   ocrEnabled: boolean;
   expanded: boolean;
   onTogglePanels: () => void;
@@ -109,7 +112,7 @@ export default function BoardCanvas({
   onToggleTask?: () => void;
   onToggleAssistant?: () => void;
   boardProfile: BoardProfile;
-}) {
+}, ref: ForwardedRef<BoardCanvasHandle>) {
   const { tl } = useI18n();
   const profileConfig = getBoardProfileConfig(boardProfile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -138,7 +141,7 @@ export default function BoardCanvas({
   const [showAllPens, setShowAllPens] = useState(false);
   const [width, setWidth] = useState(4);
   const [eraserWidth, setEraserWidth] = useState(16);
-  const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph">("draw");
+  const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph" | "lasso">("draw");
   const [humanitiesPreset, setHumanitiesPreset] = useState<"highlight" | "underline" | null>(null);
   const [grid, setGrid] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -191,6 +194,21 @@ export default function BoardCanvas({
     lastCenter: null,
   });
   const pinchRef = useRef<{ active: boolean; startDist: number }>({ active: false, startDist: 0 });
+  const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[]>([]);
+  const lassoPathRef = useRef<{ x: number; y: number }[]>([]);
+  const [lassoSelection, setLassoSelection] = useState<{
+    strokeIndices: number[];
+    graphIds: string[];
+    bounds: LassoBounds | null;
+  }>({ strokeIndices: [], graphIds: [], bounds: null });
+  const lassoMoveRef = useRef<{
+    pointerId: number;
+    start: { x: number; y: number };
+    delta: { x: number; y: number };
+    bounds: LassoBounds;
+    strokeSnapshots: Map<number, Stroke>;
+    graphSnapshots: Map<string, GraphElement>;
+  } | null>(null);
   const eraserPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const toolbarPinned =
     (showPenPalette && mode === "draw") ||
@@ -380,6 +398,164 @@ export default function BoardCanvas({
 
   const clampPan = (next: { x: number; y: number }) => next;
 
+  const clearLassoSelection = () => {
+    lassoPathRef.current = [];
+    setLassoPath([]);
+    setLassoSelection({ strokeIndices: [], graphIds: [], bounds: null });
+    lassoMoveRef.current = null;
+  };
+
+  const pointInsideBounds = (point: { x: number; y: number }, bounds: LassoBounds) =>
+    point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
+
+  const startLassoMove = (pointerId: number, point: { x: number; y: number }, bounds: LassoBounds) => {
+    const strokeSnapshots = new Map<number, Stroke>();
+    for (const index of lassoSelection.strokeIndices) {
+      const stroke = strokesRef.current[index];
+      if (stroke) {
+        strokeSnapshots.set(index, {
+          ...stroke,
+          points: stroke.points.map((item) => ({ ...item })),
+        });
+      }
+    }
+
+    const selectedGraphIds = new Set(lassoSelection.graphIds);
+    const graphSnapshots = new Map<string, GraphElement>();
+    for (const graph of graphsRef.current) {
+      if (!selectedGraphIds.has(graph.id)) continue;
+      graphSnapshots.set(graph.id, {
+        ...graph,
+        expressions: graph.expressions.map((expression) => ({ ...expression })),
+      });
+    }
+
+    lassoMoveRef.current = {
+      pointerId,
+      start: point,
+      delta: { x: 0, y: 0 },
+      bounds,
+      strokeSnapshots,
+      graphSnapshots,
+    };
+  };
+
+  const updateLassoMove = (point: { x: number; y: number }) => {
+    const move = lassoMoveRef.current;
+    if (!move) return;
+    const dx = point.x - move.start.x;
+    const dy = point.y - move.start.y;
+    move.delta = { x: dx, y: dy };
+
+    const nextStrokes = strokesRef.current.map((stroke, index) => {
+      const original = move.strokeSnapshots.get(index);
+      return original ? translateStroke(original, dx, dy) : stroke;
+    });
+    strokesRef.current = nextStrokes;
+
+    const nextGraphs = graphsRef.current.map((graph) => {
+      const original = move.graphSnapshots.get(graph.id);
+      return original ? { ...original, x: original.x + dx, y: original.y + dy } : graph;
+    });
+    graphsRef.current = nextGraphs;
+    setGraphs(nextGraphs);
+    setLassoSelection((current) => ({ ...current, bounds: translateBounds(move.bounds, dx, dy) }));
+    scheduleRender();
+  };
+
+  const finishLassoMove = () => {
+    const move = lassoMoveRef.current;
+    lassoMoveRef.current = null;
+    if (!move) return;
+    const { x: dx, y: dy } = move.delta;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+
+    const strokeIndexes = [...move.strokeSnapshots.keys()];
+    if (strokeIndexes.length) {
+      if (onReplayOp) {
+        onReplayOp({ op: "stroke_move", indexes: strokeIndexes, dx, dy, ts: Date.now() });
+      } else {
+        syncStrokesToParent([...strokesRef.current]);
+      }
+    }
+
+    if (move.graphSnapshots.size) {
+      if (onReplayOp) {
+        for (const [id, before] of move.graphSnapshots) {
+          const after = graphsRef.current.find((graph) => graph.id === id);
+          if (after) onReplayOp({ op: "graph_update", before, after, ts: Date.now() });
+        }
+      } else {
+        onChangeGraphs([...graphsRef.current]);
+      }
+    }
+  };
+
+  const finishLassoPath = () => {
+    const polygon = lassoPathRef.current;
+    lassoPathRef.current = [];
+    setLassoPath([]);
+    if (polygon.length < 3) {
+      setLassoSelection({ strokeIndices: [], graphIds: [], bounds: null });
+      return;
+    }
+
+    const strokeIndices = selectStrokeIndices(strokesRef.current, polygon);
+    const graphIds = selectGraphIds(graphsRef.current, polygon);
+    const bounds = getSelectionBounds(strokesRef.current, strokeIndices, graphsRef.current, graphIds);
+    setLassoSelection({ strokeIndices, graphIds, bounds });
+  };
+
+  const deleteLassoSelection = () => {
+    const strokeIndexes = [...lassoSelection.strokeIndices]
+      .filter((index) => Number.isInteger(index) && index >= 0 && index < strokesRef.current.length)
+      .sort((a, b) => a - b);
+    const selectedStrokes = strokeIndexes.map((index) => ({
+      ...strokesRef.current[index],
+      points: strokesRef.current[index].points.map((point) => ({ ...point })),
+    }));
+
+    const graphIds = new Set(lassoSelection.graphIds);
+    const selectedGraphs = graphsRef.current
+      .filter((graph) => graphIds.has(graph.id))
+      .map((graph) => ({
+        ...graph,
+        expressions: graph.expressions.map((expression) => ({ ...expression })),
+      }));
+
+    if (!strokeIndexes.length && !selectedGraphs.length) {
+      clearLassoSelection();
+      return;
+    }
+
+    if (onReplayOp) {
+      if (strokeIndexes.length) {
+        onReplayOp({
+          op: "stroke_delete",
+          indexes: strokeIndexes,
+          strokes: selectedStrokes,
+          ts: Date.now(),
+        });
+      }
+      for (const graph of selectedGraphs) {
+        onReplayOp({ op: "graph_delete", graph, ts: Date.now() });
+      }
+    } else {
+      if (strokeIndexes.length) {
+        const indexes = new Set(strokeIndexes);
+        strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index));
+        syncStrokesToParent([...strokesRef.current]);
+      }
+      if (selectedGraphs.length) {
+        const ids = new Set(selectedGraphs.map((graph) => graph.id));
+        syncGraphsToParent(graphsRef.current.filter((graph) => !ids.has(graph.id)));
+      }
+    }
+
+    clearLassoSelection();
+    scheduleRender();
+  };
+
   const syncStrokesToParent = (next: Stroke[]) => {
     onChangeStrokes(next);
   };
@@ -476,6 +652,7 @@ export default function BoardCanvas({
       eraserPreviewRef.current = null;
       scheduleRender();
     }
+    if (mode !== "lasso") clearLassoSelection();
   }, [mode]);
 
   useEffect(() => {
@@ -646,6 +823,33 @@ export default function BoardCanvas({
     return shouldHandlePointerType(e.pointerType);
   };
 
+  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (boardLock || (!e.ctrlKey && !e.metaKey)) return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const anchor = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+    const currentZoom = zoomRef.current;
+    const currentPan = panRef.current;
+    const nextZoom = clampZoom(currentZoom * Math.exp(-e.deltaY * 0.008));
+    if (Math.abs(nextZoom - currentZoom) < 0.0001) return;
+
+    const worldX = (anchor.x - currentPan.x) / currentZoom;
+    const worldY = (anchor.y - currentPan.y) / currentZoom;
+    const nextPan = clampPan({
+      x: anchor.x - worldX * nextZoom,
+      y: anchor.y - worldY * nextZoom,
+    });
+
+    zoomRef.current = nextZoom;
+    panRef.current = nextPan;
+    setZoom(nextZoom);
+    setPan(nextPan);
+  };
+
   const extractPoints = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const native = e.nativeEvent as PointerEvent;
@@ -696,6 +900,11 @@ export default function BoardCanvas({
         activePointerIdRef.current = null;
         lineStartRef.current = null;
         linePreviewRef.current = null;
+        if (mode === "lasso") {
+          if (lassoMoveRef.current) finishLassoMove();
+          lassoPathRef.current = [];
+          setLassoPath([]);
+        }
         scheduleRender();
         return;
       }
@@ -722,6 +931,18 @@ export default function BoardCanvas({
     const firstPoint = extractPoints(e)[0];
     const x = firstPoint.x;
     const y = firstPoint.y;
+    if (mode === "lasso") {
+      setSelectedGraphId(null);
+      const hasSelection = lassoSelection.strokeIndices.length > 0 || lassoSelection.graphIds.length > 0;
+      if (hasSelection && lassoSelection.bounds && pointInsideBounds(firstPoint, lassoSelection.bounds)) {
+        startLassoMove(e.pointerId, firstPoint, lassoSelection.bounds);
+      } else {
+        setLassoSelection({ strokeIndices: [], graphIds: [], bounds: null });
+        lassoPathRef.current = [firstPoint];
+        setLassoPath([firstPoint]);
+      }
+      return;
+    }
     if (mode === "graph") {
       createGraphAt(x, y);
       setMode("draw");
@@ -795,6 +1016,26 @@ export default function BoardCanvas({
         return;
       }
     }
+    if (mode === "lasso" && activePointerIdRef.current === e.pointerId) {
+      e.preventDefault();
+      const points = extractPoints(e);
+      if (!points.length) return;
+      if (lassoMoveRef.current) {
+        updateLassoMove(points[points.length - 1]);
+        return;
+      }
+
+      const path = [...lassoPathRef.current];
+      for (const point of points) {
+        const previous = path[path.length - 1];
+        if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) >= 2 / Math.max(zoomRef.current, 0.5)) {
+          path.push(point);
+        }
+      }
+      lassoPathRef.current = path;
+      setLassoPath(path);
+      return;
+    }
     if (panStartRef.current && panStartRef.current.id === e.pointerId) {
       e.preventDefault();
       const next = clampPan({
@@ -830,6 +1071,18 @@ export default function BoardCanvas({
         eraserPreviewRef.current = null;
         scheduleRender();
       }
+    }
+    if (mode === "lasso" && activePointerIdRef.current === e.pointerId) {
+      e.preventDefault();
+      activePointerIdRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore release errors
+      }
+      if (lassoMoveRef.current) finishLassoMove();
+      else finishLassoPath();
+      return;
     }
     if (panStartRef.current && panStartRef.current.id === e.pointerId) {
       panStartRef.current = null;
@@ -878,6 +1131,20 @@ export default function BoardCanvas({
         eraserPreviewRef.current = null;
         scheduleRender();
       }
+    }
+    if (mode === "lasso" && activePointerIdRef.current === e.pointerId) {
+      activePointerIdRef.current = null;
+      if (lassoMoveRef.current) finishLassoMove();
+      else {
+        lassoPathRef.current = [];
+        setLassoPath([]);
+      }
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      return;
     }
     if (panStartRef.current && panStartRef.current.id === e.pointerId) {
       panStartRef.current = null;
@@ -1047,23 +1314,40 @@ export default function BoardCanvas({
     });
   };
 
-  const handleOcr = async () => {
-    if (!ocrEnabled) return;
+  const handleOcr = async (): Promise<string> => {
+    const graphLines = graphsRef.current.flatMap((graph) =>
+      graph.expressions
+        .filter((expression) => expression.visible && expression.expression.trim())
+        .map((expression) => `График: y = ${expression.expression.trim()}`)
+    );
+    const hasInk = strokesRef.current.some((stroke) => stroke.mode === "draw" && stroke.points.length > 0);
+
+    if (!hasInk && graphLines.length > 0) {
+      const text = graphLines.join("\n");
+      onOcrText?.(text);
+      return text;
+    }
+    if (!ocrEnabled) throw new Error(tl("ocr_not_available"));
+
     setLoading(true);
     try {
       const blob = await renderOcrBlob();
-      if (!blob) {
-        onOcrText(tl("ocr_not_available"));
-        return;
-      }
+      if (!blob) throw new Error(tl("ocr_not_available"));
       const res = await callOcr(blob);
-      onOcrText(res.text);
-    } catch {
-      onOcrText(tl("ocr_not_available"));
+      const text = [res.text.trim(), ...graphLines].filter(Boolean).join("\n").trim();
+      if (!text) throw new Error(tl("ocr_not_available"));
+      onOcrText?.(text);
+      return text;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tl("ocr_not_available");
+      onOcrText?.(message);
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       setLoading(false);
     }
   };
+
+  useImperativeHandle(ref, () => ({ recognize: handleOcr }));
 
   const schedulePenHide = () => {
     if (penTimerRef.current) window.clearTimeout(penTimerRef.current);
@@ -1092,7 +1376,7 @@ export default function BoardCanvas({
   return (
     <div
       data-testid="board-canvas-root"
-      className={cn("glass relative flex h-full flex-col rounded-2xl pb-0 shadow-glass", expanded ? "px-1 pt-2" : "px-2 pt-4")}
+      className="relative flex h-full flex-col pb-0"
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >
@@ -1104,9 +1388,10 @@ export default function BoardCanvas({
           >
             <canvas
               ref={canvasRef}
-              className="block h-full w-full rounded-2xl"
+              className={cn("block h-full w-full rounded-2xl", mode === "lasso" && "cursor-crosshair")}
               style={{ touchAction: "none" }}
               onContextMenu={(e) => e.preventDefault()}
+              onWheel={handleCanvasWheel}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -1136,10 +1421,69 @@ export default function BoardCanvas({
                   onPreview={updateGraphPreview}
                   onCommit={commitGraphUpdate}
                   onDelete={deleteGraph}
-                  interactionDisabled={mode === "pan"}
+                  interactionDisabled={mode === "pan" || mode === "lasso"}
                 />
               ))}
             </div>
+            {mode === "lasso" && (
+              <>
+                <svg
+                  data-testid="lasso-overlay"
+                  className="pointer-events-none absolute inset-0 h-full w-full"
+                  aria-hidden="true"
+                >
+                  {lassoPath.length >= 3 ? (
+                    <polygon
+                      points={lassoPath.map((point) => `${point.x * zoom + pan.x},${point.y * zoom + pan.y}`).join(" ")}
+                      fill="rgba(77, 163, 255, 0.07)"
+                      stroke="rgba(77, 163, 255, 0.95)"
+                      strokeWidth="1.5"
+                      strokeDasharray="6 5"
+                    />
+                  ) : lassoPath.length > 1 ? (
+                    <polyline
+                      points={lassoPath.map((point) => `${point.x * zoom + pan.x},${point.y * zoom + pan.y}`).join(" ")}
+                      fill="none"
+                      stroke="rgba(77, 163, 255, 0.95)"
+                      strokeWidth="1.5"
+                      strokeDasharray="6 5"
+                    />
+                  ) : null}
+                </svg>
+                {lassoSelection.bounds && (
+                  <>
+                    <div
+                      data-testid="lasso-selection"
+                      className="pointer-events-none absolute border border-dashed border-accent/80 bg-accent/[0.035]"
+                      style={{
+                        left: lassoSelection.bounds.left * zoom + pan.x,
+                        top: lassoSelection.bounds.top * zoom + pan.y,
+                        width: Math.max(1, (lassoSelection.bounds.right - lassoSelection.bounds.left) * zoom),
+                        height: Math.max(1, (lassoSelection.bounds.bottom - lassoSelection.bounds.top) * zoom),
+                      }}
+                    />
+                    <button
+                      type="button"
+                      data-testid="lasso-delete"
+                      aria-label={tl("delete_selection")}
+                      title={tl("delete_selection")}
+                      className="absolute z-20 grid h-8 w-8 place-items-center rounded-md border border-ember/30 bg-graphite/95 text-ember shadow-soft transition hover:bg-ember/10"
+                      style={{
+                        left: Math.min(
+                          Math.max(4, lassoSelection.bounds.right * zoom + pan.x - 32),
+                          Math.max(4, widthPx - 36),
+                        ),
+                        top: Math.max(4, lassoSelection.bounds.top * zoom + pan.y - 36),
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={deleteLassoSelection}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
+              </>
+            )}
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 text-sm">
                 {tl("recognition_loading")}
@@ -1445,6 +1789,26 @@ export default function BoardCanvas({
           </Button>
         )}
         <Button
+          variant={mode === "lasso" ? "accent" : "outline"}
+          size="sm"
+          className="board-utility-button"
+          aria-label={tl("lasso")}
+          aria-pressed={mode === "lasso"}
+          title={tl("lasso")}
+          onClick={() => {
+            setHumanitiesPreset(null);
+            setMode("lasso");
+            setShowPenSlider(false);
+            setShowPenPalette(false);
+            setShowAllPens(false);
+            setShowEraserSlider(false);
+            setShowLineSlider(false);
+            closeBoardSettings();
+          }}
+        >
+          <LassoSelect size={26} />
+        </Button>
+        <Button
           variant={mode === "pan" ? "accent" : "outline"}
           size="sm"
           className="board-utility-button"
@@ -1643,7 +2007,7 @@ export default function BoardCanvas({
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <Hand size={24} className="relative z-10" />
+            <Pointer size={24} className="relative z-10" />
           </button>
         </div>
 
@@ -1700,17 +2064,6 @@ export default function BoardCanvas({
         <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("snapshot")} title={tl("snapshot")} onClick={handleSnapshot}>
           <Save size={26} />
         </Button>
-        <Button
-          variant={ocrEnabled ? "default" : "outline"}
-          size="sm"
-          className="board-utility-button"
-          aria-label={tl("recognize")}
-          title={tl("recognize")}
-          onClick={handleOcr}
-          disabled={!ocrEnabled || loading}
-        >
-          <Scan size={26} />
-        </Button>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {onToggleTask && (
             <Button variant={taskOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleTask} aria-label={tl("exercise")} title={tl("exercise")}>
@@ -1727,4 +2080,6 @@ export default function BoardCanvas({
       </div>
     </div>
   );
-}
+});
+
+export default BoardCanvas;

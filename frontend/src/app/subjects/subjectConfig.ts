@@ -1,5 +1,5 @@
 import type { Slide } from "@/app/presentation/Slides";
-import { tasks as algebraTasks, type Task } from "@/app/tasks/tasks";
+import type { Task } from "@/app/tasks/tasks";
 
 export type SubjectId =
   | "math"
@@ -181,86 +181,7 @@ export const withSubjectQuery = (path: string, subjectId: string): string => {
 
 export const getSubjectMeta = (subjectId: string): SubjectMeta => SUBJECT_MAP[normalizeId(subjectId)];
 
-const SUBJECT_TASKS: Record<Exclude<SubjectId, "algebra">, Task[]> = {
-  math: [
-    { id: 1, title: "Порядок действий", problem: "Вычисли: 48 : 6 + 7 · 3.", tags: ["вычисления"] },
-    { id: 2, title: "Текстовая задача", problem: "В трёх коробках по 12 карандашей. 8 карандашей раздали. Сколько осталось?", tags: ["задача"] },
-    { id: 3, title: "Дроби", problem: "Сравни дроби 3/4 и 5/8 и объясни ответ.", tags: ["дроби"] },
-    { id: 4, title: "Периметр", problem: "Найди периметр прямоугольника со сторонами 7 см и 4 см.", tags: ["геометрия"] },
-  ],
-  natural_science: [
-    { id: 1, title: "Состояния вещества", problem: "Назови три состояния воды и приведи по одному примеру.", tags: ["вещество"] },
-    { id: 2, title: "Солнечная система", problem: "Объясни, почему на Земле сменяются день и ночь.", tags: ["космос"] },
-    { id: 3, title: "Живая природа", problem: "Перечисли признаки живого организма.", tags: ["природа"] },
-    { id: 4, title: "Простой опыт", problem: "Предложи опыт, который показывает испарение воды.", tags: ["опыт"] },
-  ],
-  geometry: [
-    { id: 1, title: "Теорема Пифагора", problem: "В прямоугольном треугольнике катеты 9 и 12. Найди гипотенузу.", tags: ["треугольник"] },
-    { id: 2, title: "Площадь треугольника", problem: "Найди площадь треугольника со сторонами 5, 5 и 6.", tags: ["площадь"] },
-    { id: 3, title: "Центральный и вписанный углы", problem: "Центральный угол равен 110°. Найди вписанный, опирающийся на ту же дугу.", tags: ["углы"] },
-    { id: 4, title: "Подобие", problem: "Стороны подобных треугольников относятся как 2:3. Площадь меньшего 24. Найди площадь большего.", tags: ["подобие"] },
-  ],
-  physics: [
-    { id: 1, title: "Второй закон Ньютона", problem: "На тело массой 4 кг действует сила 20 Н. Найди ускорение.", tags: ["динамика"] },
-    { id: 2, title: "Работа и мощность", problem: "Груз 500 Н подняли на высоту 8 м за 20 с. Найди работу и мощность.", tags: ["энергия"] },
-    { id: 3, title: "Закон Ома", problem: "При R=12 Ом и I=1.5 А найди напряжение и мощность.", tags: ["электричество"] },
-    { id: 4, title: "Импульс", problem: "Тело 2 кг движется со скоростью 6 м/с. Найди импульс.", tags: ["импульс"] },
-  ],
-  chemistry: [
-    { id: 1, title: "Уравнение реакции", problem: "Составь и уравняй реакцию горения метана CH4.", tags: ["реакции"] },
-    { id: 2, title: "Молярная масса", problem: "Найди молярную массу H2SO4.", tags: ["моль"] },
-    { id: 3, title: "Стехиометрия", problem: "Сколько граммов CO2 получится при сжигании 12 г углерода?", tags: ["расчёты"] },
-    { id: 4, title: "Ионные уравнения", problem: "Запиши сокращённое ионное уравнение для реакции HCl и NaOH.", tags: ["ионы"] },
-  ],
-  biology: [
-    { id: 1, title: "Строение клетки", problem: "Назови основные органоиды клетки и кратко укажи их функции.", tags: ["клетка"] },
-    { id: 2, title: "Генетика", problem: "Скрещивание Aa × aa. Определи вероятности генотипов потомства.", tags: ["генетика"] },
-    { id: 3, title: "Фотосинтез", problem: "Объясни, от чего зависит интенсивность фотосинтеза.", tags: ["растения"] },
-    { id: 4, title: "Экосистема", problem: "Приведи пример пищевой цепи из 4 звеньев.", tags: ["экология"] },
-  ],
-  russian: [
-    { id: 1, title: "Сложное предложение", problem: "Определи тип связи в предложении и расставь знаки препинания.", tags: ["синтаксис"] },
-    { id: 2, title: "Орфография", problem: "Вставь пропущенные буквы и объясни правила.", tags: ["орфография"] },
-    { id: 3, title: "Морфология", problem: "Сделай морфологический разбор глагола в предложении.", tags: ["морфология"] },
-    { id: 4, title: "Лексика", problem: "Подбери по 2 синонима и 2 антонима к слову «смелый».", tags: ["лексика"] },
-  ],
-  kazakh: [
-    { id: 1, title: "Зат есім", problem: "Берілген сөздерді көпше түрге қойып, септеп жазыңдар.", tags: ["грамматика"] },
-    { id: 2, title: "Етістік", problem: "Етістікті осы шақ, өткен шақ, келер шақ формаларында жазыңдар.", tags: ["етістік"] },
-    { id: 3, title: "Сөйлем мүшелері", problem: "Сөйлемдегі бастауыш пен баяндауышты анықтаңдар.", tags: ["синтаксис"] },
-    { id: 4, title: "Лексика", problem: "Берілген сөздерге синоним және антоним жазыңдар.", tags: ["лексика"] },
-  ],
-  history: [
-    { id: 1, title: "Хронология", problem: "Расположи события в правильном историческом порядке.", tags: ["хронология"] },
-    { id: 2, title: "Причины и последствия", problem: "Назови 3 причины и 3 последствия выбранной реформы.", tags: ["анализ"] },
-    { id: 3, title: "Исторический источник", problem: "Определи, к какому периоду относится источник и почему.", tags: ["источник"] },
-    { id: 4, title: "Краткое эссе", problem: "Напиши короткое объяснение роли события в истории Казахстана.", tags: ["эссе"] },
-  ],
-  informatics: [
-    { id: 1, title: "Алгоритм", problem: "Запиши псевдокод поиска максимума в массиве из N чисел.", tags: ["алгоритмы"] },
-    { id: 2, title: "Python: условия", problem: "Напиши программу, которая определяет чётность введённого числа.", tags: ["python"] },
-    { id: 3, title: "Циклы", problem: "С помощью цикла выведи все числа Фибоначчи до 100.", tags: ["циклы"] },
-    { id: 4, title: "SQL", problem: "Составь запрос: выбрать всех учеников 10А и отсортировать по фамилии.", tags: ["sql"] },
-  ],
-  geography: [
-    { id: 1, title: "Координаты", problem: "Определи географические координаты заданной точки на карте.", tags: ["карта"] },
-    { id: 2, title: "Климат", problem: "Объясни, почему в степи амплитуда температур выше, чем у моря.", tags: ["климат"] },
-    { id: 3, title: "Ресурсы", problem: "Назови основные природные ресурсы региона и отрасли их использования.", tags: ["ресурсы"] },
-    { id: 4, title: "Население", problem: "Сравни показатели урбанизации двух регионов и сделай вывод.", tags: ["демография"] },
-  ],
-  english: [
-    { id: 1, title: "Present Simple", problem: "Put the verb in the correct form: She (go) to school every day.", tags: ["grammar"] },
-    { id: 2, title: "Vocabulary", problem: "Write five words about school and use each in a sentence.", tags: ["vocabulary"] },
-    { id: 3, title: "Questions", problem: "Make a question for the answer: I live in Aktobe.", tags: ["speaking"] },
-    { id: 4, title: "Short writing", problem: "Write four sentences about your favourite subject.", tags: ["writing"] },
-  ],
-};
-
-export const getDefaultTasksForSubject = (subjectId: string): Task[] => {
-  const sid = normalizeId(subjectId);
-  const baseTasks = sid === "algebra" ? algebraTasks : SUBJECT_TASKS[sid];
-  return baseTasks.map((task) => ({ ...task, tags: [...task.tags] }));
-};
+export const getDefaultTasksForSubject = (_subjectId: string): Task[] => [];
 
 export const buildDefaultSlidesForSubject = (subjectId: string, locale: "ru" | "kk"): Slide[] => {
   const meta = getSubjectMeta(subjectId);

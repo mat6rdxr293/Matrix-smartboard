@@ -12,6 +12,8 @@ export type BoardReplayOp = BoardReplayMeta & (
   | { op: "graph_add"; graph: GraphElement }
   | { op: "graph_update"; before: GraphElement; after: GraphElement }
   | { op: "graph_delete"; graph: GraphElement }
+  | { op: "stroke_move"; indexes: number[]; dx: number; dy: number }
+  | { op: "stroke_delete"; indexes: number[]; strokes: Stroke[] }
   | { op: "undo" | "redo" | "clear" }
 );
 

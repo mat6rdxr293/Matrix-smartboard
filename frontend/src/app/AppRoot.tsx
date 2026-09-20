@@ -36,6 +36,37 @@ export default function AppRoot() {
   const [error, setError] = useState<string | null>(null);
   const [entryDirection, setEntryDirection] = useState<1 | -1>(1);
 
+  useEffect(() => {
+    const preventBrowserZoomWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+    };
+
+    const preventBrowserZoomKeys = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (!["+", "=", "-", "_", "0"].includes(event.key)) return;
+      event.preventDefault();
+    };
+
+    const preventBrowserGestureZoom = (event: Event) => {
+      event.preventDefault();
+    };
+
+    window.addEventListener("wheel", preventBrowserZoomWheel, { passive: false, capture: true });
+    window.addEventListener("keydown", preventBrowserZoomKeys, { capture: true });
+    document.addEventListener("gesturestart", preventBrowserGestureZoom, { passive: false });
+    document.addEventListener("gesturechange", preventBrowserGestureZoom, { passive: false });
+    document.addEventListener("gestureend", preventBrowserGestureZoom, { passive: false });
+
+    return () => {
+      window.removeEventListener("wheel", preventBrowserZoomWheel, { capture: true });
+      window.removeEventListener("keydown", preventBrowserZoomKeys, { capture: true });
+      document.removeEventListener("gesturestart", preventBrowserGestureZoom);
+      document.removeEventListener("gesturechange", preventBrowserGestureZoom);
+      document.removeEventListener("gestureend", preventBrowserGestureZoom);
+    };
+  }, []);
+
   const enterRoom = useCallback(async (currentSchool: School, selectedRoom: Room, checkActive = true) => {
     localStorage.setItem(roomBindingKey(currentSchool.id), selectedRoom.id);
     setRoom(selectedRoom);

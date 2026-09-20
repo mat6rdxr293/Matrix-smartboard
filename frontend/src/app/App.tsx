@@ -10,21 +10,18 @@ import {
 import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
-import BoardCanvas from "@/app/board/BoardCanvas";
+import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
 import {
   buildDefaultSlidesForSubject,
   getDefaultTasksForSubject,
-  getPracticeTokenFromWindow,
-  verifyPracticeToken,
   getSubjectMeta,
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { callAi, getStatus } from "@/app/ai/api";
+import { callAi, getStatus, type AiMode } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
@@ -32,6 +29,7 @@ import { useTheme } from "@/app/theme/ThemeProvider";
 import { sessionApi } from "@/app/session/api";
 import type { Lesson, Room, School } from "@/app/session/types";
 import type { BoardProfile } from "@/app/board/boardProfiles";
+import TeacherPinGate from "@/app/teacher/TeacherPinGate";
 
 const TeacherDashboard = lazy(() => import("@/app/teacher/TeacherDashboard"));
 
@@ -97,22 +95,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const { locale, tl } = useI18n();
   const { theme } = useTheme();
   const subjectId = lesson.subjectId;
-  // Teacher tab is bound to verified practice token from main portal auth.
-  const [hideTeacherTab, setHideTeacherTab] = useState(true);
-  const canSeeTeacherTab = !hideTeacherTab;
-
-  useEffect(() => {
-    const token = getPracticeTokenFromWindow();
-    if (!token) {
-      setHideTeacherTab(true);
-      return;
-    }
-    verifyPracticeToken(token).then((role) => {
-      if (role === "student" || role === "parent") setHideTeacherTab(true);
-      if (role === "teacher" || role === "admin") setHideTeacherTab(false);
-      if (!role) setHideTeacherTab(true);
-    });
-  }, []);
+  const [teacherUnlocked, setTeacherUnlocked] = useState(false);
+  const teacherPinKey = `school.${school.id}.teacherPinHash`;
   const subjectMeta = useMemo(() => getSubjectMeta(subjectId), [subjectId]);
   const lessonTitle = locale === "kk" ? subjectMeta.lessonKk : subjectMeta.lessonRu;
   const subjectName = locale === "kk" ? subjectMeta.nameKk : subjectMeta.nameRu;
@@ -124,6 +108,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const performanceModeKey = `${subjectStoragePrefix}.performance.mode`;
   const tasksSidebarWidthKey = `${subjectStoragePrefix}.sidebar.tasks`;
   const slidesSidebarWidthKey = `${subjectStoragePrefix}.sidebar.slides`;
+  const freeBoardModeKey = `practice.lesson.${lesson.id}.freeBoard`;
   const withSubjectApi = useMemo(
     () => (path: string) => withSubjectQuery(path, subjectId),
     [subjectId]
@@ -131,7 +116,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const tabs = [
     { id: "tasks", label: tl("tasks") },
     { id: "slides", label: tl("presentation") },
-    ...(canSeeTeacherTab ? [{ id: "teacher", label: tl("teacher") }] : []),
+    { id: "teacher", label: tl("teacher") },
   ] as const;
   const appRef = useRef<HTMLDivElement | null>(null);
   const autoUltraLite = useMemo(() => {
@@ -154,22 +139,25 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const ultraLite = performanceMode === "performance";
   const [currentSlide, setCurrentSlide] = useState(0);
   const [selectedTaskId, setSelectedTaskId] = useState(() => defaultTaskData[0]?.id ?? 1);
-  const [attempt, setAttempt] = useState("");
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  const [aiBoardContext, setAiBoardContext] = useState("");
   const [presenterMode, setPresenterMode] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; ai: boolean; ocr: boolean } | null>(null);
   const [tab, setTab] = useState<TabId>("tasks");
   useEffect(() => {
-    if (hideTeacherTab && tab === "teacher") {
-      setTab("tasks");
-    }
-  }, [hideTeacherTab, tab]);
+    if (tab !== "teacher") setTeacherUnlocked(false);
+  }, [tab]);
+
+  useEffect(() => {
+    setTeacherUnlocked(false);
+  }, [teacherPinKey]);
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [boardExpanded, setBoardExpanded] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [focusedFloatingPanel, setFocusedFloatingPanel] = useState<"task" | "assistant">("assistant");
   const [slideshowOpen, setSlideshowOpen] = useState(false);
   const [tasksSidebarWidth, setTasksSidebarWidth] = useState(() => loadFromStorage(tasksSidebarWidthKey, 360));
   const [slidesSidebarWidth, setSlidesSidebarWidth] = useState(() => loadFromStorage(slidesSidebarWidthKey, 360));
@@ -179,11 +167,15 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [slideShowScale, setSlideShowScale] = useState(1);
   const taskDragControls = useDragControls();
   const assistantDragControls = useDragControls();
+  const boardCanvasRef = useRef<BoardCanvasHandle | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [boardHistory, setBoardHistory] = useState<BoardHistory>(() => createBoardHistory());
   const [boardPenColor, setBoardPenColor] = useState("#FF0000");
   const [boardBgColor, setBoardBgColor] = useState(() => theme === "light" ? "#FFFFFF" : "#0A0E14");
   const [taskData, setTaskData] = useState<Task[]>(() => defaultTaskData);
+  const [freeBoardRequested, setFreeBoardRequested] = useState(() => loadFromStorage(freeBoardModeKey, false));
+  const freeBoardForced = taskData.length === 0;
+  const freeBoardMode = freeBoardForced || freeBoardRequested;
   const [slideData, setSlideData] = useState<Slide[]>(() => defaultSlideData);
   const [presentationSource, setPresentationSource] = useState<PresentationSource>(DEFAULT_PRESENTATION_SOURCE);
   const [lastServerSaveAt, setLastServerSaveAt] = useState<number | null>(null);
@@ -403,6 +395,15 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   }, [performanceMode, performanceModeKey]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(freeBoardModeKey, JSON.stringify(freeBoardRequested));
+  }, [freeBoardModeKey, freeBoardRequested]);
+
+  useEffect(() => {
+    if (freeBoardMode) setTaskOpen(false);
+  }, [freeBoardMode]);
+
+  useEffect(() => {
     let alive = true;
     const load = () =>
       getStatus()
@@ -492,7 +493,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     sessionApi.loadChat(lesson.id)
       .then((items) => {
         if (!alive) return;
-        setMessages(items.slice().reverse().map((item) => ({
+        setMessages(items.map((item) => ({
           id: item.clientMessageId,
           role: item.role,
           text: item.status === "error" ? `${tl("error")}: ${item.text}` : item.text,
@@ -503,16 +504,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       .catch(() => undefined);
     return () => { alive = false; };
   }, [lesson.id, locale, tl]);
-
-  useEffect(() => {
-    setAttempt("");
-  }, [selectedTaskId]);
-
-  useEffect(() => {
-    if (!taskData.find((t) => t.id === selectedTaskId) && taskData.length) {
-      setSelectedTaskId(taskData[0].id);
-    }
-  }, [taskData, selectedTaskId]);
 
   useEffect(() => {
     if (currentSlide > slideData.length - 1) {
@@ -566,7 +557,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           };
           if (!alive) return;
           setLastServerSaveAt(Date.now());
-          if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+          if (Array.isArray(data.tasks)) {
             loadedTasks = data.tasks;
             setTaskData(data.tasks);
           }
@@ -592,7 +583,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
               siteBackground?: SiteBackground;
               presentationSource?: PresentationSource;
             };
-            if (Array.isArray(backup.tasks) && backup.tasks.length > 0) {
+            if (Array.isArray(backup.tasks)) {
               loadedTasks = backup.tasks;
               setTaskData(backup.tasks);
             }
@@ -622,7 +613,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                 siteBackground?: SiteBackground;
                 presentationSource?: PresentationSource;
               };
-              if (Array.isArray(backup.tasks) && backup.tasks.length > 0) {
+              if (Array.isArray(backup.tasks)) {
                 loadedTasks = backup.tasks;
                 setTaskData(backup.tasks);
               }
@@ -717,13 +708,24 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return () => ro.disconnect();
   }, [slideshowOpen]);
 
-  const selectedTask = taskData.find((t) => t.id === selectedTaskId) ?? taskData[0] ?? defaultTaskData[0];
+  const selectedTask = taskData.find((t) => t.id === selectedTaskId) ?? taskData[0];
+
+  useEffect(() => {
+    if (!taskData.length) {
+      setTaskOpen(false);
+      return;
+    }
+    if (!taskData.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(taskData[0].id);
+    }
+  }, [selectedTaskId, taskData]);
+
   const slideshowSlide = slideData[currentSlide];
   const ringSize = 224;
   const ringStroke = 14;
   const ringRadius = (ringSize - ringStroke) / 2;
   const ringCircumference = 2 * Math.PI * ringRadius;
-  const lastAssistant = messages.find((m) => m.role === "assistant" && m.text.trim());
+  const lastAssistant = messages.slice().reverse().find((m) => m.role === "assistant" && m.text.trim());
   const shouldContinue = (text?: string) => {
     if (!text) return false;
     const t = text.trim().toLowerCase();
@@ -732,7 +734,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (t.includes("обрыв") || t.includes("нет итогов")) return true;
     return false;
   };
-  const canContinue = !!lastAssistant && shouldContinue(lastAssistant.text);
+  const canContinue = !!lastAssistant && !!aiBoardContext.trim() && shouldContinue(lastAssistant.text);
   const isOfficeEmbedSource = presentationSource.type === "m365" || presentationSource.type === "office";
   const officeEmbedLabel = presentationSource.type === "office" ? "Office" : "M365";
 
@@ -757,7 +759,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     : siteBgStyle;
 
   const addMessage = (msg: AssistantMessage) => {
-    setMessages((prev) => [msg, ...prev]);
+    setMessages((prev) => [...prev, msg]);
   };
 
   const updateMessage = (id: string, text: string) => {
@@ -774,13 +776,106 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         minute: "2-digit",
       }),
     };
-    setMessages((prev) => [msg, ...prev]);
+    setMessages((prev) => [...prev, msg]);
+  };
+
+  const extractCheckPercent = (text: string): number | null => {
+    const normalized = text.replace(",", ".");
+    const strict = /(?:^|\n)\s*\**\s*выполнено\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
+    const strictMatch = normalized.match(strict);
+    if (!strictMatch) return null;
+    const value = Number(strictMatch[1]);
+    return Number.isFinite(value) ? clamp(Math.round(value), 0, 100) : null;
+  };
+
+  const recognizeBoard = async () => {
+    if (!apiStatus?.ocr || !boardCanvasRef.current) {
+      throw new Error(tl("ocr_not_available"));
+    }
+    return boardCanvasRef.current.recognize();
+  };
+
+  const handleRecognizedAi = (mode: AiMode, recognizedText: string) => {
+    void (async () => {
+      const boardText = recognizedText.trim();
+      if (!boardText || assistantLoading) return;
+      setAssistantLoading(true);
+      setAiBoardContext(boardText);
+      if (mode !== "hint") setTimerRunning(false);
+      appendStudentAttempt(boardText);
+
+      continueTokenRef.current += 1;
+      const token = continueTokenRef.current;
+      const id = `${Date.now()}-${Math.random()}`;
+      addMessage({
+        id,
+        role: "assistant",
+        text: tl("thinking"),
+        mode,
+        timestamp: nowLabel(),
+      });
+
+      try {
+        let fullText = "";
+        const res = await callAi(
+          mode,
+          boardText,
+          undefined,
+          undefined,
+          false,
+          subjectName,
+          lesson.id,
+          crypto.randomUUID(),
+          true,
+        );
+        fullText = res.text || "";
+        await typeText(
+          fullText,
+          (partial) => updateMessage(id, partial),
+          () => continueTokenRef.current !== token,
+        );
+
+        let guard = 0;
+        while (guard < 2 && shouldContinue(fullText) && continueTokenRef.current === token) {
+          guard += 1;
+          const continuation = await callAi(
+            mode,
+            boardText,
+            undefined,
+            fullText,
+            true,
+            subjectName,
+            lesson.id,
+            crypto.randomUUID(),
+            true,
+          );
+          const next = continuation.text || "";
+          if (!next.trim()) break;
+          await typeText(
+            next,
+            (partial) => updateMessage(id, `${fullText}\n${partial}`),
+            () => continueTokenRef.current !== token,
+          );
+          fullText = `${fullText}\n${next}`;
+        }
+
+        if (mode === "check") {
+          const percent = extractCheckPercent(fullText);
+          if (percent !== null) showScoreOverlay(percent);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : tl("unknown_error");
+        updateMessage(id, `${tl("error")}: ${message}`);
+      } finally {
+        setAssistantLoading(false);
+      }
+    })();
   };
 
   const handleContinue = async () => {
     if (assistantLoading) return;
-    const lastAssistant = messages.find((m) => m.role === "assistant" && m.text.trim());
-    if (!lastAssistant || !selectedTask) return;
+    const lastAssistant = messages.slice().reverse().find((m) => m.role === "assistant" && m.text.trim());
+    if (!lastAssistant || !aiBoardContext.trim()) return;
     if (!shouldContinue(lastAssistant.text)) return;
     setAssistantLoading(true);
     continueTokenRef.current += 1;
@@ -794,16 +889,17 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       timestamp: nowLabel(),
     });
     try {
-      const mode = (lastAssistant.mode as "hint" | "check" | "solution") || "solution";
+      const mode = (lastAssistant.mode as AiMode) || "solution";
       const res = await callAi(
         mode,
-        selectedTask.problem,
-        attempt.trim() || undefined,
+        aiBoardContext,
+        undefined,
         lastAssistant.text,
         true,
         subjectName,
         lesson.id,
         crypto.randomUUID(),
+        true,
       );
       await typeText(res.text, (partial) => updateMessage(id, partial), () => continueTokenRef.current !== token);
     } catch (err) {
@@ -850,16 +946,33 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     (target: "task" | "assistant") => (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
+
+      const panel = e.currentTarget.closest<HTMLElement>("[data-floating-panel]");
+      if (!panel) return;
+
+      const rect = panel.getBoundingClientRect();
+      const pointerId = e.pointerId;
       const startX = e.clientX;
       const startY = e.clientY;
-      const startSize = target === "task" ? taskSize : assistantSize;
-      const min = target === "task" ? { w: 420, h: 420 } : { w: 340, h: 320 };
+      const startSize = { w: rect.width, h: rect.height };
+      const min = target === "task" ? { w: 420, h: 360 } : { w: 340, h: 320 };
+      const viewportPadding = 12;
+      const bounds = appRef.current?.getBoundingClientRect();
+      const rightBound = bounds?.right ?? window.innerWidth;
+      const bottomBound = bounds?.bottom ?? window.innerHeight;
       const max = {
-        w: Math.max(min.w, window.innerWidth - 80),
-        h: Math.max(min.h, window.innerHeight - 200),
+        w: Math.max(min.w, rightBound - rect.left - viewportPadding),
+        h: Math.max(min.h, bottomBound - rect.top - viewportPadding),
       };
 
+      const root = document.documentElement;
+      const previousCursor = root.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+      root.style.cursor = "nwse-resize";
+      document.body.style.userSelect = "none";
+
       const handleMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         const next = {
           w: clamp(startSize.w + (ev.clientX - startX), min.w, max.w),
           h: clamp(startSize.h + (ev.clientY - startY), min.h, max.h),
@@ -868,13 +981,22 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         else setAssistantSize(next);
       };
 
-      const handleUp = () => {
+      const cleanup = () => {
+        root.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
         window.removeEventListener("pointermove", handleMove);
         window.removeEventListener("pointerup", handleUp);
+        window.removeEventListener("pointercancel", handleUp);
+      };
+
+      const handleUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        cleanup();
       };
 
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp);
+      window.addEventListener("pointercancel", handleUp);
     };
 
   const startSidebarResize =
@@ -900,6 +1022,39 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp);
     };
+
+  const toggleFreeBoardMode = () => {
+    if (freeBoardForced) return;
+    setFreeBoardRequested((value) => !value);
+  };
+
+  const toggleTaskPanel = () => {
+    setTaskOpen((open) => {
+      const next = !open;
+      if (next) setFocusedFloatingPanel("task");
+      else if (assistantOpen) setFocusedFloatingPanel("assistant");
+      return next;
+    });
+  };
+
+  const toggleAssistantPanel = () => {
+    setAssistantOpen((open) => {
+      const next = !open;
+      if (next) setFocusedFloatingPanel("assistant");
+      else if (taskOpen) setFocusedFloatingPanel("task");
+      return next;
+    });
+  };
+
+  const closeTaskPanel = () => {
+    setTaskOpen(false);
+    if (assistantOpen) setFocusedFloatingPanel("assistant");
+  };
+
+  const closeAssistantPanel = () => {
+    setAssistantOpen(false);
+    if (taskOpen) setFocusedFloatingPanel("task");
+  };
 
   const nextSlide = () => {
     setCurrentSlide((prev) => {
@@ -1121,7 +1276,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     transition={{ duration: 0.25 }}
                   >
                     <BoardCanvas
-                      onOcrText={(text) => setAttempt((prev) => `${prev}${prev ? "\n" : ""}${text}`)}
+                      ref={boardCanvasRef}
                       ocrEnabled={!!apiStatus?.ocr}
                       expanded={boardExpanded}
                       onTogglePanels={() => setBoardExpanded((v) => !v)}
@@ -1141,8 +1296,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       renderQualityMode={performanceMode}
                       taskOpen={taskOpen}
                       assistantOpen={assistantOpen}
-                      onToggleTask={() => setTaskOpen((v) => !v)}
-                      onToggleAssistant={() => setAssistantOpen((v) => !v)}
+                      onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
+                      onToggleAssistant={toggleAssistantPanel}
                       boardProfile={boardProfile}
                     />
                   </motion.div>
@@ -1163,41 +1318,67 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       exit={{ x: -12, opacity: 0 }}
                       transition={{ duration: 0.25 }}
                     >
-                      <div className="mb-3 flex items-center justify-between">
+                      <div className="mb-3">
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">
                           {tl("cards_count_tasks", { count: taskData.length })}
                         </h3>
-                        <Badge>{tl("practice")}</Badge>
                       </div>
                       <div ref={listRef} className="scrollbar-hide max-h-[60vh] overflow-auto pr-1">
-                      <div className="grid grid-cols-1 gap-2">
-                        {taskData.map((task) => (
+                        <div className="grid grid-cols-1 gap-2">
                           <button
-                            key={task.id}
                             type="button"
+                            aria-pressed={freeBoardMode}
+                            disabled={freeBoardForced}
+                            title={freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
+                            onClick={toggleFreeBoardMode}
                             className={
-                              task.id === selectedTaskId
-                                ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2 text-left text-sm"
-                                : "w-full rounded-xl border border-white/10 px-3 py-2 text-left text-sm hover:border-white/30"
+                              freeBoardMode
+                                ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2.5 text-left"
+                                : "w-full rounded-xl border border-white/10 px-3 py-2.5 text-left transition hover:border-white/30"
                             }
-                            onClick={() => setSelectedTaskId(task.id)}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">#{task.id}</span>
-                              <span className="text-xs text-frost/60">{task.tags[0] ?? tl("task")}</span>
-                            </div>
-                            <div className="text-xs text-frost/70">
-                              {task.id === selectedTaskId ? (
-                                <div className="inline-block align-middle">
-                                  <MathText text={task.title} />
-                                </div>
-                              ) : (
-                                task.title.replace(/\$/g, "")
-                              )}
+                            <div className="text-[12px] font-semibold text-frost">{tl("free_board_mode")}</div>
+                            <div className="mt-1 text-[11px] leading-4 text-frost/45">
+                              {freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
                             </div>
                           </button>
-                        ))}
-                      </div>
+
+                          {taskData.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-[12px] leading-5 text-frost/45">
+                              {tl("teacher_tasks_empty")}
+                            </div>
+                          ) : (
+                            taskData.map((task) => (
+                              <button
+                                key={task.id}
+                                type="button"
+                                className={
+                                  !freeBoardMode && task.id === selectedTaskId
+                                    ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2 text-left text-sm"
+                                    : "w-full rounded-xl border border-white/10 px-3 py-2 text-left text-sm hover:border-white/30"
+                                }
+                                onClick={() => {
+                                  setSelectedTaskId(task.id);
+                                  setFreeBoardRequested(false);
+                                }}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold">#{task.id}</span>
+                                  <span className="text-xs text-frost/60">{task.tags[0] ?? tl("task")}</span>
+                                </div>
+                                <div className="text-xs text-frost/70">
+                                  {task.id === selectedTaskId ? (
+                                    <div className="inline-block align-middle">
+                                      <MathText text={task.title} />
+                                    </div>
+                                  ) : (
+                                    task.title.replace(/\$/g, "")
+                                  )}
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
                       </div>
                     </motion.div>
 
@@ -1222,7 +1403,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       transition={{ duration: 0.25 }}
                     >
                       <BoardCanvas
-                        onOcrText={(text) => setAttempt((prev) => `${prev}${prev ? "\n" : ""}${text}`)}
+                        ref={boardCanvasRef}
                         ocrEnabled={!!apiStatus?.ocr}
                         expanded={boardExpanded}
                         onTogglePanels={() => setBoardExpanded((v) => !v)}
@@ -1242,8 +1423,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         renderQualityMode={performanceMode}
                         taskOpen={taskOpen}
                         assistantOpen={assistantOpen}
-                        onToggleTask={() => setTaskOpen((v) => !v)}
-                        onToggleAssistant={() => setAssistantOpen((v) => !v)}
+                        onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
+                        onToggleAssistant={toggleAssistantPanel}
                         boardProfile={boardProfile}
                       />
                     </motion.div>
@@ -1255,12 +1436,23 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
               <AnimatePresence>
                 {taskOpen && selectedTask && (
                   <motion.div
-                    className="absolute bottom-20 right-4 max-w-[92vw] touch-none"
-                    style={{ width: taskSize.w, height: taskSize.h }}
+                    data-floating-panel
+                    className="absolute touch-none"
+                    style={{
+                      left: "max(12px, calc(100% - 576px))",
+                      top: "max(12px, calc(100% - 600px))",
+                      width: taskSize.w,
+                      height: taskSize.h,
+                      maxWidth: "calc(100% - 24px)",
+                      maxHeight: "calc(100% - 24px)",
+                      zIndex: focusedFloatingPanel === "task" ? 40 : 30,
+                    }}
+                    onPointerDownCapture={() => setFocusedFloatingPanel("task")}
                     drag
                     dragControls={taskDragControls}
                     dragListener={false}
                     dragMomentum={false}
+                    dragElastic={0}
                     dragConstraints={appRef}
                     initial={{ opacity: 0, scale: 0.98, y: 8 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1277,25 +1469,14 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         </div>
                         <button
                           className="grid h-8 w-8 place-items-center rounded-lg text-frost/45 transition hover:bg-white/[0.06] hover:text-frost"
-                          onClick={() => setTaskOpen(false)}
+                          onClick={closeTaskPanel}
                           aria-label="Закрыть"
                         >
                           <X size={16} />
                         </button>
                       </div>
                       <div className="min-h-0 flex-1 overflow-auto p-4">
-                        <TaskPanel
-                          task={selectedTask}
-                          subjectName={subjectName}
-                          lessonId={lesson.id}
-                          attempt={attempt}
-                          setAttempt={setAttempt}
-                          addMessage={addMessage}
-                          updateMessage={updateMessage}
-                          appendStudentAttempt={appendStudentAttempt}
-                          onStopTimer={() => setTimerRunning(false)}
-                          onShowCheckScore={showScoreOverlay}
-                        />
+                        <TaskPanel task={selectedTask} />
                       </div>
                       <div
                         className="absolute bottom-1.5 right-1.5 h-4 w-4 cursor-se-resize touch-none opacity-35 after:absolute after:bottom-0 after:right-0 after:h-2.5 after:w-2.5 after:border-b after:border-r after:border-frost/50"
@@ -1310,12 +1491,23 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
               <AnimatePresence>
                 {assistantOpen && (
                   <motion.div
-                    className="absolute bottom-20 right-4 max-w-[90vw] touch-none"
-                    style={{ width: assistantSize.w, height: assistantSize.h }}
+                    data-floating-panel
+                    className="absolute touch-none"
+                    style={{
+                      left: "max(12px, calc(100% - 436px))",
+                      top: "max(12px, calc(100% - 500px))",
+                      width: assistantSize.w,
+                      height: assistantSize.h,
+                      maxWidth: "calc(100% - 24px)",
+                      maxHeight: "calc(100% - 24px)",
+                      zIndex: focusedFloatingPanel === "assistant" ? 40 : 30,
+                    }}
+                    onPointerDownCapture={() => setFocusedFloatingPanel("assistant")}
                     drag
                     dragControls={assistantDragControls}
                     dragListener={false}
                     dragMomentum={false}
+                    dragElastic={0}
                     dragConstraints={appRef}
                     initial={{ opacity: 0, scale: 0.98, y: 8 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1332,7 +1524,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         </div>
                         <button
                           className="grid h-8 w-8 place-items-center rounded-lg text-frost/45 transition hover:bg-white/[0.06] hover:text-frost"
-                          onClick={() => setAssistantOpen(false)}
+                          onClick={closeAssistantPanel}
                           aria-label="Закрыть"
                         >
                           <X size={16} />
@@ -1345,6 +1537,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                           canContinue={canContinue}
                           loading={assistantLoading}
                           lowPowerMode={ultraLite}
+                          ocrEnabled={!!apiStatus?.ocr}
+                          onRecognizeBoard={recognizeBoard}
+                          onSubmitRecognized={handleRecognizedAi}
                         />
                       </div>
                       <div
@@ -1415,28 +1610,32 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
           {tab === "teacher" && (
             <div className="h-full">
-              <Suspense
-                fallback={
-                  <div className="glass flex h-full items-center justify-center rounded-2xl text-sm text-frost/70">
-                    {tl("loading")}
-                  </div>
-                }
-              >
-                <TeacherDashboard
-                  subjectId={subjectId}
-                  tasks={taskData}
-                  slides={slideData}
-                  presentationSource={presentationSource}
-                  onChangeTasks={setTaskData}
-                  onChangeSlides={setSlideData}
-                  onChangePresentationSource={setPresentationSource}
-                  onClose={() => setTab("tasks")}
-                  siteBackground={siteBackground}
-                  onChangeSiteBackground={setSiteBackground}
-                  autosaveInfo={{ intervalSec: 30, lastServerSaveAt, lastLocalBackupAt }}
-                  fullPage
-                />
-              </Suspense>
+              {!teacherUnlocked ? (
+                <TeacherPinGate storageKey={teacherPinKey} onUnlock={() => setTeacherUnlocked(true)} />
+              ) : (
+                <Suspense
+                  fallback={
+                    <div className="glass flex h-full items-center justify-center rounded-2xl text-sm text-frost/70">
+                      {tl("loading")}
+                    </div>
+                  }
+                >
+                  <TeacherDashboard
+                    subjectId={subjectId}
+                    tasks={taskData}
+                    slides={slideData}
+                    presentationSource={presentationSource}
+                    onChangeTasks={setTaskData}
+                    onChangeSlides={setSlideData}
+                    onChangePresentationSource={setPresentationSource}
+                    onClose={() => setTab("tasks")}
+                    siteBackground={siteBackground}
+                    onChangeSiteBackground={setSiteBackground}
+                    autosaveInfo={{ intervalSec: 30, lastServerSaveAt, lastLocalBackupAt }}
+                    fullPage
+                  />
+                </Suspense>
+              )}
             </div>
           )}
 

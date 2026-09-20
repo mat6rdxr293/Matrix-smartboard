@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
+import { forwardRef } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
@@ -26,14 +27,14 @@ vi.mock("@/app/layout/TopBar", () => ({
   ),
 }));
 vi.mock("@/app/board/BoardCanvas", () => ({
-  default: (props: any) => {
+  default: forwardRef((props: any, _ref) => {
     mocks.boardProps = props;
     return <button data-testid="draw-stroke" onClick={() => props.onReplayOp({
       op: "add",
       stroke: { points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], color: "#fff", width: 2, mode: "draw" },
       ts: 1,
     })}>draw</button>;
-  },
+  }),
 }));
 vi.mock("@/app/tasks/TaskPanel", () => ({ default: () => null }));
 vi.mock("@/app/ai/AIAssistant", () => ({ default: () => null }));

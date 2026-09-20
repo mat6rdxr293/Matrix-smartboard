@@ -36,12 +36,17 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const board = (initialStrokes: any[] = [], onChangeStrokes = vi.fn(), boardProfile: "analytical" | "textual" | "universal" = "analytical") => (
+const board = (
+  initialStrokes: any[] = [],
+  onChangeStrokes = vi.fn(),
+  boardProfile: "analytical" | "textual" | "universal" = "analytical",
+  onReplayOp = vi.fn(),
+) => (
   <I18nProvider><BoardCanvas
     onOcrText={vi.fn()} ocrEnabled={false} expanded={false} onTogglePanels={vi.fn()} onStartTimer={vi.fn()}
     initialStrokes={initialStrokes} onChangeStrokes={onChangeStrokes} initialGraphs={[graph]} onChangeGraphs={vi.fn()}
     canUndo={false} canRedo={false} initialPenColor="#FF0000" onChangePenColor={vi.fn()}
-    initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={vi.fn()} boardProfile={boardProfile}
+    initialBgColor="#0A0E14" onChangeBgColor={vi.fn()} onReplayOp={onReplayOp} boardProfile={boardProfile}
   /></I18nProvider>
 );
 const mount = (initialStrokes: any[] = [], onChangeStrokes = vi.fn(), boardProfile: "analytical" | "textual" | "universal" = "analytical") => render(board(initialStrokes, onChangeStrokes, boardProfile));
@@ -78,6 +83,64 @@ it("hides graph UI when pressing elsewhere in the application, not only the canv
 
   fireEvent.pointerDown(document.body, { pointerId: 6, pointerType: "mouse" });
   expect(screen.queryByRole("button", { name: /удалить график|графикті өшіру/i })).not.toBeInTheDocument();
+});
+
+it("uses a Mac trackpad pinch to zoom the board instead of the page", () => {
+  const view = mount();
+  const canvas = view.container.querySelector("canvas")!;
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}),
+  });
+  const graphElement = screen.getByTestId("graph-element-g1");
+  const graphOverlay = graphElement.parentElement as HTMLDivElement;
+
+  fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -20, clientX: 400, clientY: 250 });
+
+  expect(graphOverlay.style.transform).not.toContain("scale(1)");
+  expect(graphOverlay.style.transform).toContain("scale(");
+});
+
+it("selects and moves board content with the lasso tool", () => {
+  const replay = vi.fn();
+  const stroke = {
+    points: [{ x: 10, y: 10 }, { x: 30, y: 30 }],
+    color: "#fff",
+    width: 4,
+    mode: "draw" as const,
+  };
+  const view = render(board([stroke], vi.fn(), "analytical", replay));
+  const canvas = view.container.querySelector("canvas")!;
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}),
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /лассо/i }));
+  fireEvent.pointerDown(canvas, { pointerId: 41, pointerType: "mouse", clientX: 0, clientY: 0 });
+  fireEvent.pointerMove(canvas, { pointerId: 41, pointerType: "mouse", clientX: 100, clientY: 0 });
+  fireEvent.pointerMove(canvas, { pointerId: 41, pointerType: "mouse", clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(canvas, { pointerId: 41, pointerType: "mouse", clientX: 0, clientY: 100 });
+  fireEvent.pointerUp(canvas, { pointerId: 41, pointerType: "mouse", clientX: 0, clientY: 0 });
+
+  expect(screen.getByTestId("lasso-selection")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /удалить выделенное|таңдалғанды өшіру/i })).toBeInTheDocument();
+
+  fireEvent.pointerDown(canvas, { pointerId: 42, pointerType: "mouse", clientX: 30, clientY: 30 });
+  fireEvent.pointerMove(canvas, { pointerId: 42, pointerType: "mouse", clientX: 60, clientY: 50 });
+  fireEvent.pointerUp(canvas, { pointerId: 42, pointerType: "mouse", clientX: 60, clientY: 50 });
+
+  expect(replay).toHaveBeenCalledWith(expect.objectContaining({
+    op: "stroke_move",
+    indexes: [0],
+    dx: 30,
+    dy: 20,
+  }));
+
+  fireEvent.click(screen.getByRole("button", { name: /удалить выделенное|таңдалғанды өшіру/i }));
+  expect(replay).toHaveBeenCalledWith(expect.objectContaining({
+    op: "stroke_delete",
+    indexes: [0],
+  }));
+  expect(screen.queryByTestId("lasso-selection")).not.toBeInTheDocument();
 });
 
 it("lets pan mode drag the board even when the gesture starts over a graph", () => {
@@ -178,7 +241,7 @@ it("uses the two-level toolbar shell and local artwork for the drawing tools", (
 
 it("shows large icon-only controls without visible tool captions", () => {
   mount();
-  const namedButtons = ["Панели", "Ручка", "Линия", "График", "Перемещение", "Лок", "Ластик", "Доска", "Снимок", "Распознать"];
+  const namedButtons = ["Панели", "Ручка", "Линия", "График", "Перемещение", "Лок", "Ластик", "Доска", "Снимок"];
 
   for (const name of namedButtons) {
     const button = screen.getByRole("button", { name });
@@ -190,6 +253,7 @@ it("shows large icon-only controls without visible tool captions", () => {
   expect(screen.getByRole("button", { name: "Ластик" })).toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "График" })).not.toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "Панели" })).toHaveClass("board-utility-button");
+  expect(screen.queryByRole("button", { name: "Распознать" })).not.toBeInTheDocument();
 });
 
 it("keeps tool hover motion CSS-driven instead of pointer-driven parallax", () => {

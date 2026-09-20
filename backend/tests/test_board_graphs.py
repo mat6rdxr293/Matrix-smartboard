@@ -52,6 +52,71 @@ def test_graph_operations_are_saved_in_order_and_deduplicated(tmp_path):
     assert saved[1]["after"] == after
     assert saved[4]["graph"] == after
 
+def test_stroke_move_operations_are_saved_and_validated(tmp_path):
+    client, _, _, room = registered_client(tmp_path)
+    lesson = create_lesson(client, room)
+    url = f"/api/lessons/{lesson['id']}/board/operations"
+
+    ok = client.post(url, json={"operations": [{
+        "client_operation_id": "move-1",
+        "op": "stroke_move",
+        "indexes": [0, 2],
+        "dx": 24.5,
+        "dy": -12,
+        "ts": 150,
+    }]})
+    assert ok.status_code == 200
+
+    saved = client.get(f"/api/lessons/{lesson['id']}/board").json()["operations"]
+    assert saved[-1]["op"] == "stroke_move"
+    assert saved[-1]["indexes"] == [0, 2]
+    assert saved[-1]["dx"] == 24.5
+    assert saved[-1]["dy"] == -12.0
+
+    bad = client.post(url, json={"operations": [{
+        "client_operation_id": "move-bad",
+        "op": "stroke_move",
+        "indexes": [],
+        "dx": 1,
+        "dy": 1,
+    }]})
+    assert bad.status_code == 422
+
+
+def test_stroke_delete_operations_are_saved_and_validated(tmp_path):
+    client, _, _, room = registered_client(tmp_path)
+    lesson = create_lesson(client, room)
+    url = f"/api/lessons/{lesson['id']}/board/operations"
+    stroke = {
+        "points": [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+        "color": "#fff",
+        "width": 2,
+        "mode": "draw",
+    }
+
+    ok = client.post(url, json={"operations": [{
+        "client_operation_id": "delete-1",
+        "op": "stroke_delete",
+        "indexes": [0],
+        "strokes": [stroke],
+        "ts": 160,
+    }]})
+    assert ok.status_code == 200
+
+    saved = client.get(f"/api/lessons/{lesson['id']}/board").json()["operations"]
+    assert saved[-1]["op"] == "stroke_delete"
+    assert saved[-1]["indexes"] == [0]
+    assert saved[-1]["strokes"] == [stroke]
+
+    bad = client.post(url, json={"operations": [{
+        "client_operation_id": "delete-bad",
+        "op": "stroke_delete",
+        "indexes": [0, 1],
+        "strokes": [stroke],
+    }]})
+    assert bad.status_code == 422
+
+
 def test_graph_update_rejects_mismatched_ids_and_invalid_shape(tmp_path):
     client, _, _, room = registered_client(tmp_path)
     lesson = create_lesson(client, room)

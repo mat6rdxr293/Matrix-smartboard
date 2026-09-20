@@ -27,6 +27,8 @@ export type BoardDocument = { strokes: Stroke[]; graphs: GraphElement[] };
 type Snapshot = BoardDocument;
 type Command =
   | { kind: "stroke_add"; stroke: Stroke }
+  | { kind: "stroke_move"; indexes: number[]; dx: number; dy: number }
+  | { kind: "stroke_delete"; entries: { index: number; stroke: Stroke }[] }
   | { kind: "graph_add"; graph: GraphElement }
   | { kind: "graph_update"; before: GraphElement; after: GraphElement }
   | { kind: "graph_delete"; graph: GraphElement; index: number }
@@ -40,6 +42,8 @@ export type BoardHistory = {
 
 export type BoardOperation =
   | { op: "add"; stroke: Stroke }
+  | { op: "stroke_move"; indexes: number[]; dx: number; dy: number }
+  | { op: "stroke_delete"; indexes: number[]; strokes: Stroke[] }
   | { op: "graph_add"; graph: GraphElement }
   | { op: "graph_update"; before: GraphElement; after: GraphElement }
   | { op: "graph_delete"; graph: GraphElement }
@@ -63,6 +67,15 @@ function applyCommand(document: BoardDocument, command: Command): BoardDocument 
   const next = cloneDocument(document);
   if (command.kind === "stroke_add") {
     next.strokes.push(cloneStroke(command.stroke));
+  } else if (command.kind === "stroke_move") {
+    const indexes = new Set(command.indexes);
+    next.strokes = next.strokes.map((stroke, index) => indexes.has(index)
+      ? { ...stroke, points: stroke.points.map((point) => ({ x: point.x + command.dx, y: point.y + command.dy })) }
+      : stroke
+    );
+  } else if (command.kind === "stroke_delete") {
+    const indexes = new Set(command.entries.map((entry) => entry.index));
+    next.strokes = next.strokes.filter((_, index) => !indexes.has(index));
   } else if (command.kind === "graph_add") {
     next.graphs = next.graphs.filter((graph) => graph.id !== command.graph.id);
     next.graphs.push(cloneGraph(command.graph));
@@ -81,6 +94,18 @@ function revertCommand(document: BoardDocument, command: Command): BoardDocument
   const next = cloneDocument(document);
   if (command.kind === "stroke_add") {
     next.strokes.pop();
+  } else if (command.kind === "stroke_move") {
+    const indexes = new Set(command.indexes);
+    next.strokes = next.strokes.map((stroke, index) => indexes.has(index)
+      ? { ...stroke, points: stroke.points.map((point) => ({ x: point.x - command.dx, y: point.y - command.dy })) }
+      : stroke
+    );
+  } else if (command.kind === "stroke_delete") {
+    const restored = [...next.strokes];
+    for (const entry of [...command.entries].sort((a, b) => a.index - b.index)) {
+      restored.splice(Math.min(entry.index, restored.length), 0, cloneStroke(entry.stroke));
+    }
+    next.strokes = restored;
   } else if (command.kind === "graph_add") {
     next.graphs = next.graphs.filter((graph) => graph.id !== command.graph.id);
   } else if (command.kind === "graph_update") {
@@ -106,6 +131,23 @@ function pushCommand(state: BoardHistory, command: Command): BoardHistory {
 export function applyBoardOperation(state: BoardHistory, operation: BoardOperation): BoardHistory {
   if (operation.op === "add") {
     return pushCommand(state, { kind: "stroke_add", stroke: cloneStroke(operation.stroke) });
+  }
+  if (operation.op === "stroke_move") {
+    const indexes = [...new Set(operation.indexes.filter((index) => Number.isInteger(index) && index >= 0))];
+    if (!indexes.length || (!operation.dx && !operation.dy)) return state;
+    return pushCommand(state, { kind: "stroke_move", indexes, dx: operation.dx, dy: operation.dy });
+  }
+  if (operation.op === "stroke_delete") {
+    const entries = operation.indexes
+      .map((index, position) => ({ index, stroke: operation.strokes[position] }))
+      .filter((entry): entry is { index: number; stroke: Stroke } =>
+        Number.isInteger(entry.index) && entry.index >= 0 && Boolean(entry.stroke)
+      );
+    if (!entries.length) return state;
+    return pushCommand(state, {
+      kind: "stroke_delete",
+      entries: entries.map((entry) => ({ index: entry.index, stroke: cloneStroke(entry.stroke) })),
+    });
   }
   if (operation.op === "graph_add") {
     return pushCommand(state, { kind: "graph_add", graph: cloneGraph(operation.graph) });

@@ -124,6 +124,7 @@ class AiRequest(BaseModel):
     subject: Optional[str] = None
     lesson_id: Optional[str] = None
     client_message_id: Optional[str] = None
+    board_context: bool = False
 
 
 class AiResponse(BaseModel):
@@ -571,6 +572,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
             payload.assistant_context,
             payload.continue_from,
             payload.subject,
+            payload.board_context,
         )
         async with ai_history_lock:
             _append_ai_history(
@@ -582,6 +584,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                     "studentAttempt": _trim_text(payload.student_attempt, 6000),
                     "assistantContext": _trim_text(payload.assistant_context, 6000),
                     "continueFrom": payload.continue_from,
+                    "boardContext": payload.board_context,
                     "response": _trim_text(text, 12000),
                     "ok": True,
                 },

@@ -58,7 +58,6 @@ export default function Sidebar({
       <div className="glass flex-1 rounded-2xl p-4 shadow-soft">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">Карточки 15 заданий</h3>
-          <Badge>Практика</Badge>
         </div>
         <div className="scrollbar-hide grid max-h-[44vh] grid-cols-1 gap-2 overflow-auto pr-1">
           {tasks.map((task) => {

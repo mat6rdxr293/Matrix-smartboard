@@ -33,6 +33,34 @@ describe("boardDocument", () => {
     expect(state.document.graphs[0].expressions[0].expression).toBe("x^2");
   });
 
+  it("moves selected strokes and supports undo/redo", () => {
+    const first = { points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], color: "#fff", width: 2, mode: "draw" as const };
+    const second = { points: [{ x: 20, y: 30 }, { x: 40, y: 50 }], color: "#fff", width: 2, mode: "draw" as const };
+    const state = replayBoardOperations(createBoardHistory(), [
+      { op: "add", stroke: first },
+      { op: "add", stroke: second },
+      { op: "stroke_move", indexes: [0], dx: 10, dy: -5 },
+      { op: "undo" },
+      { op: "redo" },
+    ]);
+    expect(state.document.strokes[0].points).toEqual([{ x: 11, y: -3 }, { x: 13, y: -1 }]);
+    expect(state.document.strokes[1].points).toEqual(second.points);
+  });
+
+  it("deletes selected strokes and restores them with undo", () => {
+    const first = { points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], color: "#fff", width: 2, mode: "draw" as const };
+    const second = { points: [{ x: 20, y: 30 }, { x: 40, y: 50 }], color: "#fff", width: 2, mode: "draw" as const };
+    const state = replayBoardOperations(createBoardHistory(), [
+      { op: "add", stroke: first },
+      { op: "add", stroke: second },
+      { op: "stroke_delete", indexes: [0], strokes: [first] },
+      { op: "undo" },
+    ]);
+    expect(state.document.strokes).toHaveLength(2);
+    expect(state.document.strokes[0].points).toEqual(first.points);
+    expect(state.document.strokes[1].points).toEqual(second.points);
+  });
+
   it("undoes graph deletion", () => {
     const g = graph();
     const state = replayBoardOperations(createBoardHistory(), [

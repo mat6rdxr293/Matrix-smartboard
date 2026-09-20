@@ -72,6 +72,22 @@ describe("GraphElementView", () => {
     render(<I18nProvider><GraphElementView {...props} /></I18nProvider>);
     expect(screen.getByTestId("graph-zoom-in")).toHaveClass("bg-graphite");
   });
+
+  it("shows axis intersections even with a single function", () => {
+    const single: GraphElement = {
+      ...graph,
+      expressions: [{ id: "e1", expression: "x+2", color: "#4DA3FF", visible: true }],
+    };
+    render(<I18nProvider><GraphElementView {...props} graph={single} /></I18nProvider>);
+
+    const toggle = screen.getByRole("checkbox", { name: /точки пересечения|қиылысу нүктелерін/i });
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle);
+
+    const points = screen.getAllByTestId("graph-intersection");
+    expect(points).toHaveLength(2);
+    expect(points.map((point) => point.textContent)).toEqual(expect.arrayContaining(["(-2; 0)", "(0; 2)"]));
+  });
 });
 
 it("edits an axis label using the on-screen text keyboard", () => {
@@ -222,4 +238,21 @@ it("pans while pinch zooming when the gesture center moves", () => {
   expect((next.yMin + next.yMax) / 2).toBeGreaterThan(0);
   fireEvent.pointerUp(plot, { pointerId: 2, pointerType: "touch", clientX: 360, clientY: 180 });
   expect(onCommit).toHaveBeenCalledTimes(1);
+});
+
+it("shows intersection markers for visible functions when enabled", () => {
+  const withIntersections: GraphElement = {
+    ...graph,
+    expressions: [
+      { id: "e1", expression: "x", color: "#4DA3FF", visible: true },
+      { id: "e2", expression: "-x", color: "#FF5A5F", visible: true },
+    ],
+  };
+  render(<I18nProvider><GraphElementView {...props} graph={withIntersections} /></I18nProvider>);
+
+  expect(screen.queryByTestId("graph-intersection")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: /точки пересечения|қиылысу нүктелерін/i }));
+
+  expect(screen.getByTestId("graph-intersection")).toBeInTheDocument();
+  expect(screen.getByTestId("graph-intersection")).toHaveTextContent("(0; 0)");
 });
