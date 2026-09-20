@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    ai_base_url: str | None = Field(default=None, validation_alias="AI_BASE_URL")
     ai_model: str = Field(default="gpt-5.2", validation_alias="AI_MODEL")
     ocr_model: str = Field(default="gpt-5.2", validation_alias="OCR_MODEL")
     ai_timeout_seconds: float = Field(default=30.0, validation_alias="AI_TIMEOUT_SECONDS")
@@ -93,3 +94,7 @@ def get_openai_key() -> str | None:
         except Exception:
             continue
     return None
+
+
+def is_ai_configured() -> bool:
+    return bool(settings.ai_base_url or get_openai_key())

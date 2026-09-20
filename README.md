@@ -57,6 +57,23 @@ chmod +x scripts/dev.sh
 scripts/dev.ps1
 ```
 
+### Локальный ИИ: Qwen 2.5 через Ollama
+
+Установите Ollama, загрузите модель и оставьте Ollama запущенным:
+
+```bash
+ollama pull qwen2.5
+```
+
+Скопируйте `backend/.env.example` в `backend/.env`. Нужные значения уже указаны в примере:
+
+```env
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=qwen2.5
+```
+
+Для локального чата `OPENAI_API_KEY` не нужен. OCR изображений по-прежнему требует облачный ключ или отдельную локальную мультимодальную модель.
+
 ## Проверка
 
 ```bash

@@ -249,8 +249,9 @@ def generate_ai_response(
     board_context: bool = False,
 ) -> str:
     api_key = get_openai_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
+    base_url = settings.ai_base_url
+    if not api_key and not base_url:
+        raise RuntimeError("AI backend is not configured")
 
     sys, user, max_tokens = _build_prompt(
         mode,
@@ -262,8 +263,27 @@ def generate_ai_response(
         board_context,
     )
 
-    client = OpenAI(api_key=api_key, timeout=settings.ai_timeout_seconds)
+    client_options = {
+        "api_key": api_key or "ollama",
+        "timeout": settings.ai_timeout_seconds,
+    }
+    if base_url:
+        client_options["base_url"] = base_url
+    client = OpenAI(**client_options)
     try:
+        if base_url:
+            response = client.chat.completions.create(
+                model=settings.ai_model,
+                messages=[
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": user},
+                ],
+                max_tokens=max_tokens,
+            )
+            text = response.choices[0].message.content
+            text = text.strip() if text else ""
+            return _postprocess_math(text)
+
         if not hasattr(client, "responses"):
             raise RuntimeError("OpenAI SDK слишком старый. Обновите пакет openai до версии с Responses API.")
 

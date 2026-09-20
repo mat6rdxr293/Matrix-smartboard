@@ -26,7 +26,7 @@ from .ratelimit import RateLimiter
 from .pptx_import import import_pptx, import_pptx_full, import_pptx_stickers
 from .pptx_export import export_pptx
 from .m365 import M365Client, M365Error
-from .settings import get_openai_key, settings
+from .settings import get_openai_key, is_ai_configured, settings
 from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
 from .school_store import SchoolStore
@@ -106,6 +106,7 @@ def _subject_ai_history_file(subject: Optional[str]) -> Path:
 @app.on_event("startup")
 async def _startup_log() -> None:
     has_key = bool(get_openai_key())
+    logger.info("AI backend configured: %s", "yes" if is_ai_configured() else "no")
     logger.info("OPENAI_API_KEY loaded: %s", "yes" if has_key else "no")
 
 
@@ -526,7 +527,7 @@ async def status() -> dict:
     has_key = bool(get_openai_key())
     return {
         "ok": True,
-        "ai": has_key,
+        "ai": is_ai_configured(),
         "ocr": has_key,
     }
 
