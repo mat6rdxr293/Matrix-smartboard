@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     ai_base_url: str | None = Field(default=None, validation_alias="AI_BASE_URL")
+    ocr_base_url: str | None = Field(default=None, validation_alias="OCR_BASE_URL")
     ai_model: str = Field(default="gpt-5.2", validation_alias="AI_MODEL")
     ocr_model: str = Field(default="gpt-5.2", validation_alias="OCR_MODEL")
     ai_timeout_seconds: float = Field(default=30.0, validation_alias="AI_TIMEOUT_SECONDS")
@@ -43,6 +44,23 @@ class Settings(BaseSettings):
         validation_alias="PRACTICE_DB_PATH",
     )
     school_session_days: int = Field(default=30, validation_alias="SCHOOL_SESSION_DAYS")
+
+    # В .env.example эти строки стоят пустыми. Pydantic читает их как "",
+    # и для пути к базе это давало Path("") → «unable to open database file» на старте,
+    # а для адресов — пустую строку вместо None. Пустое значение = «не задано».
+    @field_validator("practice_db_path", mode="before")
+    @classmethod
+    def _empty_db_path_means_default(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return BASE_DIR / "app" / "data" / "practice.db"
+        return value
+
+    @field_validator("ai_base_url", "ocr_base_url", mode="before")
+    @classmethod
+    def _empty_url_means_unset(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     m365_client_id: str | None = Field(default=None, validation_alias="M365_CLIENT_ID")
     m365_tenant_id: str | None = Field(default=None, validation_alias="M365_TENANT_ID")
@@ -98,3 +116,7 @@ def get_openai_key() -> str | None:
 
 def is_ai_configured() -> bool:
     return bool(settings.ai_base_url or get_openai_key())
+
+
+def is_ocr_configured() -> bool:
+    return bool(settings.ocr_base_url or get_openai_key())

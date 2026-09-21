@@ -11,10 +11,17 @@ logger = logging.getLogger(__name__)
 
 def ocr_image(png_bytes: bytes) -> str:
     api_key = get_openai_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
+    base_url = settings.ocr_base_url
+    if not api_key and not base_url:
+        raise RuntimeError("OCR backend is not configured")
 
-    client = OpenAI(api_key=api_key, timeout=settings.ai_timeout_seconds)
+    client_options = {
+        "api_key": api_key or "ollama",
+        "timeout": settings.ai_timeout_seconds,
+    }
+    if base_url:
+        client_options["base_url"] = base_url
+    client = OpenAI(**client_options)
     data_url = "data:image/png;base64," + base64.b64encode(png_bytes).decode("utf-8")
     prompt = (
         "Только транскрибируй рукописный текст и формулы в обычный текст. "
@@ -22,6 +29,25 @@ def ocr_image(png_bytes: bytes) -> str:
     )
 
     try:
+        if base_url:
+            # локальные серверы (Ollama и др.) понимают только chat.completions,
+            # а картинку там передают как image_url, а не input_image
+            response = client.chat.completions.create(
+                model=settings.ocr_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                ],
+                max_tokens=1000,
+            )
+            text = response.choices[0].message.content
+            return text.strip() if text else ""
+
         if not hasattr(client, "responses"):
             raise RuntimeError("OpenAI SDK слишком старый. Обновите пакет openai до версии с Responses API.")
 
