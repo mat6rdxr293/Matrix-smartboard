@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import ru from "@/i18n/locales/ru.json";
 import kk from "@/i18n/locales/kk.json";
+import en from "@/i18n/locales/en.json";
 import type { Slide } from "@/app/presentation/Slides";
 
-export type LocaleCode = "ru" | "kk";
+export type LocaleCode = "ru" | "kk" | "en";
 
 type LocaleDict = {
   meta?: { name?: string };
@@ -14,9 +15,28 @@ type LocaleDict = {
 const LOCALES: Record<LocaleCode, LocaleDict> = {
   ru,
   kk,
+  en,
 };
 
 const STORAGE_KEY = "algebra.locale";
+
+const readStoredLocale = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage?.getItem(STORAGE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredLocale = (locale: LocaleCode) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem(STORAGE_KEY, locale);
+  } catch {
+    // Storage can be unavailable in embedded/private contexts.
+  }
+};
 
 const interpolate = (template: string, vars?: Record<string, string | number>) => {
   if (!vars) return template;
@@ -24,13 +44,13 @@ const interpolate = (template: string, vars?: Record<string, string | number>) =
 };
 
 const normalizeLocale = (value: string | null | undefined): LocaleCode =>
-  value === "kk" ? "kk" : "ru";
+  value === "kk" || value === "en" ? value : "ru";
 
 const localeFromUrl = (): LocaleCode | null => {
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("lang");
   if (!raw) return null;
-  return raw === "kk" || raw === "ru" ? raw : null;
+  return raw === "kk" || raw === "ru" || raw === "en" ? raw : null;
 };
 
 const translateTextNode = (node: Text, literal: Record<string, string>) => {
@@ -84,12 +104,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return "ru";
     const fromUrl = localeFromUrl();
     if (fromUrl) return fromUrl;
-    return normalizeLocale(window.localStorage.getItem(STORAGE_KEY));
+    return normalizeLocale(readStoredLocale());
   });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, locale);
+    writeStoredLocale(locale);
+    if (typeof document !== "undefined") document.documentElement.lang = locale;
   }, [locale]);
 
   useEffect(() => {

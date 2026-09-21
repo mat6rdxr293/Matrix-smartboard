@@ -194,6 +194,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     lastCenter: null,
   });
   const pinchRef = useRef<{ active: boolean; startDist: number }>({ active: false, startDist: 0 });
+  const safariPinchRef = useRef<{
+    startZoom: number;
+    startPan: { x: number; y: number };
+    anchor: { x: number; y: number };
+  } | null>(null);
+  const boardLockRef = useRef(boardLock);
+  boardLockRef.current = boardLock;
   const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[]>([]);
   const lassoPathRef = useRef<{ x: number; y: number }[]>([]);
   const [lassoSelection, setLassoSelection] = useState<{
@@ -849,6 +856,71 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     setZoom(nextZoom);
     setPan(nextPan);
   };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    type SafariGestureEvent = Event & {
+      scale?: number;
+      clientX?: number;
+      clientY?: number;
+    };
+
+    const handleGestureStart = (event: Event) => {
+      if (boardLockRef.current) return;
+      const gesture = event as SafariGestureEvent;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = canvas.getBoundingClientRect();
+      const clientX = Number.isFinite(gesture.clientX) ? Number(gesture.clientX) : rect.left + rect.width / 2;
+      const clientY = Number.isFinite(gesture.clientY) ? Number(gesture.clientY) : rect.top + rect.height / 2;
+      safariPinchRef.current = {
+        startZoom: zoomRef.current,
+        startPan: { ...panRef.current },
+        anchor: { x: clientX - rect.left, y: clientY - rect.top },
+      };
+    };
+
+    const handleGestureChange = (event: Event) => {
+      const active = safariPinchRef.current;
+      if (!active || boardLockRef.current) return;
+      const gesture = event as SafariGestureEvent;
+      const scale = Number(gesture.scale);
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nextZoom = clampZoom(active.startZoom * scale);
+      const worldX = (active.anchor.x - active.startPan.x) / active.startZoom;
+      const worldY = (active.anchor.y - active.startPan.y) / active.startZoom;
+      const nextPan = clampPan({
+        x: active.anchor.x - worldX * nextZoom,
+        y: active.anchor.y - worldY * nextZoom,
+      });
+
+      zoomRef.current = nextZoom;
+      panRef.current = nextPan;
+      setZoom(nextZoom);
+      setPan(nextPan);
+    };
+
+    const handleGestureEnd = (event: Event) => {
+      if (!safariPinchRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      safariPinchRef.current = null;
+    };
+
+    canvas.addEventListener("gesturestart", handleGestureStart, { passive: false });
+    canvas.addEventListener("gesturechange", handleGestureChange, { passive: false });
+    canvas.addEventListener("gestureend", handleGestureEnd, { passive: false });
+    return () => {
+      canvas.removeEventListener("gesturestart", handleGestureStart);
+      canvas.removeEventListener("gesturechange", handleGestureChange);
+      canvas.removeEventListener("gestureend", handleGestureEnd);
+    };
+  }, []);
 
   const extractPoints = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1860,10 +1932,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs text-frost/60">
-                    {profileConfig.backgroundPattern === "lines" ? "Линии" : tl("grid")}
+                    {profileConfig.backgroundPattern === "lines" ? tl("lines") : tl("grid")}
                   </span>
                   <Button variant={grid ? "accent" : "outline"} size="sm" onClick={() => setGrid((v) => !v)}>
-                    {grid ? "Вкл" : "Выкл"}
+                    {tl(grid ? "grid_on" : "grid_off")}
                   </Button>
                 </div>
                 <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2 py-1">

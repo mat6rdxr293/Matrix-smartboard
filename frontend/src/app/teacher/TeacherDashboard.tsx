@@ -15,8 +15,8 @@ const STAGE_H = 540;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
-const formatDateTime = (ts: number, locale: "ru" | "kk") =>
-  new Date(ts).toLocaleString(locale === "kk" ? "kk-KZ" : "ru-RU", {
+const formatDateTime = (ts: number, locale: "ru" | "kk" | "en") =>
+  new Date(ts).toLocaleString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-US" : "ru-RU", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

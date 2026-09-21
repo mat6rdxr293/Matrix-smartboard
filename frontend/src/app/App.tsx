@@ -17,7 +17,8 @@ import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type B
 import {
   buildDefaultSlidesForSubject,
   getDefaultTasksForSubject,
-  getSubjectMeta,
+  getLessonTitleForLocale,
+  getSubjectNameForLocale,
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
 import { Button } from "@/components/ui/button";
@@ -97,9 +98,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const subjectId = lesson.subjectId;
   const [teacherUnlocked, setTeacherUnlocked] = useState(false);
   const teacherPinKey = `school.${school.id}.teacherPinHash`;
-  const subjectMeta = useMemo(() => getSubjectMeta(subjectId), [subjectId]);
-  const lessonTitle = locale === "kk" ? subjectMeta.lessonKk : subjectMeta.lessonRu;
-  const subjectName = locale === "kk" ? subjectMeta.nameKk : subjectMeta.nameRu;
+  const lessonTitle = getLessonTitleForLocale(subjectId, locale);
+  const subjectName = getSubjectNameForLocale(subjectId, locale);
   const defaultTaskData = useMemo(() => getDefaultTasksForSubject(subjectId), [subjectId]);
   const defaultSlideData = useMemo(() => buildDefaultSlidesForSubject(subjectId, locale), [subjectId, locale]);
   const subjectStoragePrefix = `subject.${subjectId}`;
@@ -220,7 +220,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   const nowLabel = () => {
     const d = new Date();
-    return d.toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-US" : "ru-RU", { hour: "2-digit", minute: "2-digit" });
   };
 
   const showScoreOverlay = (rawPercent: number) => {
@@ -498,7 +498,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           role: item.role,
           text: item.status === "error" ? `${tl("error")}: ${item.text}` : item.text,
           mode: item.mode || undefined,
-          timestamp: new Date(item.createdAt).toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", { hour: "2-digit", minute: "2-digit" }),
+          timestamp: new Date(item.createdAt).toLocaleTimeString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-US" : "ru-RU", { hour: "2-digit", minute: "2-digit" }),
         })));
       })
       .catch(() => undefined);
@@ -771,7 +771,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       id: `${Date.now()}-student`,
       role: "student",
       text,
-      timestamp: new Date().toLocaleTimeString(locale === "kk" ? "kk-KZ" : "ru-RU", {
+      timestamp: new Date().toLocaleTimeString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-US" : "ru-RU", {
         hour: "2-digit",
         minute: "2-digit",
       }),

@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@/i18n";
 
 import GradePicker from "./GradePicker";
 import LessonHistory from "./LessonHistory";
@@ -21,16 +22,18 @@ describe("lesson entry flow", () => {
   it("selects a class before showing its allowed subjects", () => {
     const onSelectGrade = vi.fn();
     const { rerender } = render(
-      <GradePicker school={school} room={room} onSelectGrade={onSelectGrade} onOpenHistory={() => {}} onLogout={() => {}} onChangeRoom={() => {}} />,
+      <I18nProvider>
+        <GradePicker school={school} room={room} onSelectGrade={onSelectGrade} onOpenHistory={() => {}} onLogout={() => {}} onChangeRoom={() => {}} />
+      </I18nProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "6 класс" }));
     expect(onSelectGrade).toHaveBeenCalledWith(6);
 
-    rerender(<SubjectPicker grade={6} locale="ru" onSelectSubject={() => {}} onBack={() => {}} />);
+    rerender(<I18nProvider><SubjectPicker grade={6} locale="ru" onSelectSubject={() => {}} onBack={() => {}} /></I18nProvider>);
     expect(screen.getByRole("button", { name: /Естествознание/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Физика/ })).not.toBeInTheDocument();
 
-    rerender(<SubjectPicker grade={7} locale="ru" onSelectSubject={() => {}} onBack={() => {}} />);
+    rerender(<I18nProvider><SubjectPicker grade={7} locale="ru" onSelectSubject={() => {}} onBack={() => {}} /></I18nProvider>);
     expect(screen.getByRole("button", { name: /Физика/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Естествознание/ })).not.toBeInTheDocument();
   });
@@ -38,7 +41,7 @@ describe("lesson entry flow", () => {
   it("exposes both resume decisions in a modal", () => {
     const onResume = vi.fn();
     const onStartNew = vi.fn();
-    render(<ResumeLessonModal lesson={lesson} onResume={onResume} onStartNew={onStartNew} />);
+    render(<I18nProvider><ResumeLessonModal lesson={lesson} onResume={onResume} onStartNew={onStartNew} /></I18nProvider>);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Вернуться к уроку" }));
     fireEvent.click(screen.getByRole("button", { name: "Начать новый" }));
@@ -48,7 +51,7 @@ describe("lesson entry flow", () => {
 
   it("opens a selected lesson from room history", () => {
     const onOpenLesson = vi.fn();
-    render(<LessonHistory room={room} lessons={[lesson]} onOpenLesson={onOpenLesson} onBack={() => {}} />);
+    render(<I18nProvider><LessonHistory room={room} lessons={[lesson]} onOpenLesson={onOpenLesson} onBack={() => {}} /></I18nProvider>);
     fireEvent.click(screen.getByRole("button", { name: /Открыть урок/ }));
     expect(onOpenLesson).toHaveBeenCalledWith(lesson);
   });

@@ -36,6 +36,7 @@ export default function GraphElementView(props: Props) {
   const [plotDragging, setPlotDragging] = useState(false);
   const [showIntersections, setShowIntersections] = useState(false);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
+  const plotRef = useRef<SVGSVGElement | null>(null);
   const labelSelectionRef = useRef({ start: 0, end: 0 });
   const dragRef = useRef<{
     id: number;
@@ -52,6 +53,17 @@ export default function GraphElementView(props: Props) {
     last: GraphElement;
   } | null>(null);
   const wheelGestureRef = useRef<{ before: GraphElement; last: GraphElement; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const safariGestureRef = useRef<{ before: GraphElement; last: GraphElement; anchor: { x: number; y: number } } | null>(null);
+  const graphRef = useRef(graph);
+  const onPreviewRef = useRef(onPreview);
+  const onCommitRef = useRef(onCommit);
+  const onSelectRef = useRef(onSelect);
+  const interactionDisabledRef = useRef(interactionDisabled);
+  graphRef.current = graph;
+  onPreviewRef.current = onPreview;
+  onCommitRef.current = onCommit;
+  onSelectRef.current = onSelect;
+  interactionDisabledRef.current = interactionDisabled;
   const plotPanRef = useRef<{
     id: number;
     startX: number;
@@ -162,6 +174,77 @@ export default function GraphElementView(props: Props) {
     }, 220);
     wheelGestureRef.current = { before, last: next, timer };
   };
+
+  useEffect(() => {
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    type SafariGestureEvent = Event & {
+      scale?: number;
+      clientX?: number;
+      clientY?: number;
+    };
+
+    const handleGestureStart = (event: Event) => {
+      if (interactionDisabledRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onSelectRef.current();
+
+      const pendingWheel = wheelGestureRef.current;
+      if (pendingWheel) {
+        clearTimeout(pendingWheel.timer);
+        wheelGestureRef.current = null;
+        onCommitRef.current(pendingWheel.before, pendingWheel.last);
+      }
+
+      const gesture = event as SafariGestureEvent;
+      const rect = plot.getBoundingClientRect();
+      const clientX = Number.isFinite(gesture.clientX) ? Number(gesture.clientX) : rect.left + rect.width / 2;
+      const clientY = Number.isFinite(gesture.clientY) ? Number(gesture.clientY) : rect.top + rect.height / 2;
+      safariGestureRef.current = {
+        before: graphRef.current,
+        last: graphRef.current,
+        anchor: {
+          x: rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5,
+          y: rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5,
+        },
+      };
+    };
+
+    const handleGestureChange = (event: Event) => {
+      const active = safariGestureRef.current;
+      if (!active || interactionDisabledRef.current) return;
+      const gesture = event as SafariGestureEvent;
+      const scale = Number(gesture.scale);
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const viewport = zoomGraphViewport(viewportOf(active.before), 1 / scale, active.anchor);
+      const next = withViewport(active.before, viewport);
+      active.last = next;
+      onPreviewRef.current(next);
+    };
+
+    const handleGestureEnd = (event: Event) => {
+      const active = safariGestureRef.current;
+      if (!active) return;
+      event.preventDefault();
+      event.stopPropagation();
+      safariGestureRef.current = null;
+      onCommitRef.current(active.before, active.last);
+    };
+
+    plot.addEventListener("gesturestart", handleGestureStart, { passive: false });
+    plot.addEventListener("gesturechange", handleGestureChange, { passive: false });
+    plot.addEventListener("gestureend", handleGestureEnd, { passive: false });
+    return () => {
+      plot.removeEventListener("gesturestart", handleGestureStart);
+      plot.removeEventListener("gesturechange", handleGestureChange);
+      plot.removeEventListener("gestureend", handleGestureEnd);
+    };
+  }, []);
 
   const pointerDistance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
   const pointerCenter = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
@@ -462,6 +545,7 @@ export default function GraphElementView(props: Props) {
       }}
     >
       <svg
+        ref={plotRef}
         data-testid="graph-plot"
         width={graph.width}
         height={graph.height}

@@ -19,21 +19,22 @@ export type SubjectOption = {
   id: CurriculumSubjectId;
   nameRu: string;
   nameKk: string;
+  nameEn: string;
   accent: string;
 };
 
 const SUBJECTS: Record<CurriculumSubjectId, SubjectOption> = {
-  math: { id: "math", nameRu: "Математика", nameKk: "Математика", accent: "#5BE7C4" },
-  natural_science: { id: "natural_science", nameRu: "Естествознание", nameKk: "Жаратылыстану", accent: "#7CFFB2" },
-  algebra: { id: "algebra", nameRu: "Алгебра", nameKk: "Алгебра", accent: "#5BE7C4" },
-  geometry: { id: "geometry", nameRu: "Геометрия", nameKk: "Геометрия", accent: "#9EEBFF" },
-  physics: { id: "physics", nameRu: "Физика", nameKk: "Физика", accent: "#4DA3FF" },
-  chemistry: { id: "chemistry", nameRu: "Химия", nameKk: "Химия", accent: "#FFB86B" },
-  biology: { id: "biology", nameRu: "Биология", nameKk: "Биология", accent: "#7CFFB2" },
-  geography: { id: "geography", nameRu: "География", nameKk: "География", accent: "#F6D365" },
-  kazakh: { id: "kazakh", nameRu: "Казахский язык", nameKk: "Қазақ тілі", accent: "#5BE7C4" },
-  russian: { id: "russian", nameRu: "Русский язык", nameKk: "Орыс тілі", accent: "#9EEBFF" },
-  english: { id: "english", nameRu: "Английский язык", nameKk: "Ағылшын тілі", accent: "#FF8FA3" },
+  math: { id: "math", nameRu: "Математика", nameKk: "Математика", nameEn: "Mathematics", accent: "#5BE7C4" },
+  natural_science: { id: "natural_science", nameRu: "Естествознание", nameKk: "Жаратылыстану", nameEn: "Natural Science", accent: "#7CFFB2" },
+  algebra: { id: "algebra", nameRu: "Алгебра", nameKk: "Алгебра", nameEn: "Algebra", accent: "#5BE7C4" },
+  geometry: { id: "geometry", nameRu: "Геометрия", nameKk: "Геометрия", nameEn: "Geometry", accent: "#9EEBFF" },
+  physics: { id: "physics", nameRu: "Физика", nameKk: "Физика", nameEn: "Physics", accent: "#4DA3FF" },
+  chemistry: { id: "chemistry", nameRu: "Химия", nameKk: "Химия", nameEn: "Chemistry", accent: "#FFB86B" },
+  biology: { id: "biology", nameRu: "Биология", nameKk: "Биология", nameEn: "Biology", accent: "#7CFFB2" },
+  geography: { id: "geography", nameRu: "География", nameKk: "География", nameEn: "Geography", accent: "#F6D365" },
+  kazakh: { id: "kazakh", nameRu: "Казахский язык", nameKk: "Қазақ тілі", nameEn: "Kazakh Language", accent: "#5BE7C4" },
+  russian: { id: "russian", nameRu: "Русский язык", nameKk: "Орыс тілі", nameEn: "Russian Language", accent: "#9EEBFF" },
+  english: { id: "english", nameRu: "Английский язык", nameKk: "Ағылшын тілі", nameEn: "English Language", accent: "#FF8FA3" },
 };
 
 const PRIMARY: CurriculumSubjectId[] = ["math", "natural_science", "kazakh", "russian"];

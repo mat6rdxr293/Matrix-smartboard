@@ -195,11 +195,11 @@ export default function TopBar({
           size="sm"
           onClick={onCompleteLesson}
           className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-white/10 bg-white/[0.035] px-3 text-[11px] font-semibold text-frost/75 hover:bg-white/[0.07] hover:text-frost"
-          aria-label="Завершить"
-          title="Завершить урок"
+          aria-label={tl("finish_lesson")}
+          title={tl("finish_lesson_title")}
         >
           <SquareCheckBig size={15} />
-          <span>Завершить</span>
+          <span>{tl("finish_lesson")}</span>
         </Button>
 
         <div ref={settingsRef} className="relative">
@@ -333,6 +333,16 @@ export default function TopBar({
                       onClick={() => setLocale("kk")}
                     >
                       {tl("language_kk")}
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "h-7 min-w-[66px] rounded-[8px] px-2 text-[10px] font-semibold transition",
+                        locale === "en" ? "bg-accent text-accentText shadow-sm" : "text-frost/55 hover:text-frost"
+                      )}
+                      onClick={() => setLocale("en")}
+                    >
+                      {tl("language_en")}
                     </button>
                   </div>
                 </div>

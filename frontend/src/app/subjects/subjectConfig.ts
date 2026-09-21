@@ -134,6 +134,22 @@ const SUBJECT_MAP: Record<SubjectId, SubjectMeta> = {
   },
 };
 
+const SUBJECT_EN: Record<SubjectId, { name: string; lesson: string; focus: string[] }> = {
+  math: { name: "Mathematics", lesson: "Mathematics · practice lab", focus: ["numbers", "calculations", "problems"] },
+  natural_science: { name: "Natural Science", lesson: "Natural Science · practice lab", focus: ["nature", "observation", "experiments"] },
+  algebra: { name: "Algebra", lesson: "Algebra · practice lab", focus: ["polynomials", "equations", "transformations"] },
+  geometry: { name: "Geometry", lesson: "Geometry · practice lab", focus: ["triangles", "circles", "areas"] },
+  physics: { name: "Physics", lesson: "Physics · practice lab", focus: ["mechanics", "energy", "electricity"] },
+  chemistry: { name: "Chemistry", lesson: "Chemistry · practice lab", focus: ["reactions", "stoichiometry", "solutions"] },
+  biology: { name: "Biology", lesson: "Biology · practice lab", focus: ["cells", "genetics", "ecosystems"] },
+  russian: { name: "Russian Language", lesson: "Russian Language · practice lab", focus: ["grammar", "syntax", "spelling"] },
+  kazakh: { name: "Kazakh Language", lesson: "Kazakh Language · practice lab", focus: ["vocabulary", "morphology", "syntax"] },
+  history: { name: "History of Kazakhstan", lesson: "History · practice lab", focus: ["periods", "causes and effects", "sources"] },
+  informatics: { name: "Computer Science", lesson: "Computer Science · practice lab", focus: ["algorithms", "data structures", "programming"] },
+  geography: { name: "Geography", lesson: "Geography · practice lab", focus: ["maps", "climate", "resources"] },
+  english: { name: "English Language", lesson: "English Language · practice lab", focus: ["vocabulary", "grammar", "speaking"] },
+};
+
 const SUBJECT_IDS: SubjectId[] = Object.keys(SUBJECT_MAP) as SubjectId[];
 export const DEFAULT_SUBJECT_ID: SubjectId = "algebra";
 
@@ -181,12 +197,66 @@ export const withSubjectQuery = (path: string, subjectId: string): string => {
 
 export const getSubjectMeta = (subjectId: string): SubjectMeta => SUBJECT_MAP[normalizeId(subjectId)];
 
+export const getSubjectNameForLocale = (subjectId: string, locale: "ru" | "kk" | "en"): string => {
+  const id = normalizeId(subjectId);
+  const meta = SUBJECT_MAP[id];
+  return locale === "kk" ? meta.nameKk : locale === "en" ? SUBJECT_EN[id].name : meta.nameRu;
+};
+
+export const getLessonTitleForLocale = (subjectId: string, locale: "ru" | "kk" | "en"): string => {
+  const id = normalizeId(subjectId);
+  const meta = SUBJECT_MAP[id];
+  return locale === "kk" ? meta.lessonKk : locale === "en" ? SUBJECT_EN[id].lesson : meta.lessonRu;
+};
+
 export const getDefaultTasksForSubject = (_subjectId: string): Task[] => [];
 
-export const buildDefaultSlidesForSubject = (subjectId: string, locale: "ru" | "kk"): Slide[] => {
-  const meta = getSubjectMeta(subjectId);
-  const name = locale === "kk" ? meta.nameKk : meta.nameRu;
-  const focus = locale === "kk" ? meta.focusKk : meta.focusRu;
+export const buildDefaultSlidesForSubject = (subjectId: string, locale: "ru" | "kk" | "en"): Slide[] => {
+  const id = normalizeId(subjectId);
+  const meta = SUBJECT_MAP[id];
+  const name = locale === "kk" ? meta.nameKk : locale === "en" ? SUBJECT_EN[id].name : meta.nameRu;
+  const focus = locale === "kk" ? meta.focusKk : locale === "en" ? SUBJECT_EN[id].focus : meta.focusRu;
+
+  if (locale === "en") {
+    return [
+      {
+        id: 1,
+        title: `${name}: introduction`,
+        content: `Welcome to the ${name} lab.\nToday's focus: ${focus.join(", ")}.`,
+        notes: "State the lesson goal and expected result at the start.",
+      },
+      {
+        id: 2,
+        title: "Lesson goals",
+        content: "1) Reinforce key concepts.\n2) Solve typical tasks.\n3) Review common mistakes.",
+        notes: "Show the checking criteria and evaluation logic up front.",
+      },
+      {
+        id: 3,
+        title: "Workflow",
+        content: "Understand the task → choose a strategy → solve/analyze → verify the result.",
+        notes: "Ask students to explain why at each step.",
+      },
+      {
+        id: 4,
+        title: "Practice",
+        content: "Work with task cards: first independently, then compare solutions in pairs.",
+        notes: "Work through one or two examples on the board.",
+      },
+      {
+        id: 5,
+        title: "Reflection",
+        content: "Which topic felt easiest?\nWhere did mistakes happen and why?",
+        notes: "Collect brief feedback at the end of practice.",
+      },
+      {
+        id: 6,
+        title: "Summary",
+        content: `Homework: review 2–3 tasks from the lab.\nNext lesson preparation: ${focus[0]}.`,
+        notes: "Summarize the result and point to the next learning step.",
+      },
+    ];
+  }
 
   if (locale === "kk") {
     return [

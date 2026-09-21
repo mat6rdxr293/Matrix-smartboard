@@ -1,11 +1,12 @@
 import { ArrowLeft, BookOpen, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
+import { useI18n, type LocaleCode } from "@/i18n";
 import { getSubjectsForGrade, type CurriculumSubjectId, type Grade } from "./curriculum";
 
 type SubjectPickerProps = {
   grade: Grade;
-  locale: "ru" | "kk";
+  locale: LocaleCode;
   loading?: boolean;
   error?: string | null;
   onSelectSubject: (subjectId: CurriculumSubjectId) => void;
@@ -14,6 +15,7 @@ type SubjectPickerProps = {
 
 export default function SubjectPicker({ grade, locale, loading = false, error, onSelectSubject, onBack }: SubjectPickerProps) {
   const subjects = getSubjectsForGrade(grade);
+  const { tl } = useI18n();
 
   return (
     <main className="session-shell">
@@ -25,7 +27,7 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
             className="h-10 rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[12px] text-frost/65 hover:bg-white/[0.06] hover:text-frost"
           >
             <ArrowLeft size={16} className="mr-2" />
-            К классам
+            {tl("subject_back")}
           </Button>
         </div>
 
@@ -51,9 +53,9 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
               </motion.span>
             </div>
 
-            <h1 className="text-4xl font-bold tracking-[-0.035em] text-frost sm:text-5xl">Выберите предмет</h1>
+            <h1 className="text-4xl font-bold tracking-[-0.035em] text-frost sm:text-5xl">{tl("subject_choose")}</h1>
             <p className="mx-auto mt-3 max-w-[660px] text-sm leading-6 text-frost/50 sm:text-[15px]">
-              Для {grade} класса доступно {subjects.length} предметов.
+              {tl("subject_available_count", { grade, count: subjects.length })}
             </p>
           </div>
 
@@ -65,7 +67,7 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
 
           <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {subjects.map((subject) => {
-              const name = locale === "kk" ? subject.nameKk : subject.nameRu;
+              const name = locale === "kk" ? subject.nameKk : locale === "en" ? subject.nameEn : subject.nameRu;
               return (
                 <button
                   key={subject.id}
@@ -83,7 +85,7 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[15px] font-semibold text-frost">{name}</span>
-                    <span className="mt-1 block text-[11px] text-frost/40">Открыть новый урок</span>
+                    <span className="mt-1 block text-[11px] text-frost/40">{tl("subject_open_lesson")}</span>
                   </span>
                   <ChevronRight size={17} className="shrink-0 translate-x-1 text-frost/25 transition duration-200 group-hover:translate-x-0 group-hover:text-accent" />
                 </button>

@@ -21,7 +21,7 @@ const boardProfileKey = (lessonId: string) => `practice.lesson.${lessonId}.board
 const errorText = (error: unknown) => error instanceof Error ? error.message : String((error as { detail?: unknown })?.detail || "Не удалось выполнить действие");
 
 export default function AppRoot() {
-  const { locale } = useI18n();
+  const { locale, tl } = useI18n();
   const [view, setView] = useState<View>("loading");
   const [school, setSchool] = useState<School | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -194,7 +194,7 @@ export default function AppRoot() {
   };
 
   if (view === "loading") {
-    return <main className="session-shell grid-overlay"><div className="text-sm font-semibold text-frost/60">Загрузка школьной доски…</div></main>;
+    return <main className="session-shell grid-overlay"><div className="text-sm font-semibold text-frost/60">{tl("loading_school_board")}</div></main>;
   }
   if (view === "auth" || !school) {
     return <AuthScreen loading={busy} error={error} onLogin={(name, password) => authenticate("login", name, password)} onRegister={(name, password) => authenticate("register", name, password)} />;
