@@ -488,11 +488,39 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
     return _postprocess_math(text), steps
 
 
+_CJK_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+")
+
+
+def _sanitize_board_language(
+    text: str,
+    steps: list[dict[str, str]],
+    response_locale: str,
+) -> tuple[str, list[dict[str, str]]]:
+    if response_locale not in {"ru", "kk", "en"}:
+        return text, steps
+
+    def clean(value: str) -> str:
+        value = _CJK_SCRIPT_RE.sub(" ", value)
+        value = re.sub(r"\s+([.,;:!?])", r"\1", value)
+        value = re.sub(r"[ \t]{2,}", " ", value)
+        return value.strip()
+
+    cleaned_steps: list[dict[str, str]] = []
+    for step in steps:
+        step_text = clean(step.get("text", ""))
+        if not step_text:
+            continue
+        cleaned_steps.append({**step, "text": step_text})
+
+    return clean(text), cleaned_steps
+
+
 def generate_board_solution(
     problem: str,
     *,
     subject: Optional[str] = None,
     board_context: bool = True,
+    response_locale: str = "ru",
 ) -> tuple[str, list[dict[str, str]]]:
     api_key = get_openai_key()
     base_url = settings.ai_base_url
@@ -504,7 +532,8 @@ def generate_board_solution(
             subject=subject,
             board_context=board_context,
         )
-        return text, [{"text": text, "kind": "text"}] if text else []
+        steps = [{"text": text, "kind": "text"}] if text else []
+        return _sanitize_board_language(text, steps, response_locale)
 
     sys, user, max_tokens = _build_prompt(
         "solution",
@@ -515,8 +544,16 @@ def generate_board_solution(
         subject,
         board_context,
     )
+    language_name = {
+        "ru": "русском",
+        "kk": "казахском",
+        "en": "английском",
+    }.get(response_locale, "русском")
     sys += (
-        "\nВерни ТОЛЬКО валидный JSON без markdown-обертки. "
+        f"\nОтвечай ТОЛЬКО на {language_name} языке. "
+        "Не вставляй китайские, японские, корейские или другие языки, если их нет в условии задачи. "
+        "Математические обозначения и латинские переменные разрешены. "
+        "Верни ТОЛЬКО валидный JSON без markdown-обертки. "
         "Формат: {\"summary\":\"кратко\",\"steps\":["
         "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "
         "Каждый логический шаг должен быть отдельным элементом. "
@@ -538,4 +575,5 @@ def generate_board_solution(
         subject=subject,
         postprocess=False,
     )
-    return _parse_board_solution(raw)
+    text, steps = _parse_board_solution(raw)
+    return _sanitize_board_language(text, steps, response_locale)

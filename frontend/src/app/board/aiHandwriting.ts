@@ -34,6 +34,15 @@ const SUPERSCRIPT: Record<string, string> = {
 const toSuperscript = (value: string) =>
   value.split("").map((char) => SUPERSCRIPT[char] ?? char).join("");
 
+const CJK_SCRIPT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+/g;
+
+const sanitizeLanguageText = (value: string, locale: "ru" | "kk" | "en") => {
+  // Matrix Smartboard currently ships RU/KK/EN locales. None should emit CJK script
+  // unless it was present in the source task itself; board solutions are normalized here.
+  const withoutCjk = value.replace(CJK_SCRIPT_RE, " ");
+  return withoutCjk.replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+};
+
 const decodeLooseStructuredString = (value: string) =>
   value
     .replace(/\\(["\\/])/g, "$1")
@@ -44,6 +53,7 @@ const decodeLooseStructuredString = (value: string) =>
 export function extractSafeHandwritingSteps(
   steps: HandwritingStep[] | null | undefined,
   fallbackText: string,
+  locale: "ru" | "kk" | "en" = "ru",
 ): HandwritingStep[] {
   const clean = (steps ?? []).filter(
     (step) => typeof step?.text === "string" && step.text.trim().length > 0,
@@ -54,22 +64,25 @@ export function extractSafeHandwritingSteps(
     /^\s*[\[{]/.test(value);
 
   if (clean.length > 1 || (clean.length === 1 && !looksStructured(clean[0].text))) {
-    return clean.map((step) => ({
-      text: step.text.trim(),
-      kind: step.kind,
-    }));
+    return clean
+      .map((step) => ({
+        text: sanitizeLanguageText(step.text.trim(), locale),
+        kind: step.kind,
+      }))
+      .filter((step) => step.text.length > 0);
   }
 
   const source = clean.length === 1 ? clean[0].text : fallbackText;
   if (!source.trim()) return [];
   if (!looksStructured(source)) {
-    return [{ text: source.trim(), kind: "text" }];
+    const safeText = sanitizeLanguageText(source.trim(), locale);
+    return safeText ? [{ text: safeText, kind: "text" }] : [];
   }
 
   const extracted: HandwritingStep[] = [];
   const pattern = /"text"\s*:?\s*"((?:\\.|[^"\\])*)"/gi;
   for (const match of source.matchAll(pattern)) {
-    const text = decodeLooseStructuredString(match[1]).trim();
+    const text = sanitizeLanguageText(decodeLooseStructuredString(match[1]).trim(), locale);
     if (!text) continue;
     extracted.push({ text, kind: "text" });
     if (extracted.length >= 40) break;
@@ -80,6 +93,7 @@ export function extractSafeHandwritingSteps(
 export function normalizeHandwritingText(source: string) {
   let text = (source || "").trim();
   text = text.replace(/\$\$/g, "").replace(/\$/g, "");
+  text = text.replace(/\\[()[\]]/g, "");
   text = text.replace(/\\left|\\right/g, "");
   text = text.replace(/\\(?:,|;|!|quad|qquad)/g, " ");
   text = text.replace(/\\pm/g, "±");
@@ -319,7 +333,7 @@ function renderTextLine(
   const offsetX = x - padding;
   const offsetY = y - padding;
 
-  return paths
+  const rendered = paths
     .map((path, pathIndex): Stroke | null => {
       const points = simplify(
         path.map((index, pointIndex) => {
@@ -334,6 +348,23 @@ function renderTextLine(
       return { points, color, width: strokeWidth, mode: "draw" };
     })
     .filter((stroke): stroke is Stroke => Boolean(stroke));
+
+  const anchor = (stroke: Stroke) => {
+    let left = Number.POSITIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    for (const point of stroke.points) {
+      left = Math.min(left, point.x);
+      top = Math.min(top, point.y);
+    }
+    return { left, top };
+  };
+
+  return rendered.sort((a, b) => {
+    const aa = anchor(a);
+    const bb = anchor(b);
+    if (Math.abs(aa.left - bb.left) > 3) return aa.left - bb.left;
+    return aa.top - bb.top;
+  });
 }
 
 export function solutionStepsToHandwritingStrokes(

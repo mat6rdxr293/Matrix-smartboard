@@ -150,3 +150,14 @@ def test_parse_board_solution_never_falls_back_to_raw_structured_envelope():
     _text, steps = ai_module._parse_board_solution(raw)
 
     assert steps == []
+
+
+def test_board_language_sanitizer_removes_cjk_for_russian():
+    text, steps = ai_module._sanitize_board_language(
+        "Решение: нет 实数根.",
+        [{"text": "Корней нет 实数根.", "kind": "result"}],
+        "ru",
+    )
+
+    assert text == "Решение: нет."
+    assert steps == [{"text": "Корней нет.", "kind": "result"}]

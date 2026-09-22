@@ -27,3 +27,17 @@ it("refuses to draw structured metadata when no text field can be recovered", ()
   const raw = '{"summary":"broken","steps":[{"kind":"math"}]}';
   expect(extractSafeHandwritingSteps([{ text: raw, kind: "text" }], raw)).toEqual([]);
 });
+
+it("removes unexpected CJK text from Russian board solutions", () => {
+  const steps = extractSafeHandwritingSteps(
+    [{ text: "Уравнение не имеет 实数根.", kind: "result" }],
+    "",
+    "ru",
+  );
+  expect(steps).toEqual([{ text: "Уравнение не имеет.", kind: "result" }]);
+});
+
+it("removes inline LaTeX delimiters before handwriting", () => {
+  expect(normalizeHandwritingText("\\(5x^2 - 4x + 5 = 0\\)"))
+    .toBe("5x² - 4x + 5 = 0");
+});

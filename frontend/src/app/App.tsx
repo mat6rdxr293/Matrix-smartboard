@@ -850,6 +850,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         crypto.randomUUID(),
         true,
         true,
+        locale,
       );
       if (isCancelled()) return;
 

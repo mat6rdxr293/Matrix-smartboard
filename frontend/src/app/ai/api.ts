@@ -11,6 +11,7 @@ export async function callAi(
   clientMessageId?: string,
   boardContext?: boolean,
   boardOutput?: boolean,
+  responseLocale?: "ru" | "kk" | "en",
 ) {
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -26,6 +27,7 @@ export async function callAi(
       client_message_id: clientMessageId || null,
       board_context: !!boardContext,
       board_output: !!boardOutput,
+      response_locale: responseLocale || null,
     }),
   });
   if (!res.ok) {

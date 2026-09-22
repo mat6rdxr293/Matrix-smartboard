@@ -97,9 +97,10 @@ async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOp
     if (path === "/api/ocr" && method === "POST") return json(route, { text: "Решить: x^2 - 4 = 0" });
 
     if (path === "/api/ai" && method === "POST") {
-      const payload = request.postDataJSON() as { mode?: string; board_output?: boolean };
+      const payload = request.postDataJSON() as { mode?: string; board_output?: boolean; response_locale?: string };
       expect(payload.mode).toBe("solution");
       expect(payload.board_output).toBe(true);
+      expect(payload.response_locale).toBe("ru");
       return json(route, {
         text: "Решение",
         steps: [

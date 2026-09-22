@@ -127,6 +127,7 @@ class AiRequest(BaseModel):
     client_message_id: Optional[str] = None
     board_context: bool = False
     board_output: bool = False
+    response_locale: Optional[str] = Field(default=None, pattern="^(ru|kk|en)$")
 
 
 class AiResponse(BaseModel):
@@ -573,6 +574,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 payload.problem,
                 subject=payload.subject,
                 board_context=payload.board_context,
+                response_locale=payload.response_locale or "ru",
             )
         else:
             text = generate_ai_response(

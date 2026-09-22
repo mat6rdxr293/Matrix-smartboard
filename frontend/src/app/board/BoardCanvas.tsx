@@ -1419,26 +1419,47 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     lowMotion = false,
   ) => {
     const committed: Stroke[] = [];
-    const frameDelay = lowMotion ? 0 : 14;
+    const frameDelay = lowMotion ? 0 : 5;
+    const penLiftDelay = lowMotion ? 0 : 7;
+
+    const densify = (points: Stroke["points"], maxSegment = 2.2) => {
+      if (points.length < 2) return points.map((point) => ({ ...point }));
+      const result: Stroke["points"] = [{ ...points[0] }];
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const distance = Math.hypot(end.x - start.x, end.y - start.y);
+        const segments = Math.max(1, Math.ceil(distance / maxSegment));
+        for (let part = 1; part <= segments; part += 1) {
+          const ratio = part / segments;
+          result.push({
+            x: start.x + (end.x - start.x) * ratio,
+            y: start.y + (end.y - start.y) * ratio,
+          });
+        }
+      }
+      return result;
+    };
 
     for (const source of incoming) {
       if (shouldCancel?.()) break;
       if (source.points.length < 2) continue;
 
+      const animationPoints = lowMotion ? source.points : densify(source.points);
       const preview: Stroke = {
         ...source,
-        points: [{ ...source.points[0] }],
+        points: [{ ...animationPoints[0] }],
       };
       strokesRef.current.push(preview);
 
       const stride = lowMotion
-        ? source.points.length
-        : Math.max(1, Math.ceil(source.points.length / 7));
+        ? animationPoints.length
+        : Math.max(1, Math.ceil(animationPoints.length / 14));
 
-      for (let index = 1; index < source.points.length; index += stride) {
+      for (let index = 1; index < animationPoints.length; index += stride) {
         if (shouldCancel?.()) break;
-        preview.points = source.points
-          .slice(0, Math.min(source.points.length, index + stride))
+        preview.points = animationPoints
+          .slice(0, Math.min(animationPoints.length, index + stride))
           .map((point) => ({ ...point }));
         scheduleRender();
 
@@ -1454,8 +1475,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           strokesRef.current.pop();
         } else {
           committed.push({
-            ...preview,
-            points: preview.points.map((point) => ({ ...point })),
+            ...source,
+            points: source.points.map((point) => ({ ...point })),
           });
         }
         scheduleRender();
@@ -1468,6 +1489,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         points: source.points.map((point) => ({ ...point })),
       });
       scheduleRender();
+
+      if (!lowMotion) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, penLiftDelay);
+        });
+      }
     }
 
     return committed;
