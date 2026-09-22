@@ -101,3 +101,40 @@ def test_solution_payload_limits_are_validated(tmp_path):
     )
 
     assert response.status_code == 422
+
+def test_handwriting_stroke_batch_roundtrip(tmp_path):
+    client, lesson = registered_client(tmp_path)
+    strokes = [
+        {
+            "points": [{"x": 10, "y": 20}, {"x": 20, "y": 25}, {"x": 30, "y": 21}],
+            "color": "#ffffff",
+            "width": 2.2,
+            "mode": "draw",
+        },
+        {
+            "points": [{"x": 40, "y": 20}, {"x": 50, "y": 25}],
+            "color": "#ffffff",
+            "width": 2.2,
+            "mode": "draw",
+        },
+    ]
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/board/operations",
+        json={
+            "operations": [
+                {
+                    "client_operation_id": "handwriting-1",
+                    "op": "stroke_batch_add",
+                    "strokes": strokes,
+                    "ts": 150,
+                }
+            ]
+        },
+    )
+    saved = client.get(f"/api/lessons/{lesson['id']}/board").json()["operations"]
+
+    assert response.status_code == 200
+    assert response.json()["inserted"] == 1
+    assert saved[-1]["op"] == "stroke_batch_add"
+    assert saved[-1]["strokes"] == strokes

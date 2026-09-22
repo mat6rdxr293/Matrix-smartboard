@@ -43,6 +43,16 @@ const graph = {
   ],
 };
 
+type CapturedOp = {
+  op?: string;
+  strokes?: Array<{
+    points: Array<{ x: number; y: number }>;
+    color: string;
+    width: number;
+    mode: string;
+  }>;
+};
+
 const json = (route: Route, body: unknown) =>
   route.fulfill({
     status: 200,
@@ -50,7 +60,7 @@ const json = (route: Route, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOps?: unknown[] }) {
+async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOps?: CapturedOp[] }) {
   await page.addInitScript(({ schoolId, roomId, lessonId }) => {
     localStorage.setItem("practice.room." + schoolId, roomId);
     localStorage.setItem("practice.lesson." + lessonId + ".boardProfile", "universal");
@@ -76,7 +86,7 @@ async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOp
     }
 
     if (path === "/api/lessons/" + lesson.id + "/board/operations" && method === "POST") {
-      const body = request.postDataJSON() as { operations?: unknown[] };
+      const body = request.postDataJSON() as { operations?: CapturedOp[] };
       options?.captureOps?.push(...(body.operations ?? []));
       return json(route, { ok: true, inserted: body.operations?.length ?? 0 });
     }
@@ -91,7 +101,7 @@ async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOp
       expect(payload.mode).toBe("solution");
       expect(payload.board_output).toBe(true);
       return json(route, {
-        text: "1. Переносим 4.\n2. Разлагаем.\n3. Получаем корни.",
+        text: "Решение",
         steps: [
           { text: "$$x^2 - 4 = 0$$", kind: "math" },
           { text: "$$(x-2)(x+2)=0$$", kind: "math" },
@@ -108,51 +118,54 @@ async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOp
   await expect(page.getByTestId("board-canvas-root")).toBeVisible();
 }
 
-async function generateSolution(page: Page) {
+async function generateSolution(page: Page, operations: CapturedOp[]) {
   await page.getByTestId("open-ai-assistant").click();
   await page.getByTestId("ai-full-solution").click();
   await expect(page.getByTestId("ocr-confirm")).toBeVisible();
   await page.getByTestId("ocr-confirm").click();
-  await expect(page.getByTestId("ai-solution-block")).toBeVisible();
-}
-
-test("full solution is written into free board space", async ({ page }) => {
-  const appendedOperations: unknown[] = [];
-  await seedLesson(page, { withGraph: true, captureOps: appendedOperations });
-  await generateSolution(page);
-
-  const solution = page.getByTestId("ai-solution-block");
-  await expect(page.getByTestId("ai-solution-step")).toHaveCount(3);
-  await expect(solution).toContainText("x=-2");
-
-  const graphBox = await page.locator('[data-graph-interactive="true"]').first().boundingBox();
-  const solutionBox = await solution.boundingBox();
-  expect(graphBox).not.toBeNull();
-  expect(solutionBox).not.toBeNull();
-
-  if (graphBox && solutionBox) {
-    const overlaps =
-      solutionBox.x < graphBox.x + graphBox.width &&
-      solutionBox.x + solutionBox.width > graphBox.x &&
-      solutionBox.y < graphBox.y + graphBox.height &&
-      solutionBox.y + solutionBox.height > graphBox.y;
-    expect(overlaps).toBe(false);
-  }
 
   await expect.poll(() =>
-    appendedOperations.some((operation) =>
-      (operation as { op?: string }).op === "solution_add"
-    )
-  ).toBe(true);
-});
+    operations.find((operation) => operation.op === "stroke_batch_add")?.strokes?.length ?? 0,
+    { timeout: 20_000 },
+  ).toBeGreaterThan(8);
+}
 
-test("AI solution participates in undo and redo", async ({ page }) => {
-  await seedLesson(page);
-  await generateSolution(page);
+test("full solution is handwriting strokes placed away from an existing graph", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, { withGraph: true, captureOps: operations });
+  await generateSolution(page, operations);
 
-  await page.getByTestId("board-undo").click();
   await expect(page.getByTestId("ai-solution-block")).toHaveCount(0);
 
-  await page.getByTestId("board-redo").click();
-  await expect(page.getByTestId("ai-solution-block")).toBeVisible();
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  expect(batch?.strokes?.length).toBeGreaterThan(8);
+
+  const points = batch?.strokes?.flatMap((stroke) => stroke.points) ?? [];
+  expect(points.length).toBeGreaterThan(30);
+
+  const left = Math.min(...points.map((point) => point.x));
+  const right = Math.max(...points.map((point) => point.x));
+  const top = Math.min(...points.map((point) => point.y));
+  const bottom = Math.max(...points.map((point) => point.y));
+
+  const overlapsGraph =
+    left < graph.x + graph.width &&
+    right > graph.x &&
+    top < graph.y + graph.height &&
+    bottom > graph.y;
+  expect(overlapsGraph).toBe(false);
+});
+
+test("one undo removes the whole AI handwriting batch and redo restores it", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, { captureOps: operations });
+  await generateSolution(page, operations);
+
+  await page.getByTestId("board-undo").evaluate((button) => (button as HTMLButtonElement).click());
+  await expect.poll(() => operations.some((operation) => operation.op === "undo")).toBe(true);
+
+  await page.getByTestId("board-redo").evaluate((button) => (button as HTMLButtonElement).click());
+  await expect.poll(() => operations.some((operation) => operation.op === "redo")).toBe(true);
+
+  expect(operations.filter((operation) => operation.op === "stroke_batch_add")).toHaveLength(1);
 });

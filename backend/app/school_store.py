@@ -32,12 +32,12 @@ class InvalidLesson(ValueError):
 
 
 BOARD_OPERATION_TYPES = {
-    "add", "stroke_move", "stroke_delete",
+    "add", "stroke_batch_add", "stroke_move", "stroke_delete",
     "graph_add", "graph_update", "graph_delete",
     "solution_add", "solution_update", "solution_delete",
     "undo", "redo", "clear",
 }
-BOARD_SCHEMA_VERSION = "5"
+BOARD_SCHEMA_VERSION = "6"
 MAX_BOARD_OPERATION_JSON_BYTES = 512_000
 
 
@@ -277,7 +277,7 @@ class SchoolStore:
                     lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL,
                     client_operation_id TEXT NOT NULL,
-                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
                     payload_json TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL,
                     UNIQUE(lesson_id, sequence),
@@ -317,9 +317,9 @@ class SchoolStore:
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'board_operations'"
         ).fetchone()
         ddl = row["sql"] if row and isinstance(row["sql"], str) else ""
-        connection.execute("SAVEPOINT board_operations_v5")
+        connection.execute("SAVEPOINT board_operations_v6")
         try:
-            if "solution_add" not in ddl:
+            if "stroke_batch_add" not in ddl:
                 legacy = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
                 ).fetchone()
@@ -333,7 +333,7 @@ class SchoolStore:
                         lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                         sequence INTEGER NOT NULL,
                         client_operation_id TEXT NOT NULL,
-                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
+                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
                         payload_json TEXT NOT NULL,
                         occurred_at INTEGER NOT NULL,
                         UNIQUE(lesson_id, sequence),
@@ -364,10 +364,10 @@ class SchoolStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (BOARD_SCHEMA_VERSION,),
             )
-            connection.execute("RELEASE SAVEPOINT board_operations_v5")
+            connection.execute("RELEASE SAVEPOINT board_operations_v6")
         except Exception:
-            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v5")
-            connection.execute("RELEASE SAVEPOINT board_operations_v5")
+            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v6")
+            connection.execute("RELEASE SAVEPOINT board_operations_v6")
             raise
 
     @staticmethod
@@ -626,6 +626,16 @@ class SchoolStore:
                     if not _is_valid_board_stroke(stroke):
                         raise ValueError("add operation requires valid stroke")
                     payload = {"stroke": stroke}
+                elif op_type == "stroke_batch_add":
+                    strokes = operation.get("strokes")
+                    if (
+                        not isinstance(strokes, list)
+                        or not strokes
+                        or len(strokes) > 4000
+                        or any(not _is_valid_board_stroke(stroke) for stroke in strokes)
+                    ):
+                        raise ValueError("stroke_batch_add operation requires valid strokes")
+                    payload = {"strokes": strokes}
                 elif op_type == "stroke_move":
                     indexes = operation.get("indexes")
                     dx = operation.get("dx")
@@ -722,6 +732,8 @@ class SchoolStore:
             }
             if row["op_type"] == "add":
                 item["stroke"] = payload.get("stroke")
+            elif row["op_type"] == "stroke_batch_add":
+                item["strokes"] = payload.get("strokes")
             elif row["op_type"] == "stroke_move":
                 item["indexes"] = payload.get("indexes")
                 item["dx"] = payload.get("dx")

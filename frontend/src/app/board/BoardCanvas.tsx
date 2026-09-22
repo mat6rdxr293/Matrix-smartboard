@@ -67,6 +67,11 @@ const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 export type BoardCanvasHandle = {
   recognize: () => Promise<string>;
   allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
+  animateAiStrokes: (
+    strokes: Stroke[],
+    shouldCancel?: () => boolean,
+    lowMotion?: boolean,
+  ) => Promise<Stroke[]>;
 };
 
 const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
@@ -1408,6 +1413,66 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     };
   };
 
+  const animateAiStrokes = async (
+    incoming: Stroke[],
+    shouldCancel?: () => boolean,
+    lowMotion = false,
+  ) => {
+    const committed: Stroke[] = [];
+    const frameDelay = lowMotion ? 0 : 14;
+
+    for (const source of incoming) {
+      if (shouldCancel?.()) break;
+      if (source.points.length < 2) continue;
+
+      const preview: Stroke = {
+        ...source,
+        points: [{ ...source.points[0] }],
+      };
+      strokesRef.current.push(preview);
+
+      const stride = lowMotion
+        ? source.points.length
+        : Math.max(1, Math.ceil(source.points.length / 7));
+
+      for (let index = 1; index < source.points.length; index += stride) {
+        if (shouldCancel?.()) break;
+        preview.points = source.points
+          .slice(0, Math.min(source.points.length, index + stride))
+          .map((point) => ({ ...point }));
+        scheduleRender();
+
+        if (!lowMotion) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, frameDelay);
+          });
+        }
+      }
+
+      if (shouldCancel?.()) {
+        if (preview.points.length < 2) {
+          strokesRef.current.pop();
+        } else {
+          committed.push({
+            ...preview,
+            points: preview.points.map((point) => ({ ...point })),
+          });
+        }
+        scheduleRender();
+        break;
+      }
+
+      preview.points = source.points.map((point) => ({ ...point }));
+      committed.push({
+        ...source,
+        points: source.points.map((point) => ({ ...point })),
+      });
+      scheduleRender();
+    }
+
+    return committed;
+  };
+
   const handleUndo = () => {
     if (!canUndo) return;
     onReplayOp?.({ op: "undo", ts: Date.now() });
@@ -1539,7 +1604,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
   };
 
-  useImperativeHandle(ref, () => ({ recognize: handleOcr, allocateSolutionPlacement }));
+  useImperativeHandle(ref, () => ({ recognize: handleOcr, allocateSolutionPlacement, animateAiStrokes }));
 
   const schedulePenHide = () => {
     if (penTimerRef.current) window.clearTimeout(penTimerRef.current);

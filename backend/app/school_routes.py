@@ -35,7 +35,7 @@ class LessonCreate(BaseModel):
 
 class BoardOperationInput(BaseModel):
     client_operation_id: str = Field(min_length=1, max_length=120)
-    op: Literal["add", "stroke_move", "stroke_delete", "graph_add", "graph_update", "graph_delete", "solution_add", "solution_update", "solution_delete", "undo", "redo", "clear"]
+    op: Literal["add", "stroke_batch_add", "stroke_move", "stroke_delete", "graph_add", "graph_update", "graph_delete", "solution_add", "solution_update", "solution_delete", "undo", "redo", "clear"]
     stroke: dict[str, Any] | None = None
     strokes: list[dict[str, Any]] | None = None
     graph: dict[str, Any] | None = None

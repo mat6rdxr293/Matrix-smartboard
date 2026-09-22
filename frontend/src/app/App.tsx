@@ -11,8 +11,9 @@ import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
+import { solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
-import { createBoardHistory, replayBoardOperations, type AiSolutionBlock, type BoardHistory } from "@/app/board/boardDocument";
+import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
 import {
   buildDefaultSlidesForSubject,
@@ -827,49 +828,15 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setAssistantLoading(true);
     setAiBoardContext(boardText);
     setTimerRunning(false);
-    appendStudentAttempt(boardText);
+    setAssistantOpen(false);
 
     const token = ++continueTokenRef.current;
-    const placement = boardCanvasRef.current?.allocateSolutionPlacement(500, 320) ?? {
-      x: 48,
-      y: 48,
-      width: 500,
-      minHeight: 320,
-    };
     const solutionId = crypto.randomUUID();
-    let currentBlock: AiSolutionBlock = {
-      id: solutionId,
-      ...placement,
-      steps: [],
-      status: "thinking",
-      source: "ai",
-      createdAt: Date.now(),
-    };
     activeSolutionTokenRef.current = { id: solutionId, token };
-    onBoardReplayOp({ op: "solution_add", solution: currentBlock, ts: Date.now() });
-
-    const messageId = `${Date.now()}-${Math.random()}`;
-    addMessage({
-      id: messageId,
-      role: "assistant",
-      text: tl("thinking"),
-      mode: "solution",
-      timestamp: nowLabel(),
-    });
 
     const isCancelled = () =>
       continueTokenRef.current !== token ||
       activeSolutionTokenRef.current?.id !== solutionId;
-
-    const updateBlock = (next: AiSolutionBlock) => {
-      onBoardReplayOp({
-        op: "solution_update",
-        before: currentBlock,
-        after: next,
-        ts: Date.now(),
-      });
-      currentBlock = next;
-    };
 
     try {
       const res = await callAi(
@@ -891,43 +858,50 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         : res.text.trim()
           ? [{ text: res.text.trim(), kind: "text" as const }]
           : [];
+      if (!rawSteps.length) throw new Error(tl("unknown_error"));
 
-      updateBlock({ ...currentBlock, status: "streaming" });
-      const shown: AiSolutionBlock["steps"] = [];
-      for (let index = 0; index < rawSteps.length; index += 1) {
-        if (isCancelled()) return;
-        const step = rawSteps[index];
-        shown.push({
-          id: `${solutionId}-step-${index + 1}`,
-          text: step.text,
-          kind: step.kind,
-        });
-        const done = index === rawSteps.length - 1;
-        updateBlock({
-          ...currentBlock,
-          steps: [...shown],
-          status: done ? "done" : "streaming",
-        });
-        updateMessage(
-          messageId,
-          shown.map((item, stepIndex) => `${stepIndex + 1}. ${item.text}`).join("\n"),
-        );
-        if (!done && !ultraLite) {
-          await new Promise((resolve) => window.setTimeout(resolve, 140));
-        }
-      }
+      const placement = boardCanvasRef.current?.allocateSolutionPlacement(560, 480) ?? {
+        x: 48,
+        y: 48,
+        width: 560,
+        minHeight: 480,
+      };
 
-      if (!rawSteps.length) {
-        updateBlock({ ...currentBlock, status: "done" });
-        updateMessage(messageId, res.text || tl("unknown_error"));
-      } else if (res.text.trim()) {
-        updateMessage(messageId, res.text);
-      }
+      const generated = solutionStepsToHandwritingStrokes(rawSteps, {
+        x: placement.x + 12,
+        y: placement.y + 10,
+        maxWidth: Math.max(300, placement.width - 24),
+        color: boardPenColor,
+        strokeWidth: ultraLite ? 2.4 : 2.15,
+        fontSize: ultraLite ? 27 : 29,
+        lineGap: 11,
+        stepGap: 16,
+      });
+      if (!generated.strokes.length) throw new Error("Не удалось построить рукописные штрихи");
+
+      const written = await boardCanvasRef.current?.animateAiStrokes(
+        generated.strokes,
+        isCancelled,
+        ultraLite,
+      );
+      if (!written?.length) return;
+
+      onBoardReplayOp({
+        op: "stroke_batch_add",
+        strokes: written,
+        ts: Date.now(),
+      });
     } catch (err) {
       if (isCancelled()) return;
       const message = err instanceof Error ? err.message : tl("unknown_error");
-      updateBlock({ ...currentBlock, status: "error" });
-      updateMessage(messageId, `${tl("error")}: ${message}`);
+      addMessage({
+        id: `${Date.now()}-solution-error`,
+        role: "assistant",
+        text: `${tl("error")}: ${message}`,
+        mode: "solution",
+        timestamp: nowLabel(),
+      });
+      setAssistantOpen(true);
     } finally {
       if (activeSolutionTokenRef.current?.id === solutionId) {
         activeSolutionTokenRef.current = null;

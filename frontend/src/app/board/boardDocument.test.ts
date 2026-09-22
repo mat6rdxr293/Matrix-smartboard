@@ -147,3 +147,20 @@ it("removes a generated AI solution with one undo after streamed updates", () =>
   ]);
   expect(state.document.solutions).toEqual([]);
 });
+
+it("treats an AI handwriting batch as one undoable command", () => {
+  const strokes = [
+    { points: [{ x: 10, y: 10 }, { x: 20, y: 20 }], color: "#fff", width: 2, mode: "draw" as const },
+    { points: [{ x: 30, y: 10 }, { x: 40, y: 20 }], color: "#fff", width: 2, mode: "draw" as const },
+  ];
+  let state = replayBoardOperations(createBoardHistory(), [
+    { op: "stroke_batch_add", strokes },
+  ]);
+  expect(state.document.strokes).toHaveLength(2);
+
+  state = replayBoardOperations(state, [{ op: "undo" }]);
+  expect(state.document.strokes).toHaveLength(0);
+
+  state = replayBoardOperations(state, [{ op: "redo" }]);
+  expect(state.document.strokes).toHaveLength(2);
+});

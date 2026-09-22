@@ -45,6 +45,7 @@ export type BoardDocument = { strokes: Stroke[]; graphs: GraphElement[]; solutio
 type Snapshot = BoardDocument;
 type Command =
   | { kind: "stroke_add"; stroke: Stroke }
+  | { kind: "stroke_batch_add"; strokes: Stroke[] }
   | { kind: "stroke_move"; indexes: number[]; dx: number; dy: number }
   | { kind: "stroke_delete"; entries: { index: number; stroke: Stroke }[] }
   | { kind: "graph_add"; graph: GraphElement }
@@ -63,6 +64,7 @@ export type BoardHistory = {
 
 export type BoardOperation =
   | { op: "add"; stroke: Stroke }
+  | { op: "stroke_batch_add"; strokes: Stroke[] }
   | { op: "stroke_move"; indexes: number[]; dx: number; dy: number }
   | { op: "stroke_delete"; indexes: number[]; strokes: Stroke[] }
   | { op: "graph_add"; graph: GraphElement }
@@ -96,6 +98,8 @@ function applyCommand(document: BoardDocument, command: Command): BoardDocument 
   const next = cloneDocument(document);
   if (command.kind === "stroke_add") {
     next.strokes.push(cloneStroke(command.stroke));
+  } else if (command.kind === "stroke_batch_add") {
+    next.strokes.push(...command.strokes.map(cloneStroke));
   } else if (command.kind === "stroke_move") {
     const indexes = new Set(command.indexes);
     next.strokes = next.strokes.map((stroke, index) => indexes.has(index)
@@ -133,6 +137,8 @@ function revertCommand(document: BoardDocument, command: Command): BoardDocument
   const next = cloneDocument(document);
   if (command.kind === "stroke_add") {
     next.strokes.pop();
+  } else if (command.kind === "stroke_batch_add") {
+    next.strokes.splice(Math.max(0, next.strokes.length - command.strokes.length), command.strokes.length);
   } else if (command.kind === "stroke_move") {
     const indexes = new Set(command.indexes);
     next.strokes = next.strokes.map((stroke, index) => indexes.has(index)
@@ -180,6 +186,10 @@ function pushCommand(state: BoardHistory, command: Command): BoardHistory {
 export function applyBoardOperation(state: BoardHistory, operation: BoardOperation): BoardHistory {
   if (operation.op === "add") {
     return pushCommand(state, { kind: "stroke_add", stroke: cloneStroke(operation.stroke) });
+  }
+  if (operation.op === "stroke_batch_add") {
+    if (!operation.strokes.length) return state;
+    return pushCommand(state, { kind: "stroke_batch_add", strokes: operation.strokes.map(cloneStroke) });
   }
   if (operation.op === "stroke_move") {
     const indexes = [...new Set(operation.indexes.filter((index) => Number.isInteger(index) && index >= 0))];

@@ -9,6 +9,7 @@ type BoardReplayMeta = {
 
 export type BoardReplayOp = BoardReplayMeta & (
   | { op: "add"; stroke: Stroke }
+  | { op: "stroke_batch_add"; strokes: Stroke[] }
   | { op: "graph_add"; graph: GraphElement }
   | { op: "graph_update"; before: GraphElement; after: GraphElement }
   | { op: "graph_delete"; graph: GraphElement }
