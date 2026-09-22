@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     ocr_model: str = Field(default="gpt-5.2", validation_alias="OCR_MODEL")
     ai_timeout_seconds: float = Field(default=30.0, validation_alias="AI_TIMEOUT_SECONDS")
     ai_reasoning_effort: str = Field(default="medium", validation_alias="AI_REASONING_EFFORT")
+    ai_tools_enabled: bool = Field(default=True, validation_alias="AI_TOOLS_ENABLED")
 
     rate_limit_per_minute: int = Field(default=30, validation_alias="RATE_LIMIT_PER_MINUTE")
     public_base_url: str | None = Field(default=None, validation_alias="PUBLIC_BASE_URL")

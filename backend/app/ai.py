@@ -1,5 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Optional
@@ -7,6 +8,7 @@ from typing import Optional
 from openai import OpenAI
 
 from .settings import get_openai_key, settings
+from .ai_tools import ToolError, execute_tool, openai_chat_tools
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +241,91 @@ def _build_prompt(
     return sys, user, max_tokens
 
 
+
+def _local_chat_with_tools(
+    client,
+    *,
+    sys: str,
+    user: str,
+    max_tokens: int,
+    subject: Optional[str],
+) -> str:
+    tools = openai_chat_tools(subject) if settings.ai_tools_enabled else []
+    system_text = sys
+    if tools:
+        system_text += (
+            "\nДля точных вычислений используй доступные инструменты вместо догадок. "
+            "Не выдумывай результат инструмента. После вызова инструмента объясни результат ученику."
+        )
+
+    messages: list[dict] = [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": user},
+    ]
+
+    for _ in range(5):
+        request = {
+            "model": settings.ai_model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            request["tools"] = tools
+
+        response = client.chat.completions.create(**request)
+        message = response.choices[0].message
+        tool_calls = getattr(message, "tool_calls", None) or []
+
+        if not tool_calls:
+            content = getattr(message, "content", None)
+            return _postprocess_math(content.strip() if content else "")
+
+        serialized_calls = []
+        for call in tool_calls:
+            function = getattr(call, "function", None)
+            serialized_calls.append(
+                {
+                    "id": getattr(call, "id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": getattr(function, "name", ""),
+                        "arguments": getattr(function, "arguments", "{}") or "{}",
+                    },
+                }
+            )
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": getattr(message, "content", None),
+                "tool_calls": serialized_calls,
+            }
+        )
+
+        for call in tool_calls:
+            function = getattr(call, "function", None)
+            name = getattr(function, "name", "")
+            raw_arguments = getattr(function, "arguments", "{}") or "{}"
+            try:
+                arguments = json.loads(raw_arguments)
+                if not isinstance(arguments, dict):
+                    raise ToolError("Аргументы инструмента должны быть объектом")
+                payload = execute_tool(name, arguments)
+            except Exception as exc:  # noqa: BLE001
+                payload = {"ok": False, "tool": name, "error": str(exc)}
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": getattr(call, "id", ""),
+                    "content": json.dumps(payload, ensure_ascii=False),
+                }
+            )
+
+    raise RuntimeError("AI tool loop exceeded 5 rounds")
+
+
+
 def generate_ai_response(
     mode: str,
     problem: str,
@@ -272,17 +359,13 @@ def generate_ai_response(
     client = OpenAI(**client_options)
     try:
         if base_url:
-            response = client.chat.completions.create(
-                model=settings.ai_model,
-                messages=[
-                    {"role": "system", "content": sys},
-                    {"role": "user", "content": user},
-                ],
+            return _local_chat_with_tools(
+                client,
+                sys=sys,
+                user=user,
                 max_tokens=max_tokens,
+                subject=subject,
             )
-            text = response.choices[0].message.content
-            text = text.strip() if text else ""
-            return _postprocess_math(text)
 
         if not hasattr(client, "responses"):
             raise RuntimeError("OpenAI SDK слишком старый. Обновите пакет openai до версии с Responses API.")
