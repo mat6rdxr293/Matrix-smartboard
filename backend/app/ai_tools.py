@@ -121,6 +121,23 @@ def math_factor(expression: str) -> dict[str, Any]:
     return {"input": _math(parsed), "result": _math(sp.factor(parsed))}
 
 
+def math_expand(expression: str) -> dict[str, Any]:
+    parsed = _expr(expression)
+    return {"input": _math(parsed), "result": _math(sp.expand(parsed))}
+
+
+def math_equivalent(expression_a: str, expression_b: str) -> dict[str, Any]:
+    left = _expr(expression_a)
+    right = _expr(expression_b)
+    difference = sp.simplify(left - right)
+    return {
+        "expression_a": _math(left),
+        "expression_b": _math(right),
+        "difference": _math(difference),
+        "equivalent": bool(difference == 0),
+    }
+
+
 def math_solve(equation: str, variable: Optional[str] = None) -> dict[str, Any]:
     parsed = _equation(equation)
     symbol = _symbol([parsed.lhs, parsed.rhs], variable)
@@ -367,6 +384,10 @@ TOOLS: tuple[ToolDefinition, ...] = (
     }, ["expression"]), math_evaluate),
     ToolDefinition("math_simplify", "math", "Упростить выражение.", _schema({"expression": {"type": "string"}}, ["expression"]), math_simplify),
     ToolDefinition("math_factor", "math", "Разложить выражение на множители.", _schema({"expression": {"type": "string"}}, ["expression"]), math_factor),
+    ToolDefinition("math_expand", "math", "Раскрыть скобки и привести выражение к развёрнутому виду.", _schema({"expression": {"type": "string"}}, ["expression"]), math_expand),
+    ToolDefinition("math_equivalent", "math", "Проверить математическую эквивалентность двух выражений.", _schema({
+        "expression_a": {"type": "string"}, "expression_b": {"type": "string"},
+    }, ["expression_a", "expression_b"]), math_equivalent),
     ToolDefinition("math_solve", "math", "Решить уравнение.", _schema({
         "equation": {"type": "string"}, "variable": {"type": "string"},
     }, ["equation"]), math_solve),

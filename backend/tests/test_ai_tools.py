@@ -7,6 +7,8 @@ from app.ai_tools import (
     execute_tool,
     list_tool_definitions,
     math_differentiate,
+    math_equivalent,
+    math_expand,
     math_integrate,
     math_quadratic,
     math_solve,
@@ -24,6 +26,17 @@ def test_math_tools_return_exact_results():
 
     integral = math_integrate("2*x", "x", 0, 3)
     assert integral["result"]["text"] == "9"
+
+
+def test_expand_and_equivalent_tools_verify_symbolic_answers():
+    expanded = math_expand("(x+2)^2")
+    assert expanded["result"]["text"] == "x**2 + 4*x + 4"
+
+    equivalent = math_equivalent("3*x^2 + 2", "2 + 3*x^2")
+    assert equivalent["equivalent"] is True
+
+    wrong = math_equivalent("x^2 + 4", "(x+2)^2")
+    assert wrong["equivalent"] is False
 
 
 def test_quadratic_tool_verifies_discriminant_and_real_roots():

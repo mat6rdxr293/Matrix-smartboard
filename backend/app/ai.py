@@ -1044,6 +1044,302 @@ def _numeric_tokens(text: str) -> set[str]:
     return result
 
 
+_ANSWER_MARKER_RE = re.compile(
+    r"(?:ответ|answer|жауап)\s*[:=]\s*",
+    flags=re.I,
+)
+
+
+def _split_problem_and_marked_answer(problem: str) -> tuple[str, str | None]:
+    matches = list(_ANSWER_MARKER_RE.finditer(problem or ""))
+    if not matches:
+        return (problem or "").strip(), None
+    marker = matches[-1]
+    task = (problem or "")[:marker.start()].strip(" \n\t;,.")
+    answer = (problem or "")[marker.end():].strip(" \n\t;,.")
+    return task, answer or None
+
+
+def _check_task_kind(problem: str, subject: Optional[str]) -> str:
+    task, _answer = _split_problem_and_marked_answer(problem)
+    lower = task.lower()
+    subject_value = (subject or "").lower()
+
+    if any(cue in lower for cue in ("производн", "derivative", "туынды")):
+        return "derivative"
+    if any(cue in lower for cue in ("интеграл", "integral", "интегралын")):
+        return "integral"
+    if any(cue in lower for cue in ("раскры", "expand", "жақшаны аш")):
+        return "expand"
+    if any(cue in lower for cue in ("упрост", "simplif", "ықшамда")):
+        return "simplify"
+    if any(cue in lower for cue in ("разлож", "factor", "көбейткіш")):
+        return "factor"
+    if any(cue in lower for cue in ("моляр", "molar mass", "молярлық")):
+        return "molar_mass"
+    if any(cue in lower for cue in ("уравнен", "теңдеу", "equation")) and any(
+        cue in lower for cue in ("расстав", "balance", "теңестір")
+    ):
+        return "chem_balance"
+    if any(cue in lower for cue in ("перевест", "convert", "аудар")) and (
+        "физ" in subject_value or "phys" in subject_value or "/" in lower
+    ):
+        return "unit_convert"
+
+    if "=" in task and re.search(r"[A-Za-z]", task):
+        return "equation"
+
+    if any(token in subject_value for token in ("math", "матем", "алгеб", "algebra")):
+        return "arithmetic"
+    return "unknown"
+
+
+_REFERENCE_TOOLS: dict[str, set[str]] = {
+    "equation": {"math_solve", "math_quadratic"},
+    "derivative": {"math_differentiate"},
+    "integral": {"math_integrate"},
+    "expand": {"math_expand"},
+    "simplify": {"math_simplify"},
+    "factor": {"math_factor"},
+    "arithmetic": {"math_evaluate"},
+    "unit_convert": {"physics_convert_unit"},
+    "molar_mass": {"chemistry_molar_mass"},
+    "chem_balance": {"chemistry_balance_equation"},
+}
+
+
+def _successful_tool_entries(tool_trace: list[dict]) -> list[dict]:
+    return [
+        entry
+        for entry in tool_trace
+        if isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+    ]
+
+
+def _check_trace_covers_task(
+    problem: str,
+    subject: Optional[str],
+    tool_trace: list[dict],
+) -> bool:
+    successful = _successful_tool_entries(tool_trace)
+    if not successful:
+        return False
+    required = _REFERENCE_TOOLS.get(_check_task_kind(problem, subject))
+    if not required:
+        return True
+    return any(entry.get("tool") in required for entry in successful)
+
+
+def _reference_tool_entry(
+    problem: str,
+    subject: Optional[str],
+    tool_trace: list[dict],
+) -> dict | None:
+    successful = _successful_tool_entries(tool_trace)
+    required = _REFERENCE_TOOLS.get(_check_task_kind(problem, subject))
+    if required:
+        for entry in reversed(successful):
+            if entry.get("tool") in required:
+                return entry
+        return None
+    return successful[-1] if successful else None
+
+
+def _strip_answer_lhs(answer: str) -> str:
+    value = (answer or "").strip()
+    if "=" in value:
+        left, right = value.split("=", 1)
+        if len(left.strip()) <= 18:
+            value = right.strip()
+    return value.strip(" .;")
+
+
+def _pretty_reference_value(value: str) -> str:
+    text = str(value or "").strip()
+    numeric = _canonical_numeric_token(text)
+    if numeric is not None and re.fullmatch(r"[-+]?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?", text):
+        return numeric
+    text = text.replace("**", "^")
+    text = re.sub(r"(?<=\d)\*(?=[A-Za-z])", "", text)
+    text = text.replace("*", "·")
+    return text
+
+
+def _problem_has_intermediate_work(problem: str) -> bool:
+    task, answer = _split_problem_and_marked_answer(problem)
+    if not answer:
+        return False
+    return "\n" in task or ";" in task
+
+
+def _reference_answer_from_trace(
+    problem: str,
+    subject: Optional[str],
+    tool_trace: list[dict],
+) -> dict | None:
+    entry = _reference_tool_entry(problem, subject, tool_trace)
+    if not entry:
+        return None
+    tool = entry.get("tool")
+    payload = entry.get("payload") or {}
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None
+
+    if tool == "math_solve":
+        solutions = [
+            str(item.get("text", "")).strip()
+            for item in result.get("solutions", [])
+            if isinstance(item, dict) and str(item.get("text", "")).strip()
+        ]
+        return {
+            "kind": "solution_set",
+            "values": solutions,
+            "display": ", ".join(_pretty_reference_value(value) for value in solutions) if solutions else "нет решений",
+        }
+
+    if tool == "math_quadratic":
+        roots = result.get("real_roots") or []
+        solutions = [
+            str(item.get("text", "")).strip()
+            for item in roots
+            if isinstance(item, dict) and str(item.get("text", "")).strip()
+        ]
+        if not result.get("has_real_roots"):
+            return {
+                "kind": "no_real_roots",
+                "values": [],
+                "display": "действительных корней нет",
+            }
+        return {
+            "kind": "solution_set",
+            "values": solutions,
+            "display": ", ".join(_pretty_reference_value(value) for value in solutions),
+        }
+
+    if tool in {
+        "math_evaluate",
+        "math_simplify",
+        "math_factor",
+        "math_expand",
+        "math_differentiate",
+        "math_integrate",
+    }:
+        item = result.get("result")
+        if isinstance(item, dict):
+            value = str(item.get("text", "")).strip()
+            if value:
+                return {
+                    "kind": "expression",
+                    "value": value,
+                    "display": _pretty_reference_value(value),
+                }
+
+    if tool == "physics_convert_unit":
+        value = result.get("result")
+        if value is not None:
+            to_unit = str(result.get("to_unit", "")).strip()
+            pretty_value = _pretty_reference_value(str(value))
+            return {
+                "kind": "numeric",
+                "value": str(value),
+                "display": f"{pretty_value} {to_unit}".strip(),
+            }
+
+    if tool == "chemistry_molar_mass":
+        value = result.get("molar_mass_g_mol")
+        if value is not None:
+            return {
+                "kind": "numeric",
+                "value": str(value),
+                "display": f"{value} g/mol",
+            }
+
+    if tool == "chemistry_balance_equation":
+        value = str(result.get("balanced", "")).strip()
+        if value:
+            return {
+                "kind": "text",
+                "value": value,
+                "display": value,
+            }
+
+    return None
+
+
+_NO_REAL_ROOT_CUES = (
+    "нет действительных корней",
+    "действительных корней нет",
+    "no real roots",
+    "has no real roots",
+    "нақты түбір жоқ",
+    "нақты түбірлер жоқ",
+)
+
+
+def _marked_answer_verdict(
+    problem: str,
+    subject: Optional[str],
+    tool_trace: list[dict],
+) -> dict | None:
+    _task, answer = _split_problem_and_marked_answer(problem)
+    if not answer:
+        return None
+    reference = _reference_answer_from_trace(problem, subject, tool_trace)
+    if not reference:
+        return None
+
+    actual = answer.strip()
+    actual_rhs = _strip_answer_lhs(actual)
+    kind = reference["kind"]
+    correct: bool | None = None
+
+    if kind == "no_real_roots":
+        lower = actual.lower()
+        correct = any(cue in lower for cue in _NO_REAL_ROOT_CUES)
+    elif kind == "solution_set":
+        expected_tokens = {
+            token
+            for value in reference["values"]
+            for token in _numeric_tokens(value)
+        }
+        actual_tokens = _numeric_tokens(actual_rhs)
+        if expected_tokens or actual_tokens:
+            correct = actual_tokens == expected_tokens
+    elif kind == "numeric":
+        expected_tokens = _numeric_tokens(reference["value"])
+        actual_tokens = _numeric_tokens(actual_rhs)
+        if expected_tokens and actual_tokens:
+            correct = actual_tokens == expected_tokens
+    elif kind == "expression":
+        expected = str(reference["value"]).strip()
+        candidate = actual_rhs
+        try:
+            comparison = execute_tool(
+                "math_equivalent",
+                {"expression_a": expected, "expression_b": candidate},
+            )
+            correct = bool((comparison.get("result") or {}).get("equivalent"))
+        except Exception:
+            expected_tokens = _numeric_tokens(expected)
+            actual_tokens = _numeric_tokens(candidate)
+            if expected_tokens and actual_tokens:
+                correct = actual_tokens == expected_tokens
+    elif kind == "text":
+        normalized_expected = re.sub(r"\s+", "", str(reference["value"])).lower()
+        normalized_actual = re.sub(r"\s+", "", actual).lower().replace("→", "->")
+        correct = normalized_actual == normalized_expected
+
+    if correct is None:
+        return None
+    return {
+        "correct": correct,
+        "actual": actual,
+        "expected": reference["display"],
+        "kind": kind,
+    }
+
+
 def _tool_result_numeric_facts(tool_trace: list[dict]) -> set[str]:
     facts: set[str] = set()
     for entry in tool_trace:
@@ -1195,6 +1491,15 @@ def generate_board_response(
             "Для формул используй LaTeX в $$...$$."
         )
     else:
+        task_kind = _check_task_kind(problem, subject)
+        reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
+        reference_tool_rule = (
+            " Для этого типа задания эталон должен быть получен через один из инструментов: "
+            + ", ".join(reference_tools)
+            + "."
+            if reference_tools
+            else ""
+        )
         sys += (
             f"\n{language_rule} "
             "Ответ будет написан прямо на доске рядом с работой ученика. "
@@ -1206,6 +1511,8 @@ def generate_board_response(
             "Если ошибок нет, дай одну короткую строку с kind=result. "
             "Для проверки сначала получи независимый эталон из ИСХОДНОГО условия через подходящий tool; "
             "не ограничивайся вычислением уже записанного учеником выражения, потому что оно само может быть ошибочным. "
+            + reference_tool_rule
+            + " Если в записи есть явный «Ответ:», ОБЯЗАТЕЛЬНО сравни его с эталонным результатом tool. "
             "После первой найденной ошибки и одной корректирующей строки остановись. "
             "В школьной алгебре, если D<0 и комплексные числа не требуются условием, "
             "не пиши комплексные корни: достаточно указать, что действительных корней нет. "
@@ -1241,7 +1548,10 @@ def generate_board_response(
     needs_retry = (
         _board_hint_needs_retry(steps, response_locale)
         if mode == "hint"
-        else _board_check_needs_retry(text, steps, response_locale)
+        else (
+            _board_check_needs_retry(text, steps, response_locale)
+            or not _check_trace_covers_task(problem, subject, tool_trace)
+        )
     )
     if needs_retry:
         if mode == "hint":
@@ -1255,7 +1565,10 @@ def generate_board_response(
             retry_sys = (
                 sys
                 + "\nПредыдущая проверка ненадёжна. Перепроверь работу с нуля. "
-                + "Числовые равенства ученика обязательно сверяй с фактическими результатами tools. "
+                + "Сначала выбери reference-tool, который решает ИСХОДНОЕ задание, а не просто считает выражение из ответа ученика. "
+                + "Для уравнения используй math_solve или math_quadratic; для производной math_differentiate; "
+                + "для интеграла math_integrate; для раскрытия скобок math_expand; для перевода единиц physics_convert_unit. "
+                + "Числовые и символические ответы ученика обязательно сверяй с фактическим результатом reference-tool. "
                 + "Если значение ученика отличается от результата инструмента, это и есть ошибка: "
                 + "первый такой шаг верни с kind=warning и покажи правильное значение. "
                 + "Не называй неверное вычисление верным. Не переходи к комплексным числам, если их не требует условие."
@@ -1287,7 +1600,10 @@ def generate_board_response(
         retry_bad = (
             _board_hint_needs_retry(retry_steps, response_locale)
             if mode == "hint"
-            else _board_check_needs_retry(retry_text, retry_steps, response_locale)
+            else (
+                _board_check_needs_retry(retry_text, retry_steps, response_locale)
+                or not _check_trace_covers_task(problem, subject, tool_trace)
+            )
         )
         if retry_bad:
             fallback_messages = {
@@ -1348,6 +1664,34 @@ def generate_board_response(
                 steps = [{"text": fallback, "kind": "warning"}]
         else:
             text, steps = verified_text, verified_steps
+
+    if mode == "check":
+        answer_verdict = _marked_answer_verdict(problem, subject, tool_trace)
+        if answer_verdict is not None and not answer_verdict["correct"]:
+            messages = {
+                "ru": "Ответ неверный: у тебя {actual}, должно быть {expected}.",
+                "kk": "Жауап қате: сенде {actual}, дұрысы {expected}.",
+                "en": "The answer is incorrect: you wrote {actual}, but it should be {expected}.",
+            }
+            warning = messages.get(response_locale, messages["ru"]).format(
+                actual=answer_verdict["actual"],
+                expected=answer_verdict["expected"],
+            )
+            text = warning
+            steps = [{"text": warning, "kind": "warning"}]
+        elif (
+            answer_verdict is not None
+            and answer_verdict["correct"]
+            and not _problem_has_intermediate_work(problem)
+        ):
+            correct_messages = {
+                "ru": "Ответ верный.",
+                "kk": "Жауап дұрыс.",
+                "en": "The answer is correct.",
+            }
+            confirmed = correct_messages.get(response_locale, correct_messages["ru"])
+            text = confirmed
+            steps = [{"text": confirmed, "kind": "result"}]
 
     if mode == "hint":
         text = "\n".join(

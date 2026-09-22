@@ -466,6 +466,7 @@ def test_board_check_requires_tools_and_returns_warning_with_score(monkeypatch):
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "_check_trace_covers_task", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
 
@@ -559,6 +560,7 @@ def test_board_check_drops_impossible_perfect_score_when_warning_exists(monkeypa
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "_check_trace_covers_task", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
 
@@ -672,3 +674,152 @@ def test_board_check_verifies_wrong_final_result_against_tool_trace(monkeypatch)
     assert steps == [
         {"text": "Ошибка: D=11, должно быть D=-4.", "kind": "warning"}
     ]
+
+
+def _successful_trace(tool: str, result: dict):
+    return [{
+        "tool": tool,
+        "arguments": {},
+        "payload": {
+            "ok": True,
+            "tool": tool,
+            "category": "math",
+            "result": result,
+        },
+    }]
+
+
+def test_reference_tool_policy_rejects_evaluate_for_equation():
+    wrong_trace = _successful_trace(
+        "math_evaluate",
+        {
+            "expression": {"text": "13"},
+            "result": {"text": "13.0000000000000"},
+        },
+    )
+    assert ai_module._check_task_kind(
+        "Решить 2x+3=11; Ответ: x=5",
+        "алгебра",
+    ) == "equation"
+    assert ai_module._check_trace_covers_task(
+        "Решить 2x+3=11; Ответ: x=5",
+        "алгебра",
+        wrong_trace,
+    ) is False
+
+
+def test_marked_answer_verdict_linear_equation_wrong():
+    trace = _successful_trace(
+        "math_solve",
+        {
+            "equation": {"text": "Eq(2*x + 3, 11)"},
+            "variable": "x",
+            "solutions": [{"text": "4", "latex": "4"}],
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Решить 2x + 3 = 11; Ответ: x = 5",
+        "алгебра",
+        trace,
+    )
+    assert verdict == {
+        "correct": False,
+        "actual": "x = 5",
+        "expected": "4",
+        "kind": "solution_set",
+    }
+
+
+def test_marked_answer_verdict_arithmetic_wrong():
+    trace = _successful_trace(
+        "math_evaluate",
+        {
+            "expression": {"text": "15"},
+            "result": {"text": "15.0000000000000", "latex": "15.0"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Вычислить 48/6 + 7; Ответ: 14",
+        "математика",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"].startswith("15")
+
+
+def test_marked_answer_verdict_derivative_correct_symbolically():
+    trace = _successful_trace(
+        "math_differentiate",
+        {
+            "input": {"text": "x**3 + 2*x"},
+            "variable": "x",
+            "order": 1,
+            "result": {"text": "3*x**2 + 2", "latex": "3 x^{2} + 2"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Найти производную y=x^3+2x; Ответ: y' = 2 + 3x^2",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is True
+
+
+def test_marked_answer_verdict_integral_wrong():
+    trace = _successful_trace(
+        "math_integrate",
+        {
+            "input": {"text": "2*x"},
+            "variable": "x",
+            "bounds": [{"text": "0"}, {"text": "3"}],
+            "result": {"text": "9", "latex": "9"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Вычислить интеграл от 0 до 3 функции 2x dx; Ответ: 8",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"] == "9"
+
+
+def test_marked_answer_verdict_expand_wrong_symbolically():
+    trace = _successful_trace(
+        "math_expand",
+        {
+            "input": {"text": "(x + 2)**2"},
+            "result": {"text": "x**2 + 4*x + 4", "latex": "x^{2} + 4 x + 4"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Раскрыть скобки (x+2)^2; Ответ: x^2 + 4",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+
+
+def test_marked_answer_verdict_physics_unit_conversion_wrong():
+    trace = [{
+        "tool": "physics_convert_unit",
+        "arguments": {"value": 72, "from_unit": "km/h", "to_unit": "m/s"},
+        "payload": {
+            "ok": True,
+            "tool": "physics_convert_unit",
+            "category": "physics",
+            "result": {
+                "value": 72,
+                "from_unit": "km/h",
+                "to_unit": "m/s",
+                "result": 20.0,
+            },
+        },
+    }]
+    verdict = ai_module._marked_answer_verdict(
+        "Перевести 72 km/h в m/s; Ответ: 18 m/s",
+        "физика",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"] == "20 m/s"
