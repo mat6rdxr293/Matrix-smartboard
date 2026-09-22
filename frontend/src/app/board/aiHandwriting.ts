@@ -1,4 +1,5 @@
 import type { Stroke } from "./boardEngine";
+import { renderMathAwareLine } from "./mathHandwriting";
 
 export type HandwritingStep = {
   text: string;
@@ -96,6 +97,7 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\[()[\]]/g, "");
   text = text.replace(/\\left|\\right/g, "");
   text = text.replace(/\\(?:,|;|!|quad|qquad)/g, " ");
+  text = text.replace(/\\int\b/g, "∫");
   text = text.replace(/\\pm/g, "±");
   text = text.replace(/\\times/g, "×");
   text = text.replace(/\\cdot/g, "·");
@@ -103,6 +105,8 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\neq/g, "≠");
   text = text.replace(/\\leq?|\\le/g, "≤");
   text = text.replace(/\\geq?|\\ge/g, "≥");
+  text = text.replace(/<=/g, "≤").replace(/>=/g, "≥");
+  text = text.replace(/\\lt\b/g, "<").replace(/\\gt\b/g, ">");
   text = text.replace(/\\rightarrow|\\to/g, "→");
   text = text.replace(/\\infty/g, "∞");
   text = text.replace(/\\pi/g, "π");
@@ -118,6 +122,8 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\^([0-9])/g, (_, value: string) => toSuperscript(value));
   text = text.replace(/_\{([^{}]+)\}/g, "₍$1₎");
   text = text.replace(/\\([A-Za-z]+)/g, "$1");
+  text = text.replace(/\bsqrt\s*\(/gi, "√(");
+  text = text.replace(/\bint\b(?=\s*(?:₍|\(|\[|[A-Za-z0-9]))/gi, "∫");
   text = text.replace(/[{}]/g, "");
   text = text.replace(/\*\*/g, "");
   text = text.replace(/\s+/g, " ").trim();
@@ -393,16 +399,31 @@ export function solutionStepsToHandwritingStrokes(
     const lines = sourceLines.flatMap((line) => wrapLine(measure, line, options.maxWidth));
 
     for (const line of lines) {
-      strokes.push(...renderTextLine(
-        line,
-        options.x,
-        cursorY,
-        options.maxWidth,
-        options.color,
-        step.kind === "result" ? strokeWidth + 0.3 : strokeWidth,
+      const lineStrokeWidth = step.kind === "result" ? strokeWidth + 0.3 : strokeWidth;
+      const measurePlain = (value: string, size: number) => {
+        measure.font = `${size}px "Comic Sans MS", "Marker Felt", "Bradley Hand", cursive`;
+        return measure.measureText(value).width;
+      };
+      const rendered = renderMathAwareLine(line, {
+        x: options.x,
+        y: cursorY,
         fontSize,
-      ));
-      cursorY += fontSize + lineGap;
+        color: options.color,
+        strokeWidth: lineStrokeWidth,
+        measurePlain,
+        renderPlain: (value, x, y, size) =>
+          renderTextLine(
+            value,
+            x,
+            y,
+            Math.max(36, measurePlain(value, size) + size * 0.4),
+            options.color,
+            lineStrokeWidth,
+            size,
+          ),
+      });
+      strokes.push(...rendered.strokes);
+      cursorY += Math.max(fontSize, rendered.height) + lineGap;
     }
     cursorY += stepGap;
   }

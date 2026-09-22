@@ -338,3 +338,56 @@ test("check writes the first error on the board using error ink", async ({ page 
   expect(aiColor).not.toBe("#FF0000");
   expect(["#D97706", "#DC2626", "#7C3AED", "#FBBF24", "#FB7185", "#C084FC"]).toContain(aiColor);
 });
+
+
+test("math handwriting uses geometric integral, radical bar and relation signs", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    captureOps: operations,
+    aiResponse: {
+      text: "Решение",
+      steps: [
+        {
+          text: "$$\\int_{0}^{4}(3x^2+\\sqrt{x+1})\\,dx$$",
+          kind: "math",
+        },
+        {
+          text: "$$x<4,\\quad y\\ge2$$",
+          kind: "result",
+        },
+      ],
+    },
+  });
+
+  await generateSolution(page, operations);
+
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  const strokes = batch?.strokes ?? [];
+  expect(strokes.length).toBeGreaterThan(10);
+
+  const radicalBar = strokes.find((stroke) => {
+    if (stroke.points.length !== 2) return false;
+    const [start, end] = stroke.points;
+    return (
+      Math.abs(start.y - end.y) < 0.01 &&
+      Math.abs(end.x - start.x) > 20
+    );
+  });
+  expect(radicalBar).toBeTruthy();
+
+  const integralCurve = strokes.find((stroke) => {
+    if (stroke.points.length < 25) return false;
+    const ys = stroke.points.map((point) => point.y);
+    return Math.max(...ys) - Math.min(...ys) > 30;
+  });
+  expect(integralCurve).toBeTruthy();
+
+  const shortAngularStrokes = strokes.filter((stroke) => {
+    if (stroke.points.length !== 2) return false;
+    const [start, end] = stroke.points;
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+    return dx > 6 && dy > 6 && dx < 40 && dy < 40;
+  });
+  expect(shortAngularStrokes.length).toBeGreaterThanOrEqual(4);
+});

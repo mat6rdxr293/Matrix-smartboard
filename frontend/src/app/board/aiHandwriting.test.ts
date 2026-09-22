@@ -7,6 +7,14 @@ describe("normalizeHandwritingText", () => {
       .toBe("x² = (4)/(2) ± √(9)");
   });
 
+  it("preserves math layout markers for integrals, roots and inequalities", () => {
+    expect(
+      normalizeHandwritingText(
+        "$$\\int_{0}^{4} \\sqrt{x+1} \\le 7,\\quad y \\ge 2$$",
+      ),
+    ).toBe("∫₍0₎⁴ √(x+1) ≤ 7, y ≥ 2");
+  });
+
   it("keeps Cyrillic explanations readable", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");
