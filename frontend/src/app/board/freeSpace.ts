@@ -36,6 +36,69 @@ const fitsInside = (rect: BoardRect, viewport: BoardRect) =>
   rect.right <= viewport.right &&
   rect.bottom <= viewport.bottom;
 
+export function findFreeBoardSpaceNearTarget(
+  viewport: BoardRect,
+  occupied: BoardRect[],
+  target: BoardRect,
+  width = 500,
+  height = 320,
+  gap = 40,
+  padding = 18,
+): Placement | null {
+  const safeWidth = Math.max(280, width);
+  const safeHeight = Math.max(180, height);
+  const padded = occupied.map((rect) => expand(rect, padding));
+  const targetCenterX = (target.left + target.right) / 2;
+  const targetCenterY = (target.top + target.bottom) / 2;
+
+  const candidates = [
+    { x: target.right + gap, y: target.top, priority: 0 },
+    { x: target.right + gap, y: targetCenterY - safeHeight / 2, priority: 1 },
+    { x: target.left, y: target.bottom + gap, priority: 2 },
+    { x: targetCenterX - safeWidth / 2, y: target.bottom + gap, priority: 3 },
+    { x: target.left - gap - safeWidth, y: target.top, priority: 4 },
+    { x: target.left - gap - safeWidth, y: targetCenterY - safeHeight / 2, priority: 5 },
+    { x: target.left, y: target.top - gap - safeHeight, priority: 6 },
+    { x: targetCenterX - safeWidth / 2, y: target.top - gap - safeHeight, priority: 7 },
+  ];
+
+  const scored = candidates
+    .map((candidate) => {
+      const rect = rectAt(candidate.x, candidate.y, safeWidth, safeHeight);
+      if (padded.some((item) => overlaps(rect, item))) return null;
+
+      const centerX = candidate.x + safeWidth / 2;
+      const centerY = candidate.y + safeHeight / 2;
+      const distance = Math.hypot(centerX - targetCenterX, centerY - targetCenterY);
+      const insideViewport = fitsInside(rect, viewport);
+      const viewportPenalty = insideViewport ? 0 : 10_000;
+
+      return {
+        ...candidate,
+        insideViewport,
+        score: viewportPenalty + candidate.priority * 500 + distance,
+      };
+    })
+    .filter((item): item is {
+      x: number;
+      y: number;
+      priority: number;
+      insideViewport: boolean;
+      score: number;
+    } => Boolean(item))
+    .sort((a, b) => a.score - b.score);
+
+  if (!scored.length) return null;
+  const best = scored[0];
+  return {
+    x: best.x,
+    y: best.y,
+    width: safeWidth,
+    height: safeHeight,
+    insideViewport: best.insideViewport,
+  };
+}
+
 export function findFreeBoardSpace(
   viewport: BoardRect,
   occupied: BoardRect[],

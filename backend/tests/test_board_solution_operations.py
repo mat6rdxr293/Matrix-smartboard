@@ -110,12 +110,14 @@ def test_handwriting_stroke_batch_roundtrip(tmp_path):
             "color": "#ffffff",
             "width": 2.2,
             "mode": "draw",
+            "source": "ai",
         },
         {
             "points": [{"x": 40, "y": 20}, {"x": 50, "y": 25}],
             "color": "#ffffff",
             "width": 2.2,
             "mode": "draw",
+            "source": "ai",
         },
     ]
 

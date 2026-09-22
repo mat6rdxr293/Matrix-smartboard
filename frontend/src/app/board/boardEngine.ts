@@ -4,6 +4,7 @@ export type Stroke = {
   color: string;
   width: number;
   mode: "draw" | "erase";
+  source?: "user" | "ai";
 };
 
 export function drawStrokes(

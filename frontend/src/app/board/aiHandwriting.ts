@@ -345,7 +345,7 @@ function renderTextLine(
         0.65,
       );
       if (points.length < 2) return null;
-      return { points, color, width: strokeWidth, mode: "draw" };
+      return { points, color, width: strokeWidth, mode: "draw", source: "ai" };
     })
     .filter((stroke): stroke is Stroke => Boolean(stroke));
 

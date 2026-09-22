@@ -157,6 +157,7 @@ it("treats an AI handwriting batch as one undoable command", () => {
     { op: "stroke_batch_add", strokes },
   ]);
   expect(state.document.strokes).toHaveLength(2);
+  expect(state.document.strokes.every((stroke) => stroke.source === "ai")).toBe(true);
 
   state = replayBoardOperations(state, [{ op: "undo" }]);
   expect(state.document.strokes).toHaveLength(0);

@@ -8,8 +8,9 @@ import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
 import { getSelectionBounds, selectGraphIds, selectStrokeIndices, translateBounds, translateStroke, type LassoBounds } from "@/app/board/lasso";
 import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
-import { findFreeBoardSpace, type BoardRect } from "@/app/board/freeSpace";
+import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
+import { chooseActiveOcrCluster, clusterOcrStrokes } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -191,6 +192,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const toolbarPinnedRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
+  const lastOcrTargetBoundsRef = useRef<BoardRect | null>(null);
   const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const lineToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const eraserToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1392,9 +1394,21 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       right: (widthPx - currentPan.x) / scale,
       bottom: (heightPx - currentPan.y) / scale,
     };
-    const placement = findFreeBoardSpace(
+    const occupied = occupiedBoardRects();
+    const nearTarget = lastOcrTargetBoundsRef.current
+      ? findFreeBoardSpaceNearTarget(
+          viewport,
+          occupied,
+          lastOcrTargetBoundsRef.current,
+          requestedWidth,
+          requestedHeight,
+          38,
+          16,
+        )
+      : null;
+    const placement = nearTarget ?? findFreeBoardSpace(
       viewport,
-      occupiedBoardRects(),
+      occupied,
       requestedWidth,
       requestedHeight,
       24,
@@ -1587,15 +1601,17 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     a.click();
   };
 
-  const renderOcrBlob = (): Promise<Blob | null> => {
+  const renderOcrBlob = (inputStrokes?: Stroke[]): Promise<Blob | null> => {
     const canvas = canvasRef.current;
     if (!canvas) return Promise.resolve(null);
-    const drawStrokesOnly = strokesRef.current.filter((s) => s.mode === "draw" && s.points.length > 0);
-    if (!drawStrokesOnly.length) {
-      return new Promise((resolve) => {
-        canvas.toBlob((blob) => resolve(blob), "image/png");
-      });
-    }
+    const source = inputStrokes ?? strokesRef.current;
+    const drawStrokesOnly = source.filter(
+      (stroke) =>
+        stroke.mode === "draw" &&
+        stroke.points.length > 0 &&
+        stroke.source !== "ai",
+    );
+    if (!drawStrokesOnly.length) return Promise.resolve(null);
 
     let minX = Number.POSITIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
@@ -1665,18 +1681,27 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         .filter((expression) => expression.visible && expression.expression.trim())
         .map((expression) => `График: y = ${expression.expression.trim()}`)
     );
-    const hasInk = strokesRef.current.some((stroke) => stroke.mode === "draw" && stroke.points.length > 0);
 
-    if (!hasInk && graphLines.length > 0) {
+    const selectedIndices = lassoSelection.strokeIndices.length
+      ? lassoSelection.strokeIndices
+      : undefined;
+    const clusters = clusterOcrStrokes(strokesRef.current, selectedIndices);
+    const activeCluster = selectedIndices
+      ? (clusters[0] ?? null)
+      : chooseActiveOcrCluster(clusters);
+    lastOcrTargetBoundsRef.current = activeCluster?.bounds ?? null;
+
+    if (!activeCluster && graphLines.length > 0) {
       const text = graphLines.join("\n");
       onOcrText?.(text);
       return text;
     }
+    if (!activeCluster) throw new Error(tl("ocr_not_available"));
     if (!ocrEnabled) throw new Error(tl("ocr_not_available"));
 
     setLoading(true);
     try {
-      const blob = await renderOcrBlob();
+      const blob = await renderOcrBlob(activeCluster.strokes);
       if (!blob) throw new Error(tl("ocr_not_available"));
       const res = await callOcr(blob);
       const text = [res.text.trim(), ...graphLines].filter(Boolean).join("\n").trim();

@@ -189,7 +189,12 @@ export function applyBoardOperation(state: BoardHistory, operation: BoardOperati
   }
   if (operation.op === "stroke_batch_add") {
     if (!operation.strokes.length) return state;
-    return pushCommand(state, { kind: "stroke_batch_add", strokes: operation.strokes.map(cloneStroke) });
+    return pushCommand(state, {
+      kind: "stroke_batch_add",
+      strokes: operation.strokes.map((stroke) =>
+        cloneStroke({ ...stroke, source: stroke.source ?? "ai" })
+      ),
+    });
   }
   if (operation.op === "stroke_move") {
     const indexes = [...new Set(operation.indexes.filter((index) => Number.isInteger(index) && index >= 0))];

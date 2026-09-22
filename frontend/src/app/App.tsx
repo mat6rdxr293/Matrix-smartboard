@@ -860,27 +860,36 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         throw new Error("AI вернул поврежденный structured response");
       }
 
-      const placement = boardCanvasRef.current?.allocateSolutionPlacement(560, 480) ?? {
-        x: 48,
-        y: 48,
-        width: 560,
-        minHeight: 480,
-      };
-
-      const generated = solutionStepsToHandwritingStrokes(rawSteps, {
-        x: placement.x + 12,
-        y: placement.y + 10,
-        maxWidth: Math.max(300, placement.width - 24),
+      const draft = solutionStepsToHandwritingStrokes(rawSteps, {
+        x: 12,
+        y: 10,
+        maxWidth: 536,
         color: boardPenColor,
         strokeWidth: ultraLite ? 2.4 : 2.15,
         fontSize: ultraLite ? 27 : 29,
         lineGap: 11,
         stepGap: 16,
       });
-      if (!generated.strokes.length) throw new Error("Не удалось построить рукописные штрихи");
+      if (!draft.strokes.length) throw new Error("Не удалось построить рукописные штрихи");
+
+      const requiredHeight = Math.max(180, Math.ceil(draft.height + 24));
+      const placement = boardCanvasRef.current?.allocateSolutionPlacement(560, requiredHeight) ?? {
+        x: 48,
+        y: 48,
+        width: 560,
+        minHeight: requiredHeight,
+      };
+
+      const generatedStrokes = draft.strokes.map((stroke) => ({
+        ...stroke,
+        points: stroke.points.map((point) => ({
+          x: point.x + placement.x,
+          y: point.y + placement.y,
+        })),
+      }));
 
       const written = await boardCanvasRef.current?.animateAiStrokes(
-        generated.strokes,
+        generatedStrokes,
         isCancelled,
         ultraLite,
       );

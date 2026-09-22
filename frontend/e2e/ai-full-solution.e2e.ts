@@ -43,15 +43,34 @@ const graph = {
   ],
 };
 
+type TestStroke = {
+  points: Array<{ x: number; y: number }>;
+  color: string;
+  width: number;
+  mode: "draw";
+  source?: "user" | "ai";
+};
+
 type CapturedOp = {
   op?: string;
-  strokes?: Array<{
-    points: Array<{ x: number; y: number }>;
-    color: string;
-    width: number;
-    mode: string;
-  }>;
+  stroke?: TestStroke;
+  strokes?: TestStroke[];
 };
+
+const taskStroke = (x1: number, y1: number, x2: number, y2: number): TestStroke => ({
+  points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
+  color: "#ff0000",
+  width: 4,
+  mode: "draw",
+  source: "user",
+});
+
+const defaultTaskStrokes = [
+  taskStroke(90, 120, 150, 180),
+  taskStroke(155, 145, 210, 145),
+  taskStroke(220, 115, 220, 185),
+  taskStroke(235, 145, 295, 145),
+];
 
 const json = (route: Route, body: unknown) =>
   route.fulfill({
@@ -60,7 +79,14 @@ const json = (route: Route, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOps?: CapturedOp[] }) {
+async function seedLesson(
+  page: Page,
+  options?: {
+    withGraph?: boolean;
+    captureOps?: CapturedOp[];
+    initialStrokes?: TestStroke[];
+  },
+) {
   await page.addInitScript(({ schoolId, roomId, lessonId }) => {
     localStorage.setItem("practice.room." + schoolId, roomId);
     localStorage.setItem("practice.lesson." + lessonId + ".boardProfile", "universal");
@@ -78,11 +104,24 @@ async function seedLesson(page: Page, options?: { withGraph?: boolean; captureOp
     if (path === "/api/lessons/" + lesson.id + "/chat") return json(route, { items: [] });
 
     if (path === "/api/lessons/" + lesson.id + "/board" && method === "GET") {
-      return json(route, {
-        operations: options?.withGraph
-          ? [{ sequence: 1, clientOperationId: "graph-op-e2e", op: "graph_add", graph, ts: 100 }]
-          : [],
-      });
+      const initialStrokes = options?.initialStrokes ?? defaultTaskStrokes;
+      const strokeOperations = initialStrokes.map((stroke, index) => ({
+        sequence: index + 1,
+        clientOperationId: "stroke-op-" + index,
+        op: "add",
+        stroke,
+        ts: 100 + index,
+      }));
+      const graphOperations = options?.withGraph
+        ? [{
+            sequence: strokeOperations.length + 1,
+            clientOperationId: "graph-op-e2e",
+            op: "graph_add",
+            graph,
+            ts: 200,
+          }]
+        : [];
+      return json(route, { operations: [...strokeOperations, ...graphOperations] });
     }
 
     if (path === "/api/lessons/" + lesson.id + "/board/operations" && method === "POST") {
@@ -169,4 +208,61 @@ test("one undo removes the whole AI handwriting batch and redo restores it", asy
   await expect.poll(() => operations.some((operation) => operation.op === "redo")).toBe(true);
 
   expect(operations.filter((operation) => operation.op === "stroke_batch_add")).toHaveLength(1);
+});
+
+
+test("with two equations the latest user block is OCR target and solution stays close to it", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const first = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+  const second = [
+    taskStroke(390, 110, 450, 175),
+    taskStroke(455, 140, 510, 140),
+    taskStroke(520, 110, 520, 180),
+  ];
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: [...first, ...second],
+  });
+  await generateSolution(page, operations);
+
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  const points = batch?.strokes?.flatMap((stroke) => stroke.points) ?? [];
+  expect(points.length).toBeGreaterThan(30);
+
+  const solution = {
+    left: Math.min(...points.map((point) => point.x)),
+    right: Math.max(...points.map((point) => point.x)),
+    top: Math.min(...points.map((point) => point.y)),
+    bottom: Math.max(...points.map((point) => point.y)),
+  };
+  const firstBounds = { left: 58, top: 98, right: 192, bottom: 172 };
+  const secondBounds = { left: 388, top: 108, right: 522, bottom: 182 };
+
+  const overlaps = (
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ) =>
+    a.left < b.right &&
+    a.right > b.left &&
+    a.top < b.bottom &&
+    a.bottom > b.top;
+
+  expect(overlaps(solution, firstBounds)).toBe(false);
+  expect(overlaps(solution, secondBounds)).toBe(false);
+
+  const dx = Math.max(
+    0,
+    secondBounds.left - solution.right,
+    solution.left - secondBounds.right,
+  );
+  const dy = Math.max(
+    0,
+    secondBounds.top - solution.bottom,
+    solution.top - secondBounds.bottom,
+  );
+  expect(Math.hypot(dx, dy)).toBeLessThan(90);
 });
