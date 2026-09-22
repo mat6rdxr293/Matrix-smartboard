@@ -189,7 +189,7 @@ export default function AIAssistant({
             aria-label={tl("recognized_board_title")}
           />
           <div className="mt-2 grid grid-cols-[1fr_1.25fr_auto] gap-2">
-            <Button size="sm" onClick={confirmRecognition} disabled={!recognizedText.trim() || loading || recognizing}>
+            <Button data-testid="ocr-confirm" size="sm" onClick={confirmRecognition} disabled={!recognizedText.trim() || loading || recognizing}>
               {tl("recognized_correct")}
             </Button>
             <Button size="sm" variant="outline" onClick={retryRecognition} disabled={loading || recognizing || !ocrEnabled}>
@@ -221,6 +221,7 @@ export default function AIAssistant({
               {tl("check_solution")}
             </Button>
             <Button
+              data-testid="ai-full-solution"
               variant="ghost"
               className="h-10 rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[12px] font-medium"
               onClick={() => void recognize("solution")}

@@ -93,3 +93,33 @@ def test_humanities_local_ai_does_not_send_stem_tools(monkeypatch):
 
     assert result == "Ответ"
     assert "tools" not in captured
+
+
+def test_parse_board_solution_accepts_structured_json():
+    import json
+
+    payload = json.dumps(
+        {
+            "summary": "Решение",
+            "steps": [
+                {"text": "$$x^2=4$$", "kind": "math"},
+                {"text": "$$x=\\pm2$$", "kind": "result"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    text, steps = ai_module._parse_board_solution(payload)
+
+    assert steps == [
+        {"text": "$$x^2=4$$", "kind": "math"},
+        {"text": "$$x=\\pm2$$", "kind": "result"},
+    ]
+    assert text.startswith("Решение")
+    assert "$$x^2=4$$" in text
+
+
+def test_parse_board_solution_falls_back_to_plain_text():
+    text, steps = ai_module._parse_board_solution("Обычный ответ")
+
+    assert text == "Обычный ответ"
+    assert steps == [{"text": "Обычный ответ", "kind": "text"}]

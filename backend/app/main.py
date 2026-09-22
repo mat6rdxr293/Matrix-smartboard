@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .ai import generate_ai_response
+from .ai import generate_ai_response, generate_board_solution
 from .ocr import ocr_image
 from .polynomial import candidates, divide, eval_poly, horner, horner_table, normalize
 from .ratelimit import RateLimiter
@@ -126,10 +126,12 @@ class AiRequest(BaseModel):
     lesson_id: Optional[str] = None
     client_message_id: Optional[str] = None
     board_context: bool = False
+    board_output: bool = False
 
 
 class AiResponse(BaseModel):
     text: str
+    steps: Optional[list[dict[str, str]]] = None
 
 
 class PolyRequest(BaseModel):
@@ -565,15 +567,23 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
             mode=payload.mode,
         )
     try:
-        text = generate_ai_response(
-            payload.mode,
-            payload.problem,
-            payload.student_attempt,
-            payload.assistant_context,
-            payload.continue_from,
-            payload.subject,
-            payload.board_context,
-        )
+        steps = None
+        if payload.mode == "solution" and payload.board_output:
+            text, steps = generate_board_solution(
+                payload.problem,
+                subject=payload.subject,
+                board_context=payload.board_context,
+            )
+        else:
+            text = generate_ai_response(
+                payload.mode,
+                payload.problem,
+                payload.student_attempt,
+                payload.assistant_context,
+                payload.continue_from,
+                payload.subject,
+                payload.board_context,
+            )
         async with ai_history_lock:
             _append_ai_history(
                 {
@@ -599,7 +609,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 text=text,
                 mode=payload.mode,
             )
-        return AiResponse(text=text)
+        return AiResponse(text=text, steps=steps)
     except Exception as exc:  # noqa: BLE001
         async with ai_history_lock:
             _append_ai_history(

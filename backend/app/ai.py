@@ -249,6 +249,7 @@ def _local_chat_with_tools(
     user: str,
     max_tokens: int,
     subject: Optional[str],
+    postprocess: bool = True,
 ) -> str:
     tools = openai_chat_tools(subject) if settings.ai_tools_enabled else []
     system_text = sys
@@ -278,7 +279,8 @@ def _local_chat_with_tools(
 
         if not tool_calls:
             content = getattr(message, "content", None)
-            return _postprocess_math(content.strip() if content else "")
+            text = content.strip() if content else ""
+            return _postprocess_math(text) if postprocess else text
 
         serialized_calls = []
         for call in tool_calls:
@@ -393,3 +395,97 @@ def generate_ai_response(
     except Exception as exc:  # noqa: BLE001
         logger.warning("AI request failed: %s", exc)
         raise
+
+def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
+    cleaned = (raw or "").strip()
+    fence = chr(96) * 3
+    if cleaned.startswith(fence):
+        cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
+    try:
+        payload = json.loads(cleaned)
+    except Exception:
+        payload = None
+
+    steps: list[dict[str, str]] = []
+    summary = ""
+    if isinstance(payload, dict):
+        summary_value = payload.get("summary")
+        if isinstance(summary_value, str):
+            summary = summary_value.strip()
+        raw_steps = payload.get("steps")
+        if isinstance(raw_steps, list):
+            for item in raw_steps[:40]:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                kind = item.get("kind")
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                if kind not in {"text", "math", "result", "warning"}:
+                    kind = "text"
+                steps.append({"text": text.strip()[:2000], "kind": kind})
+
+    if not steps:
+        fallback = _postprocess_math((raw or "").strip())
+        if fallback:
+            steps = [{"text": fallback[:12000], "kind": "text"}]
+        return fallback, steps
+
+    text = "\n".join(f"{index + 1}. {step['text']}" for index, step in enumerate(steps))
+    if summary:
+        text = f"{summary}\n\n{text}"
+    return _postprocess_math(text), steps
+
+
+def generate_board_solution(
+    problem: str,
+    *,
+    subject: Optional[str] = None,
+    board_context: bool = True,
+) -> tuple[str, list[dict[str, str]]]:
+    api_key = get_openai_key()
+    base_url = settings.ai_base_url
+
+    if not base_url:
+        text = generate_ai_response(
+            "solution",
+            problem,
+            subject=subject,
+            board_context=board_context,
+        )
+        return text, [{"text": text, "kind": "text"}] if text else []
+
+    sys, user, max_tokens = _build_prompt(
+        "solution",
+        problem,
+        None,
+        None,
+        False,
+        subject,
+        board_context,
+    )
+    sys += (
+        "\nВерни ТОЛЬКО валидный JSON без markdown-обертки. "
+        "Формат: {\"summary\":\"кратко\",\"steps\":["
+        "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "
+        "Каждый логический шаг должен быть отдельным элементом. "
+        "Для формул внутри text используй LaTeX в $$...$$."
+    )
+
+    client_options = {
+        "api_key": api_key or "ollama",
+        "timeout": settings.ai_timeout_seconds,
+    }
+    if base_url:
+        client_options["base_url"] = base_url
+    client = OpenAI(**client_options)
+    raw = _local_chat_with_tools(
+        client,
+        sys=sys,
+        user=user,
+        max_tokens=max_tokens,
+        subject=subject,
+        postprocess=False,
+    )
+    return _parse_board_solution(raw)

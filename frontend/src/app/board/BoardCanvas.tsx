@@ -4,9 +4,11 @@ import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
-import type { GraphElement } from "@/app/board/boardDocument";
+import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
 import { getSelectionBounds, selectGraphIds, selectStrokeIndices, translateBounds, translateStroke, type LassoBounds } from "@/app/board/lasso";
 import GraphElementView from "@/app/board/GraphElementView";
+import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
+import { findFreeBoardSpace, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
@@ -62,7 +64,13 @@ const BG_EXTRA = [
 ];
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
-export type BoardCanvasHandle = { recognize: () => Promise<string> };
+export type BoardCanvasHandle = {
+  recognize: () => Promise<string>;
+  allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
+};
+
+const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
+const NOOP_SOLUTION_CHANGE = (_next: AiSolutionBlock[]) => undefined;
 
 const BoardCanvas = forwardRef(function BoardCanvas({
   onOcrText,
@@ -74,6 +82,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   onChangeStrokes,
   initialGraphs,
   onChangeGraphs,
+  initialSolutions = EMPTY_SOLUTIONS,
+  onChangeSolutions = NOOP_SOLUTION_CHANGE,
+  onCancelAiSolution,
   canUndo,
   canRedo,
   initialPenColor,
@@ -98,6 +109,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   onChangeStrokes: (next: Stroke[]) => void;
   initialGraphs: GraphElement[];
   onChangeGraphs: (next: GraphElement[]) => void;
+  initialSolutions?: AiSolutionBlock[];
+  onChangeSolutions?: (next: AiSolutionBlock[]) => void;
+  onCancelAiSolution?: (id: string) => void;
   canUndo: boolean;
   canRedo: boolean;
   initialPenColor: string;
@@ -124,6 +138,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const strokesRef = useRef<Stroke[]>(initialStrokes);
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
   const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
+  const solutionsRef = useRef<AiSolutionBlock[]>(initialSolutions);
+  const [solutions, setSolutions] = useState<AiSolutionBlock[]>(initialSolutions);
   const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1289,12 +1305,108 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, [initialGraphs, selectedGraphId]);
 
   useEffect(() => {
+    solutionsRef.current = initialSolutions;
+    setSolutions(initialSolutions);
+  }, [initialSolutions]);
+
+  useEffect(() => {
     setColor(initialPenColor);
   }, [initialPenColor]);
 
   useEffect(() => {
     setBg(initialBgColor);
   }, [initialBgColor]);
+
+  const syncSolutionsToParent = (next: AiSolutionBlock[]) => {
+    solutionsRef.current = next;
+    setSolutions(next);
+    onChangeSolutions(next);
+  };
+
+  const commitSolutionUpdate = (before: AiSolutionBlock, after: AiSolutionBlock) => {
+    if (before.id !== after.id) return;
+    onReplayOp?.({ op: "solution_update", before, after, ts: Date.now() });
+    syncSolutionsToParent(
+      solutionsRef.current.map((solution) => solution.id === after.id ? after : solution)
+    );
+  };
+
+  const deleteSolution = (solution: AiSolutionBlock) => {
+    onReplayOp?.({ op: "solution_delete", solution, ts: Date.now() });
+    syncSolutionsToParent(solutionsRef.current.filter((item) => item.id !== solution.id));
+  };
+
+  const occupiedBoardRects = (): BoardRect[] => {
+    const rects: BoardRect[] = [];
+    for (const graph of graphsRef.current) {
+      rects.push({
+        left: graph.x,
+        top: graph.y,
+        right: graph.x + graph.width,
+        bottom: graph.y + graph.height,
+      });
+    }
+    for (const solution of solutionsRef.current) {
+      const estimatedHeight = Math.max(
+        solution.minHeight,
+        96 + solution.steps.reduce((sum, step) => sum + Math.max(34, Math.ceil(step.text.length / 46) * 24), 0),
+      );
+      rects.push({
+        left: solution.x,
+        top: solution.y,
+        right: solution.x + solution.width,
+        bottom: solution.y + estimatedHeight,
+      });
+    }
+    for (const stroke of strokesRef.current) {
+      if (!stroke.points.length) continue;
+      let left = Number.POSITIVE_INFINITY;
+      let top = Number.POSITIVE_INFINITY;
+      let right = Number.NEGATIVE_INFINITY;
+      let bottom = Number.NEGATIVE_INFINITY;
+      const half = Math.max(3, stroke.width / 2);
+      for (const point of stroke.points) {
+        left = Math.min(left, point.x - half);
+        top = Math.min(top, point.y - half);
+        right = Math.max(right, point.x + half);
+        bottom = Math.max(bottom, point.y + half);
+      }
+      if ([left, top, right, bottom].every(Number.isFinite)) rects.push({ left, top, right, bottom });
+    }
+    return rects;
+  };
+
+  const allocateSolutionPlacement = (requestedWidth = 500, requestedHeight = 320) => {
+    const scale = Math.max(zoomRef.current, 0.01);
+    const currentPan = panRef.current;
+    const viewport: BoardRect = {
+      left: -currentPan.x / scale,
+      top: -currentPan.y / scale,
+      right: (widthPx - currentPan.x) / scale,
+      bottom: (heightPx - currentPan.y) / scale,
+    };
+    const placement = findFreeBoardSpace(
+      viewport,
+      occupiedBoardRects(),
+      requestedWidth,
+      requestedHeight,
+      24,
+    );
+    if (!placement.insideViewport) {
+      const targetScreenX = widthPx / 2 - (placement.x + placement.width / 2) * scale;
+      const targetScreenY = heightPx / 2 - (placement.y + placement.height / 2) * scale;
+      const nextPan = clampPan({ x: targetScreenX, y: targetScreenY });
+      panRef.current = nextPan;
+      setPan(nextPan);
+      scheduleRender();
+    }
+    return {
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      minHeight: placement.height,
+    };
+  };
 
   const handleUndo = () => {
     if (!canUndo) return;
@@ -1307,19 +1419,27 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const handleClear = () => {
-    if (strokesRef.current.length === 0 && graphsRef.current.length === 0) return;
+    if (strokesRef.current.length === 0 && graphsRef.current.length === 0 && solutionsRef.current.length === 0) return;
     onReplayOp?.({ op: "clear", ts: Date.now() });
     strokesRef.current = [];
     syncGraphsToParent([]);
+    syncSolutionsToParent([]);
     setSelectedGraphId(null);
     scheduleRender();
     syncStrokesToParent([]);
   };
 
-  const handleSnapshot = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const url = canvas.toDataURL("image/png");
+  const handleSnapshot = async () => {
+    const board = areaRef.current;
+    if (!board) return;
+    const { default: html2canvas } = await import("html2canvas");
+    const snapshot = await html2canvas(board, {
+      backgroundColor: bg,
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      logging: false,
+    });
+    const url = snapshot.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
     a.download = "board.png";
@@ -1419,7 +1539,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
   };
 
-  useImperativeHandle(ref, () => ({ recognize: handleOcr }));
+  useImperativeHandle(ref, () => ({ recognize: handleOcr, allocateSolutionPlacement }));
 
   const schedulePenHide = () => {
     if (penTimerRef.current) window.clearTimeout(penTimerRef.current);
@@ -1494,6 +1614,16 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   onCommit={commitGraphUpdate}
                   onDelete={deleteGraph}
                   interactionDisabled={mode === "pan" || mode === "lasso"}
+                />
+              ))}
+              {solutions.map((solution) => (
+                <AiSolutionBlockView
+                  key={solution.id}
+                  solution={solution}
+                  zoom={zoom}
+                  onCommitChange={commitSolutionUpdate}
+                  onDelete={deleteSolution}
+                  onCancel={onCancelAiSolution}
                 />
               ))}
             </div>
@@ -2083,10 +2213,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           </button>
         </div>
 
-        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
+        <Button data-testid="board-undo" variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
           <RotateCcw size={25} />
         </Button>
-        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
+        <Button data-testid="board-redo" variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
           <RotateCw size={25} />
         </Button>
         <div ref={clearToolbarAnchorRef} className="relative flex items-center">
@@ -2143,7 +2273,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             </Button>
           )}
           {onToggleAssistant && (
-            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
+            <Button data-testid="open-ai-assistant" variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
               <MessageSquare size={26} />
             </Button>
           )}

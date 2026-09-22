@@ -32,9 +32,12 @@ class InvalidLesson(ValueError):
 
 
 BOARD_OPERATION_TYPES = {
-    "add", "stroke_move", "stroke_delete", "graph_add", "graph_update", "graph_delete", "undo", "redo", "clear"
+    "add", "stroke_move", "stroke_delete",
+    "graph_add", "graph_update", "graph_delete",
+    "solution_add", "solution_update", "solution_delete",
+    "undo", "redo", "clear",
 }
-BOARD_SCHEMA_VERSION = "4"
+BOARD_SCHEMA_VERSION = "5"
 MAX_BOARD_OPERATION_JSON_BYTES = 512_000
 
 
@@ -95,6 +98,48 @@ def _is_valid_graph(graph: object) -> bool:
         if not isinstance(item.get("visible"), bool):
             return False
     return True
+
+
+def _is_valid_solution(solution: object) -> bool:
+    if not isinstance(solution, dict):
+        return False
+    solution_id = solution.get("id")
+    if not isinstance(solution_id, str) or not solution_id.strip() or len(solution_id) > 120:
+        return False
+    if not _is_number(solution.get("x")) or not _is_number(solution.get("y")):
+        return False
+    if abs(float(solution["x"])) > 1_000_000 or abs(float(solution["y"])) > 1_000_000:
+        return False
+    if not _is_number(solution.get("width")) or not 280 <= float(solution["width"]) <= 900:
+        return False
+    if not _is_number(solution.get("minHeight")) or not 120 <= float(solution["minHeight"]) <= 2400:
+        return False
+    if solution.get("status") not in {"thinking", "streaming", "done", "error"}:
+        return False
+    if solution.get("source") != "ai":
+        return False
+    created_at = solution.get("createdAt")
+    if not isinstance(created_at, int) or isinstance(created_at, bool) or created_at < 0:
+        return False
+    steps = solution.get("steps")
+    if not isinstance(steps, list) or len(steps) > 40:
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            return False
+        step_id = step.get("id")
+        text = step.get("text")
+        if not isinstance(step_id, str) or not step_id or len(step_id) > 120:
+            return False
+        if not isinstance(text, str) or len(text) > 2000:
+            return False
+        if step.get("kind") not in {"text", "math", "result", "warning"}:
+            return False
+    try:
+        encoded = json.dumps(solution, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except Exception:
+        return False
+    return len(encoded) <= 128_000
 
 
 def _now_ms() -> int:
@@ -232,7 +277,7 @@ class SchoolStore:
                     lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL,
                     client_operation_id TEXT NOT NULL,
-                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
                     payload_json TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL,
                     UNIQUE(lesson_id, sequence),
@@ -272,9 +317,9 @@ class SchoolStore:
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'board_operations'"
         ).fetchone()
         ddl = row["sql"] if row and isinstance(row["sql"], str) else ""
-        connection.execute("SAVEPOINT board_operations_v4")
+        connection.execute("SAVEPOINT board_operations_v5")
         try:
-            if "stroke_delete" not in ddl:
+            if "solution_add" not in ddl:
                 legacy = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
                 ).fetchone()
@@ -288,7 +333,7 @@ class SchoolStore:
                         lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                         sequence INTEGER NOT NULL,
                         client_operation_id TEXT NOT NULL,
-                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'undo', 'redo', 'clear')),
+                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
                         payload_json TEXT NOT NULL,
                         occurred_at INTEGER NOT NULL,
                         UNIQUE(lesson_id, sequence),
@@ -319,10 +364,10 @@ class SchoolStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (BOARD_SCHEMA_VERSION,),
             )
-            connection.execute("RELEASE SAVEPOINT board_operations_v4")
+            connection.execute("RELEASE SAVEPOINT board_operations_v5")
         except Exception:
-            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v4")
-            connection.execute("RELEASE SAVEPOINT board_operations_v4")
+            connection.execute("ROLLBACK TO SAVEPOINT board_operations_v5")
+            connection.execute("RELEASE SAVEPOINT board_operations_v5")
             raise
 
     @staticmethod
@@ -626,6 +671,19 @@ class SchoolStore:
                     if before["id"] != after["id"]:
                         raise ValueError("graph_update ids must match")
                     payload = {"before": before, "after": after}
+                elif op_type in {"solution_add", "solution_delete"}:
+                    solution = operation.get("solution")
+                    if not _is_valid_solution(solution):
+                        raise ValueError(f"{op_type} operation requires valid solution")
+                    payload = {"solution": solution}
+                elif op_type == "solution_update":
+                    before = operation.get("before")
+                    after = operation.get("after")
+                    if not _is_valid_solution(before) or not _is_valid_solution(after):
+                        raise ValueError("solution_update operation requires valid before and after")
+                    if before["id"] != after["id"]:
+                        raise ValueError("solution_update ids must match")
+                    payload = {"before": before, "after": after}
 
                 payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
                 if len(payload_json.encode("utf-8")) > MAX_BOARD_OPERATION_JSON_BYTES:
@@ -674,6 +732,11 @@ class SchoolStore:
             elif row["op_type"] in {"graph_add", "graph_delete"}:
                 item["graph"] = payload.get("graph")
             elif row["op_type"] == "graph_update":
+                item["before"] = payload.get("before")
+                item["after"] = payload.get("after")
+            elif row["op_type"] in {"solution_add", "solution_delete"}:
+                item["solution"] = payload.get("solution")
+            elif row["op_type"] == "solution_update":
                 item["before"] = payload.get("before")
                 item["after"] = payload.get("after")
             result.append(item)

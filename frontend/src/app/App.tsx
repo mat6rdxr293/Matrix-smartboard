@@ -12,7 +12,7 @@ import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
-import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
+import { createBoardHistory, replayBoardOperations, type AiSolutionBlock, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
 import {
   buildDefaultSlidesForSubject,
@@ -182,6 +182,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [lastLocalBackupAt, setLastLocalBackupAt] = useState<number | null>(null);
   const [siteBackground, setSiteBackground] = useState<SiteBackground>(DEFAULT_SITE_BACKGROUND);
   const continueTokenRef = useRef(0);
+  const activeSolutionTokenRef = useRef<{ id: string; token: number } | null>(null);
   const storageReadyRef = useRef(false);
   const autoSavingRef = useRef(false);
   const latestStorageRef = useRef<{
@@ -307,6 +308,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setBoardHistory((previous) => ({
       ...previous,
       document: { ...previous.document, graphs },
+    }));
+  };
+
+  const syncBoardSolutions = (solutions: BoardHistory["document"]["solutions"]) => {
+    setBoardHistory((previous) => ({
+      ...previous,
+      document: { ...previous.document, solutions },
     }));
   };
 
@@ -795,7 +803,144 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return boardCanvasRef.current.recognize();
   };
 
+  const cancelAiSolution = (solutionId: string) => {
+    const active = activeSolutionTokenRef.current;
+    if (!active || active.id !== solutionId) return;
+    continueTokenRef.current += 1;
+    activeSolutionTokenRef.current = null;
+    const current = boardHistory.document.solutions.find((solution) => solution.id === solutionId);
+    if (current && (current.status === "thinking" || current.status === "streaming")) {
+      onBoardReplayOp({
+        op: "solution_update",
+        before: current,
+        after: { ...current, status: "done" },
+        ts: Date.now(),
+      });
+    }
+    setAssistantLoading(false);
+  };
+
+  const handleBoardSolution = async (recognizedText: string) => {
+    const boardText = recognizedText.trim();
+    if (!boardText || assistantLoading) return;
+
+    setAssistantLoading(true);
+    setAiBoardContext(boardText);
+    setTimerRunning(false);
+    appendStudentAttempt(boardText);
+
+    const token = ++continueTokenRef.current;
+    const placement = boardCanvasRef.current?.allocateSolutionPlacement(500, 320) ?? {
+      x: 48,
+      y: 48,
+      width: 500,
+      minHeight: 320,
+    };
+    const solutionId = crypto.randomUUID();
+    let currentBlock: AiSolutionBlock = {
+      id: solutionId,
+      ...placement,
+      steps: [],
+      status: "thinking",
+      source: "ai",
+      createdAt: Date.now(),
+    };
+    activeSolutionTokenRef.current = { id: solutionId, token };
+    onBoardReplayOp({ op: "solution_add", solution: currentBlock, ts: Date.now() });
+
+    const messageId = `${Date.now()}-${Math.random()}`;
+    addMessage({
+      id: messageId,
+      role: "assistant",
+      text: tl("thinking"),
+      mode: "solution",
+      timestamp: nowLabel(),
+    });
+
+    const isCancelled = () =>
+      continueTokenRef.current !== token ||
+      activeSolutionTokenRef.current?.id !== solutionId;
+
+    const updateBlock = (next: AiSolutionBlock) => {
+      onBoardReplayOp({
+        op: "solution_update",
+        before: currentBlock,
+        after: next,
+        ts: Date.now(),
+      });
+      currentBlock = next;
+    };
+
+    try {
+      const res = await callAi(
+        "solution",
+        boardText,
+        undefined,
+        undefined,
+        false,
+        subjectName,
+        lesson.id,
+        crypto.randomUUID(),
+        true,
+        true,
+      );
+      if (isCancelled()) return;
+
+      const rawSteps = res.steps?.length
+        ? res.steps
+        : res.text.trim()
+          ? [{ text: res.text.trim(), kind: "text" as const }]
+          : [];
+
+      updateBlock({ ...currentBlock, status: "streaming" });
+      const shown: AiSolutionBlock["steps"] = [];
+      for (let index = 0; index < rawSteps.length; index += 1) {
+        if (isCancelled()) return;
+        const step = rawSteps[index];
+        shown.push({
+          id: `${solutionId}-step-${index + 1}`,
+          text: step.text,
+          kind: step.kind,
+        });
+        const done = index === rawSteps.length - 1;
+        updateBlock({
+          ...currentBlock,
+          steps: [...shown],
+          status: done ? "done" : "streaming",
+        });
+        updateMessage(
+          messageId,
+          shown.map((item, stepIndex) => `${stepIndex + 1}. ${item.text}`).join("\n"),
+        );
+        if (!done && !ultraLite) {
+          await new Promise((resolve) => window.setTimeout(resolve, 140));
+        }
+      }
+
+      if (!rawSteps.length) {
+        updateBlock({ ...currentBlock, status: "done" });
+        updateMessage(messageId, res.text || tl("unknown_error"));
+      } else if (res.text.trim()) {
+        updateMessage(messageId, res.text);
+      }
+    } catch (err) {
+      if (isCancelled()) return;
+      const message = err instanceof Error ? err.message : tl("unknown_error");
+      updateBlock({ ...currentBlock, status: "error" });
+      updateMessage(messageId, `${tl("error")}: ${message}`);
+    } finally {
+      if (activeSolutionTokenRef.current?.id === solutionId) {
+        activeSolutionTokenRef.current = null;
+      }
+      if (continueTokenRef.current === token) setAssistantLoading(false);
+    }
+  };
+
   const handleRecognizedAi = (mode: AiMode, recognizedText: string) => {
+    if (mode === "solution") {
+      void handleBoardSolution(recognizedText);
+      return;
+    }
     void (async () => {
       const boardText = recognizedText.trim();
       if (!boardText || assistantLoading) return;
@@ -1285,6 +1430,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       onChangeStrokes={syncBoardStrokes}
                       initialGraphs={boardHistory.document.graphs}
                       onChangeGraphs={syncBoardGraphs}
+                      initialSolutions={boardHistory.document.solutions}
+                      onChangeSolutions={syncBoardSolutions}
+                      onCancelAiSolution={cancelAiSolution}
                       canUndo={boardHistory.undoStack.length > 0}
                       canRedo={boardHistory.redoStack.length > 0}
                       initialPenColor={boardPenColor}
@@ -1412,6 +1560,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         onChangeStrokes={syncBoardStrokes}
                         initialGraphs={boardHistory.document.graphs}
                         onChangeGraphs={syncBoardGraphs}
+                        initialSolutions={boardHistory.document.solutions}
+                        onChangeSolutions={syncBoardSolutions}
+                        onCancelAiSolution={cancelAiSolution}
                         canUndo={boardHistory.undoStack.length > 0}
                         canRedo={boardHistory.redoStack.length > 0}
                         initialPenColor={boardPenColor}

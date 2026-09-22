@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "clsx": "2.1.1",
     "framer-motion": "11.0.28",
+    "html2canvas": "^1.4.1",
     "katex": "0.16.11",
     "lucide-react": "0.471.0",
     "react": "18.3.1",
@@ -20,6 +22,7 @@
     "tailwind-merge": "2.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@types/react": "18.3.3",
