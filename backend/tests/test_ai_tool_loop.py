@@ -823,3 +823,266 @@ def test_marked_answer_verdict_physics_unit_conversion_wrong():
     )
     assert verdict and verdict["correct"] is False
     assert verdict["expected"] == "20 m/s"
+
+
+def test_marked_answer_verdict_system_equations():
+    trace = [{
+        "tool": "math_solve_system",
+        "arguments": {"equations": ["x+y=7", "x-y=1"], "variables": ["x", "y"]},
+        "payload": {
+            "ok": True,
+            "tool": "math_solve_system",
+            "category": "math",
+            "result": {
+                "variables": ["x", "y"],
+                "solutions": [{
+                    "x": {"text": "4", "latex": "4"},
+                    "y": {"text": "3", "latex": "3"},
+                }],
+            },
+        },
+    }]
+    correct = ai_module._marked_answer_verdict(
+        "Решить систему x+y=7, x-y=1; Ответ: y=3, x=4",
+        "алгебра",
+        trace,
+    )
+    wrong = ai_module._marked_answer_verdict(
+        "Решить систему x+y=7, x-y=1; Ответ: x=5, y=2",
+        "алгебра",
+        trace,
+    )
+    assert correct and correct["correct"] is True
+    assert wrong and wrong["correct"] is False
+
+
+def test_marked_answer_verdict_inequality_equivalent_orientation():
+    trace = [{
+        "tool": "math_solve_inequalities",
+        "arguments": {"inequalities": ["2*x-3>5"], "variable": "x"},
+        "payload": {
+            "ok": True,
+            "tool": "math_solve_inequalities",
+            "category": "math",
+            "result": {
+                "variable": "x",
+                "result": {"text": "(4 < x) & (x < oo)", "latex": "4 < x"},
+            },
+        },
+    }]
+    verdict = ai_module._marked_answer_verdict(
+        "Решить неравенство 2x-3>5; Ответ: x>4",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is True
+
+
+def test_marked_answer_verdict_percent_and_geometry():
+    percent_trace = [{
+        "tool": "math_percent",
+        "arguments": {"operation": "percent_of", "value": 240, "percent": 15},
+        "payload": {
+            "ok": True,
+            "tool": "math_percent",
+            "category": "math",
+            "result": {"operation": "percent_of", "value": 240.0, "percent": 15, "result": 36.0},
+        },
+    }]
+    percent = ai_module._marked_answer_verdict(
+        "Найти 15% от 240; Ответ: 36",
+        "математика",
+        percent_trace,
+    )
+    assert percent and percent["correct"] is True
+
+    geometry_trace = [{
+        "tool": "geometry_compute",
+        "arguments": {"kind": "triangle_sides", "values": {"a": 3, "b": 4, "c": 5}},
+        "payload": {
+            "ok": True,
+            "tool": "geometry_compute",
+            "category": "math",
+            "result": {
+                "kind": "triangle_sides",
+                "area": {"text": "6", "latex": "6"},
+                "perimeter": {"text": "12", "latex": "12"},
+            },
+        },
+    }]
+    geometry = ai_module._marked_answer_verdict(
+        "У треугольника стороны 3, 4, 5. Найти площадь; Ответ: 6",
+        "геометрия",
+        geometry_trace,
+    )
+    assert geometry and geometry["correct"] is True
+
+
+def test_board_sanitizer_removes_internal_tool_language():
+    text, steps = ai_module._sanitize_board_language(
+        "Воспользуемся инструментом для вычисления. S=6",
+        [{"text": "S=6. Воспользуемся инструментом для вычисления.", "kind": "result"}],
+        "ru",
+    )
+    assert "инструмент" not in text.lower()
+    assert "инструмент" not in steps[0]["text"].lower()
+
+
+def test_verified_board_result_removes_nested_json_and_hallucinated_tail():
+    steps = [
+        {
+            "text": r'{\"summary\":\"15% от 240\",\"steps\":[]}',
+            "kind": "text",
+        },
+        {"text": "0.15 * 240", "kind": "math"},
+        {"text": "36", "kind": "result"},
+        {"text": "5.4", "kind": "result"},
+    ]
+    reference = {"kind": "numeric", "value": "36", "display": "36"}
+
+    result = ai_module._enforce_verified_board_result(steps, reference)
+
+    assert result == [
+        {"text": "0.15 * 240", "kind": "math"},
+        {"text": "36", "kind": "result"},
+    ]
+
+
+def test_verified_board_result_overrides_wrong_terminal_result():
+    steps = [
+        {"text": "2x > 8", "kind": "math"},
+        {"text": "x > 3", "kind": "result"},
+    ]
+    reference = {"kind": "inequality", "value": "4 < x", "display": "x > 4"}
+
+    result = ai_module._enforce_verified_board_result(steps, reference)
+
+    assert result[-1] == {"text": "x > 4", "kind": "result"}
+    assert all(step["text"] != "x > 3" for step in result)
+
+
+def test_verified_terminal_result_removes_nested_json_and_false_trailing_result():
+    steps = [
+        {
+            "text": r'{\"summary\":\"Найти 15% от 240\",\"steps\":[{\"text\":\"36\",\"kind\":\"result\"}]}',
+            "kind": "text",
+        },
+        {"text": "15% от 240", "kind": "text"},
+        {"text": "36", "kind": "result"},
+        {"text": "5.4", "kind": "result"},
+    ]
+    reference = {"kind": "numeric", "value": "36.0", "display": "36"}
+
+    cleaned = ai_module._enforce_verified_board_result(steps, reference)
+
+    assert cleaned[-1] == {"text": "36", "kind": "result"}
+    assert all("5.4" not in step["text"] for step in cleaned)
+    assert all("summary" not in step["text"] for step in cleaned)
+
+
+def test_marked_answer_verdict_inequality_wrong():
+    trace = _successful_trace(
+        "math_solve_inequalities",
+        {
+            "inequalities": [{"text": "2*x - 3 > 5"}],
+            "variable": "x",
+            "result": {"text": "4 < x", "latex": "4 < x"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Решить неравенство 2x-3>5; Ответ: x>5",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"] in {"x > 4", "4 < x"}
+
+
+def test_marked_answer_verdict_probability_wrong():
+    trace = _successful_trace(
+        "math_probability",
+        {
+            "kind": "classical",
+            "favorable": 3,
+            "total": 8,
+            "result": {"text": "3/8", "latex": "\\frac{3}{8}"},
+            "decimal": 0.375,
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "В урне 3 красных и 5 синих шаров. Найти вероятность красного; Ответ: 1/2",
+        "математика",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"] == "3/8"
+
+
+def test_marked_answer_verdict_trig_correct_exactly():
+    trace = _successful_trace(
+        "math_trig_value",
+        {
+            "function": "sin",
+            "angle": {"text": "30"},
+            "unit": "degrees",
+            "result": {"text": "1/2", "latex": "\\frac{1}{2}"},
+            "decimal": 0.5,
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Найти sin 30 градусов; Ответ: 0.5",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is True
+
+
+def test_marked_answer_verdict_geometry_wrong():
+    trace = _successful_trace(
+        "geometry_compute",
+        {
+            "kind": "triangle_sides",
+            "perimeter": {"text": "12", "latex": "12"},
+            "semiperimeter": {"text": "6", "latex": "6"},
+            "area": {"text": "6", "latex": "6"},
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "У треугольника стороны 3, 4 и 5. Найти площадь; Ответ: 5",
+        "геометрия",
+        trace,
+    )
+    assert verdict and verdict["correct"] is False
+    assert verdict["expected"] == "6"
+
+
+def test_marked_answer_verdict_system_correct():
+    trace = _successful_trace(
+        "math_solve_system",
+        {
+            "equations": [],
+            "variables": ["x", "y"],
+            "solutions": [{
+                "x": {"text": "4", "latex": "4"},
+                "y": {"text": "3", "latex": "3"},
+            }],
+        },
+    )
+    verdict = ai_module._marked_answer_verdict(
+        "Решить систему x+y=7, x-y=1; Ответ: y=3, x=4",
+        "алгебра",
+        trace,
+    )
+    assert verdict and verdict["correct"] is True
+
+
+def test_repeated_problem_step_is_removed_from_board_solution():
+    problem = "У треугольника стороны 3, 4 и 5. Найти площадь."
+    steps = [
+        {"text": "$$S=6$$", "kind": "math"},
+        {"text": problem, "kind": "text"},
+        {"text": "$$S=6$$", "kind": "result"},
+    ]
+    cleaned = ai_module._strip_repeated_problem_steps(steps, problem)
+    assert len(cleaned) == 2
+    assert all(step["text"] != problem for step in cleaned)

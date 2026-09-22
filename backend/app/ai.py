@@ -340,6 +340,30 @@ def _extract_pseudo_tool_calls(text: str, allowed_names: set[str]) -> list[tuple
     return found
 
 
+_TERMINAL_TOOL_NAMES = {
+    "math_solve_system",
+    "math_solve_inequalities",
+    "math_domain",
+    "math_limit",
+    "math_percent",
+    "math_sequence",
+    "math_combinatorics",
+    "math_probability",
+    "math_statistics",
+    "math_number_theory",
+    "math_function_analysis",
+    "math_trig_value",
+    "math_solve_trig",
+    "math_vector",
+    "geometry_compute",
+    "physics_convert_unit",
+    "physics_check_dimensions",
+    "chemistry_molar_mass",
+    "chemistry_balance_equation",
+    "chemistry_element",
+}
+
+
 def _local_chat_with_tools(
     client,
     *,
@@ -347,18 +371,31 @@ def _local_chat_with_tools(
     user: str,
     max_tokens: int,
     subject: Optional[str],
+    task_text: Optional[str] = None,
     postprocess: bool = True,
     require_tool: bool = False,
     tool_trace: Optional[list[dict]] = None,
     finalize_after_tool: bool = False,
+    return_after_tool_names: Optional[set[str]] = None,
+    only_tool_names: Optional[set[str]] = None,
 ) -> str:
-    tools = openai_chat_tools(subject) if settings.ai_tools_enabled else []
+    tools = openai_chat_tools(subject, task_text or user) if settings.ai_tools_enabled else []
+    only_tool_names = set(only_tool_names or ())
+    if only_tool_names:
+        tools = [
+            tool
+            for tool in tools
+            if isinstance(tool, dict)
+            and isinstance(tool.get("function"), dict)
+            and tool["function"].get("name") in only_tool_names
+        ]
     allowed_tool_names = {
         tool["function"]["name"]
         for tool in tools
         if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
     }
     require_tool = bool(require_tool and tools)
+    return_after_tool_names = set(return_after_tool_names or ())
 
     successful_tool_use = False
     unique_tool_calls = 0
@@ -394,44 +431,101 @@ def _local_chat_with_tools(
         ]
         if not verified:
             return ""
+
+        structured_board = (
+            "валидный JSON" in sys
+            and '"steps"' in sys
+        )
+        requires_result_step = (
+            "Последний элемент steps ОБЯЗАТЕЛЬНО должен иметь kind=result" in sys
+        )
+        final_system = (
+            sys
+            + "\nИнструменты уже выполнены backend-ом. "
+            + "Новых инструментов сейчас нет. Используй ТОЛЬКО фактические результаты ниже "
+            + "и сформируй финальный ответ в требуемом формате. "
+            + "Не выдумывай вычисления и не противоречь результатам tools."
+        )
+        if structured_board:
+            final_system += (
+                "\nВерни один JSON-объект без markdown. "
+                "В steps обязательно должны быть короткие логические шаги."
+            )
+            if requires_result_step:
+                final_system += (
+                    " Последний шаг ОБЯЗАТЕЛЬНО должен иметь kind=result "
+                    "и содержать конечный ответ."
+                )
+
         final_messages = [
-            {
-                "role": "system",
-                "content": (
-                    sys
-                    + "\nИнструменты уже выполнены backend-ом. "
-                    + "Новых инструментов сейчас нет. Используй ТОЛЬКО фактические результаты ниже "
-                    + "и сформируй финальный ответ в требуемом формате. "
-                    + "Не выдумывай вычисления и не противоречь результатам tools."
-                ),
-            },
+            {"role": "system", "content": final_system},
             {
                 "role": "user",
                 "content": (
                     user
                     + "\n\nПРОВЕРЕННЫЕ РЕЗУЛЬТАТЫ ИНСТРУМЕНТОВ:\n"
-                    + json.dumps(verified, ensure_ascii=False)
+                    + json.dumps(verified, ensure_ascii=False)[:12000]
                     + "\n\nТеперь дай финальный ответ."
                 ),
             },
         ]
-        for _attempt in range(2):
-            response = client.chat.completions.create(
-                model=settings.ai_model,
-                messages=final_messages,
-                max_tokens=max_tokens,
-            )
+
+        json_mode_supported = True
+        for attempt in range(3):
+            request = {
+                "model": settings.ai_model,
+                "messages": final_messages,
+                "max_tokens": max_tokens,
+                "temperature": 0,
+            }
+            if structured_board and json_mode_supported:
+                request["response_format"] = {"type": "json_object"}
+            try:
+                response = client.chat.completions.create(**request)
+            except Exception:
+                if structured_board and json_mode_supported:
+                    json_mode_supported = False
+                    request.pop("response_format", None)
+                    response = client.chat.completions.create(**request)
+                else:
+                    raise
+
             message = response.choices[0].message
             content = getattr(message, "content", None)
             text = content.strip() if content else ""
-            if text:
-                return _postprocess_math(text) if postprocess else text
-            final_messages.append(
-                {
-                    "role": "user",
-                    "content": "Ответ пустой. Верни финальный ответ прямо сейчас, без вызовов инструментов.",
-                }
-            )
+            if not text:
+                final_messages.append(
+                    {
+                        "role": "user",
+                        "content": "Ответ пустой. Верни финальный ответ прямо сейчас.",
+                    }
+                )
+                continue
+
+            if structured_board:
+                _parsed_text, parsed_steps = _parse_board_solution(text)
+                parsed_steps = _normalize_board_result_tail(parsed_steps, "ru")
+                if parsed_steps and (
+                    not requires_result_step
+                    or _board_solution_has_result(parsed_steps)
+                ):
+                    return text
+                correction = (
+                    "JSON не завершён: последний шаг должен быть kind=result "
+                    "и содержать конечный ответ. Верни исправленный полный JSON."
+                    if requires_result_step
+                    else "JSON не содержит корректных steps. Верни исправленный полный JSON."
+                )
+                final_messages.append(
+                    {
+                        "role": "user",
+                        "content": correction,
+                    }
+                )
+                continue
+
+            return _postprocess_math(text) if postprocess else text
+
         return ""
 
     def run_tool(name: str, arguments: dict) -> tuple[dict, bool]:
@@ -522,6 +616,8 @@ def _local_chat_with_tools(
 
             saw_new_call = False
             saw_duplicate = False
+            saw_terminal_success = False
+            saw_requested_return = False
 
             for call in tool_calls:
                 function = getattr(call, "function", None)
@@ -534,6 +630,10 @@ def _local_chat_with_tools(
                     payload, is_new = run_tool(name, arguments)
                     saw_new_call = saw_new_call or is_new
                     saw_duplicate = saw_duplicate or not is_new
+                    if is_new and payload.get("ok") and name in _TERMINAL_TOOL_NAMES:
+                        saw_terminal_success = True
+                    if is_new and payload.get("ok") and name in return_after_tool_names:
+                        saw_requested_return = True
                 except Exception as exc:  # noqa: BLE001
                     payload = {"ok": False, "tool": name, "error": str(exc)}
 
@@ -545,7 +645,14 @@ def _local_chat_with_tools(
                     }
                 )
 
-            if successful_tool_use and (
+            if saw_requested_return:
+                return ""
+            if successful_tool_use and (finalize_after_tool or saw_terminal_success):
+                finalized = finalize_from_tools()
+                if finalized:
+                    return finalized
+                force_final = True
+            elif successful_tool_use and (
                 unique_tool_calls >= 3
                 or (saw_duplicate and not saw_new_call)
             ):
@@ -571,12 +678,18 @@ def _local_chat_with_tools(
             results = []
             saw_new_call = False
             saw_duplicate = False
+            saw_terminal_success = False
+            saw_requested_return = False
 
             for name, arguments in pseudo_calls:
                 payload, is_new = run_tool(name, arguments)
                 results.append(payload)
                 saw_new_call = saw_new_call or is_new
                 saw_duplicate = saw_duplicate or not is_new
+                if is_new and payload.get("ok") and name in _TERMINAL_TOOL_NAMES:
+                    saw_terminal_success = True
+                if is_new and payload.get("ok") and name in return_after_tool_names:
+                    saw_requested_return = True
 
             messages.append(
                 {
@@ -589,7 +702,14 @@ def _local_chat_with_tools(
                 }
             )
 
-            if successful_tool_use and (
+            if saw_requested_return:
+                return ""
+            if successful_tool_use and (finalize_after_tool or saw_terminal_success):
+                finalized = finalize_from_tools()
+                if finalized:
+                    return finalized
+                force_final = True
+            elif successful_tool_use and (
                 unique_tool_calls >= 3
                 or (saw_duplicate and not saw_new_call)
             ):
@@ -665,6 +785,7 @@ def generate_ai_response(
                 user=user,
                 max_tokens=max_tokens,
                 subject=subject,
+                task_text=problem,
                 require_tool=_requires_tool_use(subject, mode),
             )
 
@@ -792,6 +913,91 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
 _CJK_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+")
 
 
+def _looks_like_nested_board_json(value: str) -> bool:
+    normalized = (value or "").replace("\\", "").strip()
+    if not normalized.startswith(("{", "[")):
+        return False
+    lower = normalized.lower()
+    return '"steps"' in lower or '"summary"' in lower or '"kind"' in lower
+
+
+def _clean_board_step_artifacts(steps: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        dict(step)
+        for step in steps
+        if step.get("text", "").strip()
+        and not _looks_like_nested_board_json(step.get("text", ""))
+    ]
+
+
+def _strip_repeated_problem_steps(
+    steps: list[dict[str, str]],
+    problem: str,
+) -> list[dict[str, str]]:
+    def normalize(value: str) -> str:
+        value = re.sub(r"[$\\()]+", " ", value or "")
+        value = re.sub(r"[^0-9A-Za-zА-Яа-яӘәҒғҚқҢңӨөҰұҮүҺһІіЁё]+", " ", value)
+        return re.sub(r"\s+", " ", value).strip().lower()
+
+    target = normalize(problem)
+    if not target:
+        return [dict(step) for step in steps]
+
+    cleaned: list[dict[str, str]] = []
+    for step in steps:
+        step_text = normalize(step.get("text", ""))
+        if step_text and (
+            step_text == target
+            or (
+                len(step_text) >= 24
+                and len(target) >= 24
+                and (step_text in target or target in step_text)
+            )
+        ):
+            continue
+        cleaned.append(dict(step))
+    return cleaned
+
+
+def _enforce_verified_board_result(
+    steps: list[dict[str, str]],
+    reference: dict | None,
+) -> list[dict[str, str]]:
+    cleaned = _clean_board_step_artifacts(steps)
+    if not reference:
+        return cleaned
+
+    display = str(reference.get("display", "")).strip()
+    if not display:
+        return cleaned
+
+    # Preserve a correctly localized "no real roots" phrase if the model
+    # already expressed the verified result cleanly.
+    if reference.get("kind") == "no_real_roots":
+        for step in reversed(cleaned):
+            if step.get("kind") != "result":
+                continue
+            lower = step.get("text", "").lower()
+            if any(cue in lower for cue in _NO_REAL_ROOT_CUES):
+                return [
+                    *[dict(item) for item in cleaned if item.get("kind") != "result"],
+                    dict(step),
+                ]
+
+    # A terminal solver/tool is authoritative for the final value. Keep AI
+    # reasoning, but never allow a hallucinated trailing result to override it.
+    without_results = [
+        dict(step)
+        for step in cleaned
+        if step.get("kind") != "result"
+    ]
+    if without_results and without_results[-1].get("text", "").strip() == display:
+        without_results[-1]["kind"] = "result"
+        return without_results
+    without_results.append({"text": display, "kind": "result"})
+    return without_results
+
+
 def _sanitize_board_language(
     text: str,
     steps: list[dict[str, str]],
@@ -801,7 +1007,35 @@ def _sanitize_board_language(
         return text, steps
 
     def clean(value: str) -> str:
+        # Local models sometimes emit single-backslash LaTeX inside JSON.
+        # json.loads then interprets valid JSON escapes such as \f in \frac
+        # or \t in \theta. Repair the common math commands before rendering.
+        latex_repairs = {
+            chr(12) + "rac": "\\frac",
+            chr(8) + "eta": "\\beta",
+            chr(8) + "egin": "\\begin",
+            chr(13) + "ight": "\\right",
+            chr(9) + "heta": "\\theta",
+            chr(9) + "an": "\\tan",
+            chr(9) + "imes": "\\times",
+            chr(9) + "ext": "\\text",
+            chr(9) + "au": "\\tau",
+            chr(10) + "eq": "\\neq",
+        }
+        for broken, repaired in latex_repairs.items():
+            value = value.replace(broken, repaired)
         value = _CJK_SCRIPT_RE.sub(" ", value)
+        value = re.sub(
+            r"(?i)\b(?:воспользуемся|используем|воспользуйся)\s+(?:доступным\s+)?инструментом[^.!?]*[.!?]?",
+            " ",
+            value,
+        )
+        value = re.sub(
+            r"(?i)\b(?:с помощью|через)\s+(?:доступного\s+)?инструмента\b",
+            " ",
+            value,
+        )
+        value = re.sub(r"(?i)\b(?:tool|backend|api)\b", " ", value)
         value = re.sub(r"\s+([.,;:!?])", r"\1", value)
         value = re.sub(r"[ \t]{2,}", " ", value)
         return value.strip()
@@ -1065,6 +1299,14 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
     lower = task.lower()
     subject_value = (subject or "").lower()
 
+    if any(cue in lower for cue in ("неравен", "inequal", "теңсіз", "<", ">")):
+        return "inequality"
+    if any(cue in lower for cue in ("систем", "system of equations", "теңдеулер жүй")):
+        return "system"
+    if any(cue in lower for cue in ("област", "domain", "одз", "анықталу облысы")):
+        return "domain"
+    if any(cue in lower for cue in ("предел", "limit", "шек")):
+        return "limit"
     if any(cue in lower for cue in ("производн", "derivative", "туынды")):
         return "derivative"
     if any(cue in lower for cue in ("интеграл", "integral", "интегралын")):
@@ -1075,6 +1317,39 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
         return "simplify"
     if any(cue in lower for cue in ("разлож", "factor", "көбейткіш")):
         return "factor"
+    if any(cue in lower for cue in ("процент", "percent", "%", "пайыз")):
+        return "percent"
+    if any(cue in lower for cue in ("прогресс", "sequence", "последователь", "тізбек")):
+        asks_sum = any(cue in lower for cue in ("сумм", "sum", "қосынды"))
+        asks_nth = bool(
+            re.search(r"\ba\s*[_]?[{]?\d+[}]?", lower)
+            or any(cue in lower for cue in ("n-й", "n-ый", "nth", "n мүш"))
+        )
+        if asks_sum and asks_nth:
+            return "sequence_both"
+        if asks_sum:
+            return "sequence_sum"
+        return "sequence_nth"
+    if any(cue in lower for cue in ("сочетан", "размещен", "перестанов", "factorial", "combination", "permutation", "факториал")):
+        return "combinatorics"
+    if any(cue in lower for cue in ("вероят", "probab", "ықтимал")):
+        return "probability"
+    if any(cue in lower for cue in ("медиан", "median")):
+        return "statistics_median"
+    if any(cue in lower for cue in ("мода", "mode")):
+        return "statistics_mode"
+    if any(cue in lower for cue in ("дисперс", "variance")):
+        return "statistics_variance"
+    if any(cue in lower for cue in ("средн", "mean", "average", "арифметическое среднее")):
+        return "statistics_mean"
+    if any(cue in lower for cue in ("нод", "нок", "gcd", "lcm", "простые множители", "prime factor", "делител", "divisor", "простое число")):
+        return "number_theory"
+    if any(cue in lower for cue in ("исследовать функцию", "исследование функции", "экстрем", "монотон", "возраст", "убыва", "critical point", "extrem", "increasing", "decreasing")):
+        return "function_analysis"
+    if any(cue in lower for cue in ("sin", "cos", "tan", "tg", "ctg", "тригоном", "синус", "косинус", "танген")):
+        return "trig_equation" if "=" in task else "trig_value"
+    if any(cue in lower for cue in ("вектор", "vector", "скаляр")):
+        return "vector"
     if any(cue in lower for cue in ("моляр", "molar mass", "молярлық")):
         return "molar_mass"
     if any(cue in lower for cue in ("уравнен", "теңдеу", "equation")) and any(
@@ -1085,6 +1360,15 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
         "физ" in subject_value or "phys" in subject_value or "/" in lower
     ):
         return "unit_convert"
+    if any(cue in lower for cue in (
+        "геометр", "geometry", "треуг", "triangle", "окруж", "circle",
+        "прямоуголь", "rectangle", "трапец", "polygon", "многоуг",
+        "параллел", "ромб", "сектор", "дуг", "arc",
+        "площад", "area", "периметр", "perimeter", "объём", "объем", "volume",
+        "цилинд", "cylinder", "конус", "cone", "сфер", "sphere", "куб", "призм",
+        "координат", "расстояние между точ", "midpoint", "пирами",
+    )) or any(token in subject_value for token in ("geometry", "геом")):
+        return "geometry"
 
     if "=" in task and re.search(r"[A-Za-z]", task):
         return "equation"
@@ -1096,11 +1380,31 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
 
 _REFERENCE_TOOLS: dict[str, set[str]] = {
     "equation": {"math_solve", "math_quadratic"},
+    "system": {"math_solve_system"},
+    "inequality": {"math_solve_inequalities"},
+    "domain": {"math_domain"},
+    "limit": {"math_limit"},
     "derivative": {"math_differentiate"},
     "integral": {"math_integrate"},
     "expand": {"math_expand"},
     "simplify": {"math_simplify"},
     "factor": {"math_factor"},
+    "percent": {"math_percent"},
+    "sequence_nth": {"math_sequence"},
+    "sequence_sum": {"math_sequence"},
+    "sequence_both": {"math_sequence"},
+    "combinatorics": {"math_combinatorics"},
+    "probability": {"math_probability"},
+    "statistics_mean": {"math_statistics"},
+    "statistics_median": {"math_statistics"},
+    "statistics_mode": {"math_statistics"},
+    "statistics_variance": {"math_statistics"},
+    "number_theory": {"math_number_theory"},
+    "function_analysis": {"math_function_analysis"},
+    "trig_value": {"math_trig_value"},
+    "trig_equation": {"math_solve_trig"},
+    "vector": {"math_vector"},
+    "geometry": {"geometry_compute"},
     "arithmetic": {"math_evaluate"},
     "unit_convert": {"physics_convert_unit"},
     "molar_mass": {"chemistry_molar_mass"},
@@ -1156,13 +1460,39 @@ def _strip_answer_lhs(answer: str) -> str:
 
 def _pretty_reference_value(value: str) -> str:
     text = str(value or "").strip()
+
+    # Preserve exact rational answers from SymPy (1/2, 3/8, ...). Converting
+    # them to decimal here destroys the distinction between an exact school
+    # answer and an approximation.
+    if re.fullmatch(r"[-+]?\d+/\d+", text):
+        return text
+
     numeric = _canonical_numeric_token(text)
-    if numeric is not None and re.fullmatch(r"[-+]?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?", text):
+    if numeric is not None and re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
         return numeric
+
     text = text.replace("**", "^")
     text = re.sub(r"(?<=\d)\*(?=[A-Za-z])", "", text)
     text = text.replace("*", "·")
     return text
+
+
+def _pretty_inequality_text(value: str, variable: str = "x") -> str:
+    text = str(value or "").strip()
+    escaped = re.escape(variable)
+    patterns = [
+        (rf"^\((.+) < {escaped}\) & \({escaped} < oo\)$", lambda m: f"{variable} > {m.group(1)}"),
+        (rf"^\((.+) <= {escaped}\) & \({escaped} < oo\)$", lambda m: f"{variable} >= {m.group(1)}"),
+        (rf"^\(-oo < {escaped}\) & \({escaped} < (.+)\)$", lambda m: f"{variable} < {m.group(1)}"),
+        (rf"^\(-oo < {escaped}\) & \({escaped} <= (.+)\)$", lambda m: f"{variable} <= {m.group(1)}"),
+        (rf"^\((.+) < {escaped}\) & \({escaped} < (.+)\)$", lambda m: f"{m.group(1)} < {variable} < {m.group(2)}"),
+        (rf"^\((.+) <= {escaped}\) & \({escaped} <= (.+)\)$", lambda m: f"{m.group(1)} <= {variable} <= {m.group(2)}"),
+    ]
+    for pattern, render in patterns:
+        match = re.match(pattern, text)
+        if match:
+            return render(match)
+    return _pretty_reference_value(text)
 
 
 def _problem_has_intermediate_work(problem: str) -> bool:
@@ -1170,6 +1500,49 @@ def _problem_has_intermediate_work(problem: str) -> bool:
     if not answer:
         return False
     return "\n" in task or ";" in task
+
+
+def _geometry_reference_key(problem: str, result: dict) -> str | None:
+    lower = (problem or "").lower()
+    preferences = [
+        (("объём", "объем", "volume"), ("volume",)),
+        (("площадь поверхности", "surface area"), ("surface_area",)),
+        (("боков", "lateral"), ("lateral_area",)),
+        (("площад", "area"), ("area", "surface_area")),
+        (("периметр", "perimeter"), ("perimeter",)),
+        (("длина окруж", "circumference"), ("circumference",)),
+        (("дуг", "arc"), ("arc_length",)),
+        (("диагон", "diagonal"), ("space_diagonal", "diagonal")),
+        (("гипотен", "hypotenuse"), ("hypotenuse",)),
+        (("сторон", "side"), ("side", "third_side")),
+        (("расстоя", "distance"), ("distance",)),
+        (("наклон", "slope"), ("slope",)),
+        (("радиус", "radius"), ("radius",)),
+        (("диаметр", "diameter"), ("diameter",)),
+    ]
+    for cues, keys in preferences:
+        if any(cue in lower for cue in cues):
+            for key in keys:
+                if key in result:
+                    return key
+    computed = [
+        key
+        for key, value in result.items()
+        if key != "kind" and isinstance(value, dict) and "text" in value
+    ]
+    return computed[0] if len(computed) == 1 else None
+
+
+def _math_item_reference(item: Any) -> dict | None:
+    if isinstance(item, dict):
+        value = str(item.get("text", "")).strip()
+        if value:
+            return {
+                "kind": "expression",
+                "value": value,
+                "display": _pretty_reference_value(value),
+            }
+    return None
 
 
 def _reference_answer_from_trace(
@@ -1185,6 +1558,7 @@ def _reference_answer_from_trace(
     result = payload.get("result")
     if not isinstance(result, dict):
         return None
+    task_kind = _check_task_kind(problem, subject)
 
     if tool == "math_solve":
         solutions = [
@@ -1216,6 +1590,128 @@ def _reference_answer_from_trace(
             "values": solutions,
             "display": ", ".join(_pretty_reference_value(value) for value in solutions),
         }
+
+    if tool == "math_solve_system":
+        solutions = result.get("solutions") or []
+        if not solutions:
+            return {"kind": "text", "value": "нет решений", "display": "нет решений"}
+        first = solutions[0]
+        if isinstance(first, dict):
+            pairs = []
+            for variable in result.get("variables", []):
+                item = first.get(variable)
+                if isinstance(item, dict) and str(item.get("text", "")).strip():
+                    pairs.append(f"{variable}={_pretty_reference_value(str(item['text']))}")
+            if pairs:
+                value = ", ".join(pairs)
+                return {"kind": "system_solution", "value": value, "display": value}
+
+    if tool == "math_solve_inequalities":
+        item = result.get("result")
+        if isinstance(item, dict) and str(item.get("text", "")).strip():
+            value = str(item["text"]).strip()
+            return {
+                "kind": "inequality",
+                "value": value,
+                "variable": str(result.get("variable", "x")),
+                "display": _pretty_inequality_text(
+                    value,
+                    str(result.get("variable", "x")),
+                ),
+            }
+
+    if tool == "math_domain":
+        return _math_item_reference(result.get("domain"))
+
+    if tool == "math_limit":
+        return _math_item_reference(result.get("result"))
+
+    if tool == "math_percent":
+        value = result.get("result")
+        if value is not None:
+            return {
+                "kind": "numeric",
+                "value": str(value),
+                "display": _pretty_reference_value(str(value)),
+            }
+
+    if tool == "math_sequence":
+        if task_kind == "sequence_both":
+            nth = result.get("nth")
+            total = result.get("sum_n")
+            if isinstance(nth, dict) and isinstance(total, dict):
+                n = result.get("n")
+                nth_text = _pretty_reference_value(str(nth.get("text", "")))
+                sum_text = _pretty_reference_value(str(total.get("text", "")))
+                display = f"a_{n}={nth_text}, S_{n}={sum_text}"
+                return {"kind": "text", "value": display, "display": display}
+        key = "sum_n" if task_kind == "sequence_sum" else "nth"
+        return _math_item_reference(result.get(key))
+
+    if tool in {"math_combinatorics", "math_probability", "math_trig_value"}:
+        return _math_item_reference(result.get("result"))
+
+    if tool == "math_statistics":
+        key = {
+            "statistics_mean": "mean",
+            "statistics_median": "median",
+            "statistics_variance": "variance_population",
+        }.get(task_kind)
+        if key:
+            return _math_item_reference(result.get(key))
+        if task_kind == "statistics_mode":
+            modes = [
+                str(item.get("text", "")).strip()
+                for item in result.get("modes", [])
+                if isinstance(item, dict) and str(item.get("text", "")).strip()
+            ]
+            if modes:
+                value = ", ".join(modes)
+                return {"kind": "solution_set", "values": modes, "display": value}
+
+    if tool == "math_solve_trig":
+        item = result.get("solution")
+        if isinstance(item, dict) and str(item.get("text", "")).strip():
+            value = str(item["text"]).strip()
+            return {"kind": "text", "value": value, "display": _pretty_reference_value(value)}
+
+    if tool == "math_number_theory":
+        operation = str(result.get("operation", "")).strip()
+        if "result" in result and isinstance(result.get("result"), (int, float)):
+            value = str(result["result"])
+            return {
+                "kind": "numeric",
+                "value": value,
+                "display": _pretty_reference_value(value),
+            }
+        if operation == "prime_factors" and isinstance(result.get("factors"), dict):
+            parts = []
+            for prime, exponent in sorted(result["factors"].items(), key=lambda item: int(item[0])):
+                parts.append(str(prime) if int(exponent) == 1 else f"{prime}^{exponent}")
+            value = " · ".join(parts)
+            return {"kind": "text", "value": value, "display": value}
+        if operation == "divisors" and isinstance(result.get("divisors"), list):
+            value = ", ".join(str(item) for item in result["divisors"])
+            return {"kind": "text", "value": value, "display": value}
+
+    if tool == "math_vector":
+        item = result.get("result")
+        if isinstance(item, dict):
+            return _math_item_reference(item)
+        if isinstance(item, list):
+            values = [
+                _pretty_reference_value(str(part.get("text", "")))
+                for part in item
+                if isinstance(part, dict) and str(part.get("text", "")).strip()
+            ]
+            if values:
+                value = "(" + ", ".join(values) + ")"
+                return {"kind": "text", "value": value, "display": value}
+
+    if tool == "geometry_compute":
+        key = _geometry_reference_key(problem, result)
+        if key:
+            return _math_item_reference(result.get(key))
 
     if tool in {
         "math_evaluate",
@@ -1311,6 +1807,49 @@ def _marked_answer_verdict(
         actual_tokens = _numeric_tokens(actual_rhs)
         if expected_tokens and actual_tokens:
             correct = actual_tokens == expected_tokens
+    elif kind == "system_solution":
+        expected_pairs = {
+            name: value
+            for name, value in re.findall(
+                r"([A-Za-z][A-Za-z0-9]*)\s*=\s*([^,;\s]+)",
+                str(reference["value"]),
+            )
+        }
+        actual_pairs = {
+            name: value
+            for name, value in re.findall(
+                r"([A-Za-z][A-Za-z0-9]*)\s*=\s*([^,;\s]+)",
+                actual,
+            )
+        }
+        if expected_pairs and set(expected_pairs) == set(actual_pairs):
+            checks = []
+            for name, expected_value in expected_pairs.items():
+                try:
+                    comparison = execute_tool(
+                        "math_equivalent",
+                        {
+                            "expression_a": expected_value,
+                            "expression_b": actual_pairs[name],
+                        },
+                    )
+                    checks.append(bool((comparison.get("result") or {}).get("equivalent")))
+                except Exception:
+                    checks.append(False)
+            correct = all(checks)
+    elif kind == "inequality":
+        try:
+            comparison = execute_tool(
+                "math_solve_inequalities",
+                {
+                    "inequalities": [actual_rhs],
+                    "variable": reference.get("variable", "x"),
+                },
+            )
+            compared_result = ((comparison.get("result") or {}).get("result") or {}).get("text")
+            correct = str(compared_result).strip() == str(reference["value"]).strip()
+        except Exception:
+            correct = False
     elif kind == "expression":
         expected = str(reference["value"]).strip()
         candidate = actual_rhs
@@ -1471,6 +2010,8 @@ def generate_board_response(
         response_locale,
     )
     language_rule = _response_language_rule(response_locale)
+    simple_marked_check = False
+    reference_tool_names: set[str] = set()
     score_label = {
         "ru": "Выполнено",
         "kk": "Орындалды",
@@ -1493,6 +2034,13 @@ def generate_board_response(
     else:
         task_kind = _check_task_kind(problem, subject)
         reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
+        reference_tool_names = set(reference_tools)
+        _task_text, marked_answer = _split_problem_and_marked_answer(problem)
+        simple_marked_check = bool(
+            marked_answer
+            and not _problem_has_intermediate_work(problem)
+            and reference_tool_names
+        )
         reference_tool_rule = (
             " Для этого типа задания эталон должен быть получен через один из инструментов: "
             + ", ".join(reference_tools)
@@ -1536,10 +2084,36 @@ def generate_board_response(
         user=user,
         max_tokens=min(max_tokens, 900 if mode == "hint" else 1200),
         subject=subject,
+        task_text=problem,
         postprocess=False,
         require_tool=_requires_tool_use(subject, mode),
         tool_trace=tool_trace,
+        return_after_tool_names=reference_tool_names if simple_marked_check else None,
+        only_tool_names=reference_tool_names if simple_marked_check else None,
     )
+
+    if simple_marked_check and _check_trace_covers_task(problem, subject, tool_trace):
+        fast_verdict = _marked_answer_verdict(problem, subject, tool_trace)
+        if fast_verdict is not None:
+            if fast_verdict["correct"]:
+                messages = {
+                    "ru": "Ответ верный.",
+                    "kk": "Жауап дұрыс.",
+                    "en": "The answer is correct.",
+                }
+                result_text = messages.get(response_locale, messages["ru"])
+                return result_text, [{"text": result_text, "kind": "result"}]
+            messages = {
+                "ru": "Ответ неверный: у тебя {actual}, должно быть {expected}.",
+                "kk": "Жауап қате: сенде {actual}, дұрысы {expected}.",
+                "en": "The answer is incorrect: you wrote {actual}, but it should be {expected}.",
+            }
+            result_text = messages.get(response_locale, messages["ru"]).format(
+                actual=fast_verdict["actual"],
+                expected=fast_verdict["expected"],
+            )
+            return result_text, [{"text": result_text, "kind": "warning"}]
+
     text, steps = _parse_board_solution(raw)
     text, steps = _sanitize_board_language(text, steps, response_locale)
     if mode == "check":
@@ -1585,9 +2159,11 @@ def generate_board_response(
             user=retry_user,
             max_tokens=min(max_tokens, 900 if mode == "hint" else 1200),
             subject=subject,
+            task_text=problem,
             postprocess=False,
             require_tool=_requires_tool_use(subject, mode),
             tool_trace=tool_trace,
+            only_tool_names=reference_tool_names if simple_marked_check else None,
         )
         retry_text, retry_steps = _parse_board_solution(retry_raw)
         retry_text, retry_steps = _sanitize_board_language(
@@ -1630,9 +2206,19 @@ def generate_board_response(
         else:
             text, steps = retry_text, retry_steps
 
-    if mode == "check" and any(
-        isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
-        for entry in tool_trace
+    deterministic_answer_verdict = (
+        _marked_answer_verdict(problem, subject, tool_trace)
+        if mode == "check" and not _problem_has_intermediate_work(problem)
+        else None
+    )
+
+    if (
+        mode == "check"
+        and deterministic_answer_verdict is None
+        and any(
+            isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+            for entry in tool_trace
+        )
     ):
         verified_text, verified_steps = _verify_board_check_against_tools(
             client,
@@ -1666,7 +2252,11 @@ def generate_board_response(
             text, steps = verified_text, verified_steps
 
     if mode == "check":
-        answer_verdict = _marked_answer_verdict(problem, subject, tool_trace)
+        answer_verdict = (
+            deterministic_answer_verdict
+            if deterministic_answer_verdict is not None
+            else _marked_answer_verdict(problem, subject, tool_trace)
+        )
         if answer_verdict is not None and not answer_verdict["correct"]:
             messages = {
                 "ru": "Ответ неверный: у тебя {actual}, должно быть {expected}.",
@@ -1767,8 +2357,11 @@ def generate_board_solution(
         "Не переписывай условие задачи и не объясняй очевидные действия длинными предложениями. "
         "Обычно используй 3-7 коротких шагов, по возможности одну строку на шаг; предпочитай формулы словам. "
         "В школьной алгебре решай над действительными числами, если комплексные числа явно не требуются условием. "
+        "Для неравенств: знак неравенства меняется ТОЛЬКО при умножении или делении обеих частей на отрицательное число; "
+        "обычный перенос слагаемого или прибавление/вычитание одного и того же числа знак не меняет. "
         "Если дискриминант D < 0, пиши кратко: действительных корней нет; не переходи к комплексным корням. "
         "Не смешивай язык ответа с английскими математическими словами: используй терминологию выбранного языка UI. "
+        "Никогда не упоминай ученику tools, API, backend или то, что вычисления выполнялись инструментом. "
         "Обязательно доведи решение до конечного ответа. "
         "Последний элемент steps ОБЯЗАТЕЛЬНО должен иметь kind=result и содержать конечный ответ, "
         "а не промежуточную формулу. "
@@ -1782,18 +2375,29 @@ def generate_board_solution(
     if base_url:
         client_options["base_url"] = base_url
     client = OpenAI(**client_options)
+    tool_trace: list[dict] = []
     raw = _local_chat_with_tools(
         client,
         sys=sys,
         user=user,
         max_tokens=max_tokens,
         subject=subject,
+        task_text=problem,
         postprocess=False,
         require_tool=_requires_tool_use(subject, "solution"),
+        tool_trace=tool_trace,
     )
     text, steps = _parse_board_solution(raw)
     text, steps = _sanitize_board_language(text, steps, response_locale)
+    steps = _strip_repeated_problem_steps(steps, problem)
     steps = _normalize_board_result_tail(steps, response_locale)
+    verified_reference = _reference_answer_from_trace(problem, subject, tool_trace)
+    steps = _enforce_verified_board_result(steps, verified_reference)
+    if steps:
+        text = "\n".join(
+            f"{index + 1}. {step['text']}"
+            for index, step in enumerate(steps)
+        )
 
     if steps and not _board_solution_has_result(steps):
         continuation_sys = (
@@ -1814,6 +2418,7 @@ def generate_board_solution(
             user=continuation_user,
             max_tokens=max_tokens,
             subject=subject,
+            task_text=problem,
             postprocess=False,
         )
         continuation_text, continuation_steps = _parse_board_solution(raw_continuation)
