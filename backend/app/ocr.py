@@ -44,13 +44,13 @@ _OCR_PROMPTS = (
 )
 
 _MATH_OCR_RE = re.compile(
-    r"(?:\\?int\b|∫|\\?frac\b|\\?sqrt\b|√|\^|"
+    r"(?:\\?int(?=\b|_|\[)|∫|\\?frac\b|\\?sqrt\b|√|\^|"
     r"\\?(?:sin|cos|tan|log|ln)\b|\b(?:sin|cos|tan|log|ln)\b|"
     r"\\?pi\b|π|\bd[xyz]\b|[=<>])",
     re.I,
 )
 
-_INTEGRAL_RE = re.compile(r"(?:\\?int\b|∫)", re.I)
+_INTEGRAL_RE = re.compile(r"(?:\\?int(?=\b|_|\[)|∫)", re.I)
 
 
 def _normalize_ocr_text(text: str | None) -> str:
@@ -149,6 +149,84 @@ def _data_url(image_bytes: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(image_bytes).decode("utf-8")
 
 
+def _ink_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
+    gray = ImageOps.grayscale(image.convert("RGB"))
+    # The board crop is almost white. Ignore faint grid lines and keep handwriting.
+    mask = gray.point(lambda value: 255 if value < 185 else 0)
+    return mask.getbbox()
+
+
+def _crop_png(image: Image.Image, box: tuple[int, int, int, int]) -> bytes:
+    cropped = image.crop(box).convert("RGB")
+    longest = max(cropped.size)
+    if longest and longest < 1800:
+        factor = min(3.0, 1800 / longest)
+        cropped = cropped.resize(
+            (
+                max(1, round(cropped.width * factor)),
+                max(1, round(cropped.height * factor)),
+            ),
+            Image.Resampling.LANCZOS,
+        )
+    output = io.BytesIO()
+    cropped.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _math_zone_crops(image_bytes: bytes) -> list[tuple[str, bytes]]:
+    """Create labeled zooms for spatial math OCR.
+
+    The source passed by the board is already one formula cluster.  For tall
+    notation such as integrals, roots and fractions, a second view of the upper
+    zone, lower zone and baseline substantially reduces role-mixing (e.g. a pi
+    from the integrand being mistaken for an integration limit).
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        bbox = _ink_bbox(image)
+        if not bbox:
+            return []
+
+        left, top, right, bottom = bbox
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        margin_x = max(8, round(width * 0.04))
+        margin_y = max(8, round(height * 0.05))
+        left = max(0, left - margin_x)
+        right = min(image.width, right + margin_x)
+        top = max(0, top - margin_y)
+        bottom = min(image.height, bottom + margin_y)
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+
+        # Limits live close to the integral sign, which is normally in the
+        # left half of the formula. Give them a generous left-side crop.
+        limits_right = min(right, left + round(width * 0.55))
+        upper_bottom = min(bottom, top + round(height * 0.48))
+        lower_top = max(top, top + round(height * 0.48))
+
+        # Baseline/integrand gets almost the full width but trims extreme
+        # superscript/subscript whitespace so characters are larger.
+        main_top = max(top, top + round(height * 0.22))
+        main_bottom = min(bottom, top + round(height * 0.82))
+
+        crops: list[tuple[str, bytes]] = []
+        boxes = [
+            ("Увеличение верхней зоны / верхнего предела", (left, top, limits_right, upper_bottom)),
+            ("Увеличение нижней зоны / нижнего предела", (left, lower_top, limits_right, bottom)),
+            ("Увеличение основной строки / интегранда", (left, main_top, right, main_bottom)),
+        ]
+        for label, box in boxes:
+            x0, y0, x1, y1 = box
+            if x1 - x0 < 12 or y1 - y0 < 12:
+                continue
+            crops.append((label, _crop_png(image, box)))
+        return crops
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OCR math zone crops skipped: %s", exc)
+        return []
+
+
 def _candidate_key(text: str) -> str:
     value = _normalize_ocr_text(text).lower()
     value = value.replace("\\pi", "pi").replace("π", "pi")
@@ -164,20 +242,23 @@ def _request_ocr(
     prompt: str,
     image_bytes: bytes,
     base_url: str | None,
+    extra_images: list[tuple[str, bytes]] | None = None,
 ) -> str:
-    data_url = _data_url(image_bytes)
+    images = [("Полное изображение", image_bytes), *(extra_images or [])]
+
     if base_url:
+        content = [{"type": "text", "text": prompt}]
+        for label, payload in images:
+            content.append({"type": "text", "text": label})
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _data_url(payload)},
+                }
+            )
         response = client.chat.completions.create(
             model=settings.ocr_model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
             max_tokens=1200,
             temperature=0,
         )
@@ -187,22 +268,80 @@ def _request_ocr(
             raise RuntimeError(
                 "OpenAI SDK слишком старый. Обновите пакет openai до версии с Responses API."
             )
+        content = [{"type": "input_text", "text": prompt}]
+        for label, payload in images:
+            content.append({"type": "input_text", "text": label})
+            content.append({"type": "input_image", "image_url": _data_url(payload)})
         response = client.responses.create(
             model=settings.ocr_model,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": data_url},
-                    ],
-                }
-            ],
+            input=[{"role": "user", "content": content}],
             max_output_tokens=1200,
         )
         text = response.output_text
     return _normalize_ocr_text(text)
 
+
+def _integral_spatial_prompt(candidates: list[str]) -> str:
+    rendered = "\\n".join(
+        f"Кандидат {index + 1}: {candidate}"
+        for index, candidate in enumerate(candidates[-3:])
+    )
+    return (
+        "Это пространственная OCR-проверка ОДНОГО рукописного интеграла. "
+        "Полное изображение и увеличенные зоны относятся к ОДНОЙ И ТОЙ ЖЕ формуле. "
+        "Не решай и не упрощай выражение. Не доверяй кандидатам, если они противоречат изображению. "
+        "Определи четыре независимых поля: "
+        "1) lower_limit — только то, что написано у НИЖНЕГО предела интеграла; "
+        "2) upper_limit — только то, что написано у ВЕРХНЕГО предела, включая дроби, корни, pi и знаки; "
+        "3) integrand — ВСЁ выражение основной строки между знаком интеграла и dx/dy, "
+        "не пропуская функции sin/cos/tan, коэффициенты, корни, степени и знаки; "
+        "4) differential — dx, dy или другой реально видимый дифференциал. "
+        "Особенно проверь, не потеряны ли cos/sin перед корнем и числовой коэффициент перед x^n. "
+        "Если верхний предел является дробью, сохрани числитель и знаменатель как (числитель)/(знаменатель). "
+        "Верни СТРОГО один JSON без markdown: "
+        '{"lower_limit":"...","upper_limit":"...","integrand":"...","differential":"dx"}. '
+        "Используй pi для π, sqrt(...) для корней, ^ для степеней. "
+        "Для реально неразборчивого ОДНОГО символа используй ?, но не выбрасывай остальное.\\n\\n"
+        + rendered
+    )
+
+
+def _extract_json_object(text: str) -> dict[str, str] | None:
+    value = (text or "").strip()
+    match = re.search(r"\{.*\}", value, flags=re.S)
+    if not match:
+        return None
+    try:
+        import json
+        parsed = json.loads(match.group(0))
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    result: dict[str, str] = {}
+    for key in ("lower_limit", "upper_limit", "integrand", "differential"):
+        raw = parsed.get(key)
+        if raw is None:
+            continue
+        result[key] = str(raw).strip()
+    return result
+
+
+def _integral_from_spatial_response(text: str) -> str:
+    parsed = _extract_json_object(text)
+    if not parsed:
+        return ""
+    lower = parsed.get("lower_limit", "").strip()
+    upper = parsed.get("upper_limit", "").strip()
+    integrand = parsed.get("integrand", "").strip()
+    differential = parsed.get("differential", "").strip()
+    if not integrand or not re.fullmatch(r"d[A-Za-z]", differential):
+        return ""
+    if not lower:
+        lower = "?"
+    if not upper:
+        upper = "?"
+    return rf"\int_{{{lower}}}^{{{upper}}} ({integrand}) {differential}"
 
 def _reconcile_math_prompt(candidates: list[str]) -> str:
     rendered = "\n".join(
@@ -278,14 +417,28 @@ def ocr_image(png_bytes: bytes) -> str:
 
         if needs_reconcile:
             try:
-                reconciled = _request_ocr(
-                    client,
-                    prompt=_reconcile_math_prompt(candidates),
-                    image_bytes=png_bytes,
-                    base_url=base_url,
-                )
-                if _usable_ocr_text(reconciled):
-                    candidates.append(reconciled)
+                if _INTEGRAL_RE.search(best):
+                    spatial_raw = _request_ocr(
+                        client,
+                        prompt=_integral_spatial_prompt(candidates),
+                        image_bytes=png_bytes,
+                        base_url=base_url,
+                        extra_images=_math_zone_crops(contrast or png_bytes),
+                    )
+                    spatial = _integral_from_spatial_response(spatial_raw)
+                    if _usable_ocr_text(spatial):
+                        candidates.append(spatial)
+                        logger.info("Integral OCR accepted spatially reconstructed result")
+                        return spatial
+                else:
+                    reconciled = _request_ocr(
+                        client,
+                        prompt=_reconcile_math_prompt(candidates),
+                        image_bytes=png_bytes,
+                        base_url=base_url,
+                    )
+                    if _usable_ocr_text(reconciled):
+                        candidates.append(reconciled)
             except Exception as exc:  # noqa: BLE001
                 errors.append(str(exc))
                 logger.warning("OCR math reconciliation failed: %s", exc)

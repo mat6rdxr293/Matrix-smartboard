@@ -36,8 +36,9 @@ def test_local_ocr_uses_chat_completions_with_image(monkeypatch):
     content = captured["request"]["messages"][0]["content"]
     # картинка уходит в формате chat.completions, а не Responses API
     assert content[0]["type"] == "text"
-    assert content[1]["type"] == "image_url"
-    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    image_parts = [item for item in content if item["type"] == "image_url"]
+    assert image_parts
+    assert image_parts[0]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 def test_ocr_without_key_and_without_local_url_is_not_configured(monkeypatch):
@@ -135,7 +136,7 @@ def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(
     responses = [
         r"\[\int_{0}^{4\pi} \cos x \, dx\]",
         r"int_[0]^[4*pi](cos x) dx",
-        r"int_[0]^[4](3x^2 + cos(4*pi)) dx",
+        '{"lower_limit":"0","upper_limit":"4","integrand":"3x^2 + cos(4*pi)","differential":"dx"}',
     ]
 
     class FakeCompletions:
@@ -161,11 +162,12 @@ def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(
 
     result = ocr_module.ocr_image(b"raw")
 
-    assert result == "int_[0]^[4](3x^2 + cos(4*pi)) dx"
+    assert result == r"\int_{0}^{4} (3x^2 + cos(4*pi)) dx"
     assert len(calls) == 3
     final_prompt = calls[-1]["messages"][0]["content"][0]["text"]
-    assert "нижний предел" in final_prompt
-    assert "интегранд" in final_prompt
+    assert "lower_limit" in final_prompt
+    assert "upper_limit" in final_prompt
+    assert "integrand" in final_prompt
 
 
 def test_plain_text_ocr_stays_single_pass(monkeypatch):
@@ -200,3 +202,61 @@ def test_plain_text_ocr_stays_single_pass(monkeypatch):
 
 def test_ocr_normalizer_removes_outer_display_math_wrapper():
     assert ocr_module._normalize_ocr_text(r"\[ x^2 + 1 \]") == "x^2 + 1"
+
+
+def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeypatch):
+    calls = []
+    responses = [
+        r"\int_{-\pi}^{\pi} \sqrt{x+1} - x^2 \, dx",
+        r"int_[-pi]^[pi](sqrt(x+1) - x^2) dx",
+        '{"lower_limit":"-pi","upper_limit":"(4*sqrt(pi))/(11)",'
+        '"integrand":"cos(sqrt(x+1)) - 2*x^2","differential":"dx"}',
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=responses[len(calls) - 1])
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+    monkeypatch.setattr(
+        ocr_module,
+        "_math_zone_crops",
+        lambda _data: [
+            ("upper", b"upper"),
+            ("lower", b"lower"),
+            ("main", b"main"),
+        ],
+    )
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == (
+        r"\int_{-pi}^{(4*sqrt(pi))/(11)} "
+        r"(cos(sqrt(x+1)) - 2*x^2) dx"
+    )
+    assert len(calls) == 3
+
+    final_content = calls[-1]["messages"][0]["content"]
+    image_parts = [item for item in final_content if item["type"] == "image_url"]
+    assert len(image_parts) == 4
+
+    final_prompt = final_content[0]["text"]
+    assert "lower_limit" in final_prompt
+    assert "upper_limit" in final_prompt
+    assert "integrand" in final_prompt
+    assert "коэффициент" in final_prompt
