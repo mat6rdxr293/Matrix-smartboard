@@ -356,7 +356,13 @@ def _local_chat_with_tools(
         if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
     }
     require_tool = bool(require_tool and tools)
+
     successful_tool_use = False
+    unique_tool_calls = 0
+    failed_tool_calls = 0
+    tool_cache: dict[str, dict] = {}
+    force_final = False
+    force_final_notice_sent = False
 
     system_text = sys
     if tools:
@@ -376,13 +382,53 @@ def _local_chat_with_tools(
         {"role": "user", "content": user},
     ]
 
-    for round_index in range(7):
+    def run_tool(name: str, arguments: dict) -> tuple[dict, bool]:
+        nonlocal successful_tool_use, unique_tool_calls, failed_tool_calls
+
+        signature = name + ":" + json.dumps(
+            arguments,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        cached = tool_cache.get(signature)
+        if cached is not None:
+            return cached, False
+
+        try:
+            payload = execute_tool(name, arguments)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "tool": name, "error": str(exc)}
+
+        tool_cache[signature] = payload
+        unique_tool_calls += 1
+        if payload.get("ok"):
+            successful_tool_use = True
+        else:
+            failed_tool_calls += 1
+        return payload, True
+
+    for round_index in range(6):
+        if force_final and not force_final_notice_sent:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Инструменты уже дали достаточно проверенных данных. "
+                        "Теперь сформируй финальный ответ, используя результаты выше. "
+                        "Не запрашивай дополнительные инструменты и не пересчитывай их результаты в уме."
+                    ),
+                }
+            )
+            force_final_notice_sent = True
+
         request = {
             "model": settings.ai_model,
             "messages": messages,
             "max_tokens": max_tokens,
         }
-        if tools:
+
+        if tools and not force_final:
             request["tools"] = tools
             if require_tool and not successful_tool_use:
                 request["tool_choice"] = "required"
@@ -391,7 +437,7 @@ def _local_chat_with_tools(
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []
 
-        if tool_calls:
+        if tool_calls and not force_final:
             serialized_calls = []
             for call in tool_calls:
                 function = getattr(call, "function", None)
@@ -414,6 +460,9 @@ def _local_chat_with_tools(
                 }
             )
 
+            saw_new_call = False
+            saw_duplicate = False
+
             for call in tool_calls:
                 function = getattr(call, "function", None)
                 name = getattr(function, "name", "")
@@ -422,8 +471,9 @@ def _local_chat_with_tools(
                     arguments = json.loads(raw_arguments)
                     if not isinstance(arguments, dict):
                         raise ToolError("Аргументы инструмента должны быть объектом")
-                    payload = execute_tool(name, arguments)
-                    successful_tool_use = successful_tool_use or bool(payload.get("ok"))
+                    payload, is_new = run_tool(name, arguments)
+                    saw_new_call = saw_new_call or is_new
+                    saw_duplicate = saw_duplicate or not is_new
                 except Exception as exc:  # noqa: BLE001
                     payload = {"ok": False, "tool": name, "error": str(exc)}
 
@@ -434,24 +484,40 @@ def _local_chat_with_tools(
                         "content": json.dumps(payload, ensure_ascii=False),
                     }
                 )
+
+            if successful_tool_use and (
+                unique_tool_calls >= 3
+                or (saw_duplicate and not saw_new_call)
+            ):
+                force_final = True
+            elif not successful_tool_use and failed_tool_calls >= 2:
+                raise RuntimeError(
+                    "AI не смог выполнить вычислительные инструменты после нескольких попыток"
+                )
             continue
 
         content = getattr(message, "content", None)
         text = content.strip() if content else ""
 
         # Some local models print a tool request as JSON in normal assistant text.
-        # Recover that intent instead of letting the pseudo-call leak onto the board.
-        pseudo_calls = _extract_pseudo_tool_calls(text, allowed_tool_names)
+        # Recover that intent instead of leaking pseudo-tool JSON to the UI.
+        pseudo_calls = (
+            _extract_pseudo_tool_calls(text, allowed_tool_names)
+            if not force_final
+            else []
+        )
         if pseudo_calls:
             messages.append({"role": "assistant", "content": text})
             results = []
+            saw_new_call = False
+            saw_duplicate = False
+
             for name, arguments in pseudo_calls:
-                try:
-                    payload = execute_tool(name, arguments)
-                    successful_tool_use = successful_tool_use or bool(payload.get("ok"))
-                except Exception as exc:  # noqa: BLE001
-                    payload = {"ok": False, "tool": name, "error": str(exc)}
+                payload, is_new = run_tool(name, arguments)
                 results.append(payload)
+                saw_new_call = saw_new_call or is_new
+                saw_duplicate = saw_duplicate or not is_new
+
             messages.append(
                 {
                     "role": "user",
@@ -462,6 +528,16 @@ def _local_chat_with_tools(
                     ),
                 }
             )
+
+            if successful_tool_use and (
+                unique_tool_calls >= 3
+                or (saw_duplicate and not saw_new_call)
+            ):
+                force_final = True
+            elif not successful_tool_use and failed_tool_calls >= 2:
+                raise RuntimeError(
+                    "AI не смог выполнить вычислительные инструменты после нескольких попыток"
+                )
             continue
 
         if require_tool and not successful_tool_use:
@@ -479,7 +555,30 @@ def _local_chat_with_tools(
 
         return _postprocess_math(text) if postprocess else text
 
-    raise RuntimeError("AI tool loop exceeded 7 rounds without a valid final answer")
+    if successful_tool_use:
+        # Last-resort finalization: no tools are exposed in this request, so the
+        # model cannot loop back into another function call.
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Сформируй финальный ответ прямо сейчас по уже полученным результатам инструментов. "
+                    "Никаких новых вычислений и вызовов инструментов."
+                ),
+            }
+        )
+        response = client.chat.completions.create(
+            model=settings.ai_model,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+        message = response.choices[0].message
+        content = getattr(message, "content", None)
+        text = content.strip() if content else ""
+        if text:
+            return _postprocess_math(text) if postprocess else text
+
+    raise RuntimeError("AI не смог завершить ответ после вызова инструментов")
 
 
 
