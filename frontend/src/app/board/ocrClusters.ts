@@ -77,7 +77,10 @@ export function clusterOcrStrokes(
     .map((entry) => entry.bounds.bottom - entry.bounds.top)
     .filter((height) => height >= 4 && height <= 240);
   const typicalHeight = clamp(median(heights), 28, 100);
-  const horizontalGap = clamp(typicalHeight * 0.72, 24, 72);
+  // Handwritten math often contains intentionally wider gaps around operators,
+  // integral terms and function arguments. 0.72× split a single real integral
+  // into two OCR blocks when the gap was only ~0.83× the median stroke height.
+  const horizontalGap = clamp(typicalHeight * 0.95, 30, 84);
   const verticalGap = clamp(typicalHeight * 0.62, 20, 62);
   const stackedGap = clamp(typicalHeight * 1.05, 36, 104);
 

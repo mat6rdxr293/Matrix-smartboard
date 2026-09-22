@@ -60,3 +60,22 @@ describe("clusterOcrStrokes", () => {
     expect(clusters[0].indices).toEqual([0, 1]);
   });
 });
+
+
+it("keeps one handwritten formula together across a moderate operator gap", () => {
+  const strokes = [
+    stroke(0, 0, 20, 90),
+    stroke(30, 30, 80, 70),
+    stroke(85, 25, 135, 65),
+    stroke(140, 10, 160, 30),
+    // About 38 px gap: should still be the same handwritten formula.
+    stroke(198, 30, 235, 70),
+    stroke(240, 30, 275, 70),
+    stroke(280, 30, 320, 70),
+  ];
+
+  const clusters = clusterOcrStrokes(strokes);
+
+  expect(clusters).toHaveLength(1);
+  expect(clusters[0].indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+});
