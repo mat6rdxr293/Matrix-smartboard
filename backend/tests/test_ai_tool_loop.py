@@ -411,3 +411,264 @@ def test_local_ai_recovers_pseudo_tool_call_printed_as_text(monkeypatch):
     assert requests[1]["messages"][-1]["role"] == "user"
     assert "math_evaluate" in requests[1]["messages"][-1]["content"]
     assert "-84" in requests[1]["messages"][-1]["content"]
+
+
+def test_board_hint_returns_compact_structured_steps_without_full_answer(monkeypatch):
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        captured.update(kwargs)
+        return (
+            '{"summary":"Подсказка","steps":['
+            '{"text":"Сначала найди дискриминант.","kind":"text"},'
+            '{"text":"$$D=b^2-4ac$$","kind":"math"}'
+            ']}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps = ai_module.generate_board_response(
+        "hint",
+        "x^2 + 4x + 5 = 0",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 2
+    assert steps[0]["text"] == "Сначала найди дискриминант."
+    assert "$$D=b^2-4ac$$" in text
+    assert captured["require_tool"] is False
+    assert "Не раскрывай конечный ответ" in captured["sys"]
+
+
+def test_board_check_requires_tools_and_returns_warning_with_score(monkeypatch):
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        captured.update(kwargs)
+        return (
+            '{"summary":"Выполнено: 60%","steps":['
+            '{"text":"Ошибка: неверно вычислен дискриминант.","kind":"warning"},'
+            '{"text":"$$D=16-20=-4$$","kind":"math"}'
+            ']}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        "x^2 + 4x + 5 = 0; D=16-5=11",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert steps[0]["kind"] == "warning"
+    assert "Выполнено: 60%" in text
+    assert captured["require_tool"] is True
+    assert "kind=warning" in captured["sys"]
+
+
+def test_loose_board_parser_preserves_warning_and_math_kinds():
+    raw = (
+        '{"summary":"Выполнено: 60%","steps":['
+        '{"text":"Ошибка: неверный дискриминант.","kind":"warning"},'
+        '{"text":"\\(D=-4\\)","kind":"math"}'
+        ']}'
+    )
+    _text, steps = ai_module._parse_board_solution(raw)
+
+    assert steps == [
+        {"text": "Ошибка: неверный дискриминант.", "kind": "warning"},
+        {"text": "\\(D=-4\\)", "kind": "math"},
+    ]
+
+
+def test_compact_board_check_keeps_first_warning_and_one_correction():
+    steps = [
+        {"text": "Сначала проверим через инструмент.", "kind": "text"},
+        {"text": "Ошибка: неверно вычислен D.", "kind": "warning"},
+        {"text": "$$D=16-20=-4$$", "kind": "math"},
+        {"text": "Действительных корней нет.", "kind": "result"},
+    ]
+
+    assert ai_module._compact_board_check_steps(steps) == [
+        {"text": "Ошибка: неверно вычислен D.", "kind": "warning"},
+        {"text": "$$D=16-20=-4$$", "kind": "math"},
+    ]
+
+
+def test_compact_board_check_stops_when_warning_already_contains_correction():
+    steps = [
+        {
+            "text": "Ошибка: D=11, должно быть D=16-20=-4.",
+            "kind": "warning",
+        },
+        {"text": "$$D=11$$", "kind": "math"},
+    ]
+
+    assert ai_module._compact_board_check_steps(steps) == [
+        {
+            "text": "Ошибка: D=11, должно быть D=16-20=-4.",
+            "kind": "warning",
+        }
+    ]
+
+
+def test_check_kind_normalization_marks_error_text_as_warning():
+    steps = [
+        {"text": "Неверно вычислен дискриминант.", "kind": "text"},
+        {"text": "$$D=-4$$", "kind": "math"},
+    ]
+
+    normalized = ai_module._normalize_board_check_kinds(steps)
+
+    assert normalized[0]["kind"] == "warning"
+    assert normalized[1]["kind"] == "math"
+
+
+def test_hint_quality_gate_rejects_internal_tool_names():
+    steps = [{"text": "Используй math_quadratic.", "kind": "math"}]
+    assert ai_module._board_hint_needs_retry(steps, "ru") is True
+
+
+def test_board_check_drops_impossible_perfect_score_when_warning_exists(monkeypatch):
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        return (
+            '{"summary":"Выполнено: 100%","steps":['
+            '{"text":"Ошибка: D=11, должно быть D=-4.","kind":"warning"}'
+            ']}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        "x^2+4x+5=0; D=11",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert "100%" not in text
+    assert steps == [
+        {"text": "Ошибка: D=11, должно быть D=-4.", "kind": "warning"}
+    ]
+
+
+def test_board_check_detects_result_conflicting_with_tool_trace():
+    trace = [
+        {
+            "tool": "math_quadratic",
+            "arguments": {"equation": "x^2+4*x+5=0", "variable": "x"},
+            "payload": {
+                "ok": True,
+                "tool": "math_quadratic",
+                "result": {
+                    "a": {"text": "1"},
+                    "b": {"text": "4"},
+                    "c": {"text": "5"},
+                    "discriminant": {"text": "-4"},
+                    "discriminant_sign": -1,
+                    "real_roots": [],
+                },
+            },
+        }
+    ]
+
+    assert ai_module._board_check_conflicts_with_tools(
+        [{"text": "Дискриминант равен 11.", "kind": "result"}],
+        trace,
+    ) is True
+    assert ai_module._board_check_conflicts_with_tools(
+        [{"text": "Ошибка: D=11, должно быть D=-4.", "kind": "warning"}],
+        trace,
+    ) is False
+
+
+def test_board_check_verifies_wrong_final_result_against_tool_trace(monkeypatch):
+    trace_payload = {
+        "ok": True,
+        "tool": "math_quadratic",
+        "category": "math",
+        "result": {
+            "a": {"text": "1", "latex": "1"},
+            "b": {"text": "4", "latex": "4"},
+            "c": {"text": "5", "latex": "5"},
+            "discriminant": {"text": "-4", "latex": "-4"},
+            "discriminant_sign": -1,
+            "real_roots": [],
+            "has_real_roots": False,
+        },
+    }
+
+    def fake_local_chat(client, **kwargs):
+        kwargs["tool_trace"].append({
+            "tool": "math_quadratic",
+            "arguments": {"equation": "x^2+4*x+5=0", "variable": "x"},
+            "payload": trace_payload,
+        })
+        return (
+            '{"summary":"Выполнено: 60%","steps":['
+            '{"text":"Дискриминант равен 11.","kind":"result"}'
+            ']}'
+        )
+
+    verifier_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=(
+                        '{"summary":"Выполнено: 60%","steps":['
+                        '{"text":"Ошибка: D=11, должно быть D=-4.","kind":"warning"}'
+                        ']}'
+                    )
+                )
+            )
+        ]
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return verifier_response
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        "x^2+4x+5=0; D=11",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert "D=-4" in text
+    assert "Дискриминант равен 11" not in text
+    assert steps == [
+        {"text": "Ошибка: D=11, должно быть D=-4.", "kind": "warning"}
+    ]

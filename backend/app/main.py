@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .ai import generate_ai_response, generate_board_solution
+from .ai import generate_ai_response, generate_board_response
 from .ocr import ocr_image
 from .polynomial import candidates, divide, eval_poly, horner, horner_table, normalize
 from .ratelimit import RateLimiter
@@ -569,8 +569,9 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
         )
     try:
         steps = None
-        if payload.mode == "solution" and payload.board_output:
-            text, steps = generate_board_solution(
+        if payload.board_output and payload.mode in {"hint", "check", "solution"}:
+            text, steps = generate_board_response(
+                payload.mode,
                 payload.problem,
                 subject=payload.subject,
                 board_context=payload.board_context,

@@ -206,6 +206,7 @@ export default function AIAssistant({
         <div className="mt-3 border-t border-white/10 pt-3">
           <div className="grid grid-cols-[0.9fr_1.2fr_1fr] gap-2">
             <Button
+              data-testid="ai-hint"
               variant="outline"
               className="h-10 rounded-xl border-white/12 bg-transparent px-3 text-[12px] font-medium"
               onClick={() => void recognize("hint")}
@@ -214,6 +215,7 @@ export default function AIAssistant({
               {tl("hint")}
             </Button>
             <Button
+              data-testid="ai-check"
               className="h-10 rounded-xl px-3 text-[12px] font-semibold"
               onClick={() => void recognize("check")}
               disabled={loading || recognizing || !ocrEnabled}

@@ -12,6 +12,7 @@ import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
+import { pickAiInkColor } from "@/app/board/aiInkColor";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
@@ -822,26 +823,26 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setAssistantLoading(false);
   };
 
-  const handleBoardSolution = async (recognizedText: string) => {
+  const handleBoardAi = async (mode: AiMode, recognizedText: string) => {
     const boardText = recognizedText.trim();
     if (!boardText || assistantLoading) return;
 
     setAssistantLoading(true);
     setAiBoardContext(boardText);
-    setTimerRunning(false);
+    if (mode !== "hint") setTimerRunning(false);
     setAssistantOpen(false);
 
     const token = ++solutionRunRef.current;
-    const solutionId = crypto.randomUUID();
-    activeSolutionTokenRef.current = { id: solutionId, token };
+    const runId = crypto.randomUUID();
+    activeSolutionTokenRef.current = { id: runId, token };
 
     const isCancelled = () =>
       solutionRunRef.current !== token ||
-      activeSolutionTokenRef.current?.id !== solutionId;
+      activeSolutionTokenRef.current?.id !== runId;
 
     try {
       const res = await callAi(
-        "solution",
+        mode,
         boardText,
         undefined,
         undefined,
@@ -860,23 +861,85 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         throw new Error("AI вернул поврежденный structured response");
       }
 
-      const draft = solutionStepsToHandwritingStrokes(rawSteps, {
+      const percent = mode === "check" ? extractCheckPercent(res.text) : null;
+      const hasWarning = rawSteps.some((step) => step.kind === "warning");
+      const checkCorrect =
+        mode === "check"
+          ? !hasWarning && (percent === null || percent >= 95)
+          : undefined;
+
+      const studentColor =
+        boardCanvasRef.current?.getLastOcrTargetColor() ?? boardPenColor;
+      const aiColor = pickAiInkColor({
+        mode,
+        studentColor,
+        boardBgColor,
+        checkCorrect,
+      });
+
+      const title =
+        mode === "hint"
+          ? locale === "kk"
+            ? "Көмек:"
+            : locale === "en"
+              ? "Hint:"
+              : "Подсказка:"
+          : mode === "check"
+            ? locale === "kk"
+              ? "Тексеру:"
+              : locale === "en"
+                ? "Check:"
+                : "Проверка:"
+            : "";
+
+      const boardSteps = title
+        ? [{ text: title, kind: "text" as const }, ...rawSteps]
+        : rawSteps;
+
+      const width = mode === "hint" ? 430 : mode === "check" ? 500 : 560;
+      const fontSize =
+        mode === "solution"
+          ? ultraLite
+            ? 27
+            : 29
+          : ultraLite
+            ? 23
+            : 25;
+      const strokeWidth = mode === "solution"
+        ? ultraLite
+          ? 2.4
+          : 2.15
+        : ultraLite
+          ? 2.2
+          : 1.95;
+      const lineGap = mode === "solution" ? 11 : 9;
+      const stepGap = mode === "solution" ? 16 : mode === "check" ? 12 : 10;
+
+      const draft = solutionStepsToHandwritingStrokes(boardSteps, {
         x: 12,
         y: 10,
-        maxWidth: 536,
-        color: boardPenColor,
-        strokeWidth: ultraLite ? 2.4 : 2.15,
-        fontSize: ultraLite ? 27 : 29,
-        lineGap: 11,
-        stepGap: 16,
+        maxWidth: width - 24,
+        color: aiColor,
+        strokeWidth,
+        fontSize,
+        lineGap,
+        stepGap,
       });
-      if (!draft.strokes.length) throw new Error("Не удалось построить рукописные штрихи");
+      if (!draft.strokes.length) {
+        throw new Error("Не удалось построить рукописные штрихи");
+      }
 
-      const requiredHeight = Math.max(180, Math.ceil(draft.height + 24));
-      const placement = boardCanvasRef.current?.allocateSolutionPlacement(560, requiredHeight) ?? {
+      const requiredHeight = Math.max(
+        mode === "hint" ? 130 : 160,
+        Math.ceil(draft.height + 24),
+      );
+      const placement = boardCanvasRef.current?.allocateSolutionPlacement(
+        width,
+        requiredHeight,
+      ) ?? {
         x: 48,
         y: 48,
-        width: 560,
+        width,
         minHeight: requiredHeight,
       };
 
@@ -900,19 +963,23 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         strokes: written,
         ts: Date.now(),
       });
+
+      if (mode === "check" && percent !== null) {
+        showScoreOverlay(percent);
+      }
     } catch (err) {
       if (isCancelled()) return;
       const message = err instanceof Error ? err.message : tl("unknown_error");
       addMessage({
-        id: `${Date.now()}-solution-error`,
+        id: `${Date.now()}-${mode}-error`,
         role: "assistant",
         text: `${tl("error")}: ${message}`,
-        mode: "solution",
+        mode,
         timestamp: nowLabel(),
       });
       setAssistantOpen(true);
     } finally {
-      if (activeSolutionTokenRef.current?.id === solutionId) {
+      if (activeSolutionTokenRef.current?.id === runId) {
         activeSolutionTokenRef.current = null;
       }
       if (solutionRunRef.current === token) setAssistantLoading(false);
@@ -920,88 +987,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   };
 
   const handleRecognizedAi = (mode: AiMode, recognizedText: string) => {
-    if (mode === "solution") {
-      void handleBoardSolution(recognizedText);
-      return;
-    }
-    void (async () => {
-      const boardText = recognizedText.trim();
-      if (!boardText || assistantLoading) return;
-      setAssistantLoading(true);
-      setAiBoardContext(boardText);
-      if (mode !== "hint") setTimerRunning(false);
-      appendStudentAttempt(boardText);
-
-      continueTokenRef.current += 1;
-      const token = continueTokenRef.current;
-      const id = `${Date.now()}-${Math.random()}`;
-      addMessage({
-        id,
-        role: "assistant",
-        text: tl("thinking"),
-        mode,
-        timestamp: nowLabel(),
-      });
-
-      try {
-        let fullText = "";
-        const res = await callAi(
-          mode,
-          boardText,
-          undefined,
-          undefined,
-          false,
-          subjectName,
-          lesson.id,
-          crypto.randomUUID(),
-          true,
-          undefined,
-          locale,
-        );
-        fullText = res.text || "";
-        await typeText(
-          fullText,
-          (partial) => updateMessage(id, partial),
-          () => continueTokenRef.current !== token,
-        );
-
-        let guard = 0;
-        while (guard < 2 && shouldContinue(fullText) && continueTokenRef.current === token) {
-          guard += 1;
-          const continuation = await callAi(
-            mode,
-            boardText,
-            undefined,
-            fullText,
-            true,
-            subjectName,
-            lesson.id,
-            crypto.randomUUID(),
-            true,
-            undefined,
-            locale,
-          );
-          const next = continuation.text || "";
-          if (!next.trim()) break;
-          await typeText(
-            next,
-            (partial) => updateMessage(id, `${fullText}\n${partial}`),
-            () => continueTokenRef.current !== token,
-          );
-          fullText = `${fullText}\n${next}`;
-        }
-
-        if (mode === "check") {
-          const percent = extractCheckPercent(fullText);
-          if (percent !== null) showScoreOverlay(percent);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : tl("unknown_error");
-        updateMessage(id, `${tl("error")}: ${message}`);
-      } finally {
-        setAssistantLoading(false);
-      }
-    })();
+    void handleBoardAi(mode, recognizedText);
   };
 
   const handleContinue = async () => {

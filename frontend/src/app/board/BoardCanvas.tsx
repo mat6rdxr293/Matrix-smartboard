@@ -67,6 +67,7 @@ const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
 export type BoardCanvasHandle = {
   recognize: () => Promise<string>;
+  getLastOcrTargetColor: () => string | null;
   allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
   animateAiStrokes: (
     strokes: Stroke[],
@@ -193,6 +194,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
   const lastOcrTargetBoundsRef = useRef<BoardRect | null>(null);
+  const lastOcrTargetColorRef = useRef<string | null>(null);
   const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const lineToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const eraserToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1690,6 +1692,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       ? (clusters[0] ?? null)
       : chooseActiveOcrCluster(clusters);
     lastOcrTargetBoundsRef.current = activeCluster?.bounds ?? null;
+    if (activeCluster) {
+      const colorWeights = new Map<string, number>();
+      for (const stroke of activeCluster.strokes) {
+        let length = 0;
+        for (let index = 1; index < stroke.points.length; index += 1) {
+          const previous = stroke.points[index - 1];
+          const current = stroke.points[index];
+          length += Math.hypot(current.x - previous.x, current.y - previous.y);
+        }
+        colorWeights.set(stroke.color, (colorWeights.get(stroke.color) ?? 0) + Math.max(1, length));
+      }
+      lastOcrTargetColorRef.current =
+        [...colorWeights.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    } else {
+      lastOcrTargetColorRef.current = null;
+    }
 
     if (!activeCluster && graphLines.length > 0) {
       const text = graphLines.join("\n");
@@ -1717,7 +1735,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
   };
 
-  useImperativeHandle(ref, () => ({ recognize: handleOcr, allocateSolutionPlacement, animateAiStrokes }));
+  useImperativeHandle(ref, () => ({
+    recognize: handleOcr,
+    getLastOcrTargetColor: () => lastOcrTargetColorRef.current,
+    allocateSolutionPlacement,
+    animateAiStrokes,
+  }));
 
   const schedulePenHide = () => {
     if (penTimerRef.current) window.clearTimeout(penTimerRef.current);

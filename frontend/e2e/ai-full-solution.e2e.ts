@@ -85,6 +85,11 @@ async function seedLesson(
     withGraph?: boolean;
     captureOps?: CapturedOp[];
     initialStrokes?: TestStroke[];
+    aiMode?: "hint" | "check" | "solution";
+    aiResponse?: {
+      text: string;
+      steps: Array<{ text: string; kind: "text" | "math" | "warning" | "result" }>;
+    };
   },
 ) {
   await page.addInitScript(({ schoolId, roomId, lessonId }) => {
@@ -137,10 +142,10 @@ async function seedLesson(
 
     if (path === "/api/ai" && method === "POST") {
       const payload = request.postDataJSON() as { mode?: string; board_output?: boolean; response_locale?: string };
-      expect(payload.mode).toBe("solution");
+      expect(payload.mode).toBe(options?.aiMode ?? "solution");
       expect(payload.board_output).toBe(true);
       expect(payload.response_locale).toBe("ru");
-      return json(route, {
+      return json(route, options?.aiResponse ?? {
         text: "Решение",
         steps: [
           { text: "$$x^2 - 4 = 0$$", kind: "math" },
@@ -265,4 +270,71 @@ test("with two equations the latest user block is OCR target and solution stays 
     solution.top - secondBounds.bottom,
   );
   expect(Math.hypot(dx, dy)).toBeLessThan(90);
+});
+
+
+async function generateBoardMode(
+  page: Page,
+  operations: CapturedOp[],
+  buttonTestId: "ai-hint" | "ai-check" | "ai-full-solution",
+) {
+  await page.getByTestId("open-ai-assistant").click();
+  await page.getByTestId(buttonTestId).click();
+  await expect(page.getByTestId("ocr-confirm")).toBeVisible();
+  await page.getByTestId("ocr-confirm").click();
+
+  await expect.poll(() =>
+    operations.find((operation) => operation.op === "stroke_batch_add")?.strokes?.length ?? 0,
+    { timeout: 20_000 },
+  ).toBeGreaterThan(4);
+}
+
+test("hint is written directly on the board in AI ink different from student ink", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    captureOps: operations,
+    aiMode: "hint",
+    aiResponse: {
+      text: "Подсказка",
+      steps: [
+        { text: "Сначала найди дискриминант.", kind: "text" },
+        { text: "$$D=b^2-4ac$$", kind: "math" },
+      ],
+    },
+  });
+
+  await generateBoardMode(page, operations, "ai-hint");
+
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  expect(batch?.strokes?.length).toBeGreaterThan(4);
+  const colors = new Set(batch?.strokes?.map((stroke) => stroke.color.toUpperCase()) ?? []);
+  expect(colors.size).toBe(1);
+  const [aiColor] = [...colors];
+  expect(aiColor).not.toBe("#FF0000");
+  expect(["#2563EB", "#7C3AED", "#0891B2", "#60A5FA", "#A78BFA", "#22D3EE"]).toContain(aiColor);
+});
+
+test("check writes the first error on the board using error ink", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    captureOps: operations,
+    aiMode: "check",
+    aiResponse: {
+      text: "Выполнено: 60%\n\n1. Ошибка: неверно вычислен дискриминант.",
+      steps: [
+        { text: "Ошибка: неверно вычислен дискриминант.", kind: "warning" },
+        { text: "$$D=16-20=-4$$", kind: "math" },
+      ],
+    },
+  });
+
+  await generateBoardMode(page, operations, "ai-check");
+
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  expect(batch?.strokes?.length).toBeGreaterThan(4);
+  const colors = new Set(batch?.strokes?.map((stroke) => stroke.color.toUpperCase()) ?? []);
+  expect(colors.size).toBe(1);
+  const [aiColor] = [...colors];
+  expect(aiColor).not.toBe("#FF0000");
+  expect(["#D97706", "#DC2626", "#7C3AED", "#FBBF24", "#FB7185", "#C084FC"]).toContain(aiColor);
 });

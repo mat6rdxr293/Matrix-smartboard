@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from openai import OpenAI
@@ -348,6 +349,8 @@ def _local_chat_with_tools(
     subject: Optional[str],
     postprocess: bool = True,
     require_tool: bool = False,
+    tool_trace: Optional[list[dict]] = None,
+    finalize_after_tool: bool = False,
 ) -> str:
     tools = openai_chat_tools(subject) if settings.ai_tools_enabled else []
     allowed_tool_names = {
@@ -361,6 +364,7 @@ def _local_chat_with_tools(
     unique_tool_calls = 0
     failed_tool_calls = 0
     tool_cache: dict[str, dict] = {}
+    internal_tool_trace: list[dict] = []
     force_final = False
     force_final_notice_sent = False
 
@@ -382,6 +386,54 @@ def _local_chat_with_tools(
         {"role": "user", "content": user},
     ]
 
+    def finalize_from_tools() -> str:
+        verified = [
+            item
+            for item in internal_tool_trace
+            if isinstance(item.get("payload"), dict) and item["payload"].get("ok")
+        ]
+        if not verified:
+            return ""
+        final_messages = [
+            {
+                "role": "system",
+                "content": (
+                    sys
+                    + "\nИнструменты уже выполнены backend-ом. "
+                    + "Новых инструментов сейчас нет. Используй ТОЛЬКО фактические результаты ниже "
+                    + "и сформируй финальный ответ в требуемом формате. "
+                    + "Не выдумывай вычисления и не противоречь результатам tools."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    user
+                    + "\n\nПРОВЕРЕННЫЕ РЕЗУЛЬТАТЫ ИНСТРУМЕНТОВ:\n"
+                    + json.dumps(verified, ensure_ascii=False)
+                    + "\n\nТеперь дай финальный ответ."
+                ),
+            },
+        ]
+        for _attempt in range(2):
+            response = client.chat.completions.create(
+                model=settings.ai_model,
+                messages=final_messages,
+                max_tokens=max_tokens,
+            )
+            message = response.choices[0].message
+            content = getattr(message, "content", None)
+            text = content.strip() if content else ""
+            if text:
+                return _postprocess_math(text) if postprocess else text
+            final_messages.append(
+                {
+                    "role": "user",
+                    "content": "Ответ пустой. Верни финальный ответ прямо сейчас, без вызовов инструментов.",
+                }
+            )
+        return ""
+
     def run_tool(name: str, arguments: dict) -> tuple[dict, bool]:
         nonlocal successful_tool_use, unique_tool_calls, failed_tool_calls
 
@@ -402,6 +454,14 @@ def _local_chat_with_tools(
 
         tool_cache[signature] = payload
         unique_tool_calls += 1
+        trace_item = {
+            "tool": name,
+            "arguments": dict(arguments),
+            "payload": payload,
+        }
+        internal_tool_trace.append(trace_item)
+        if tool_trace is not None:
+            tool_trace.append(dict(trace_item))
         if payload.get("ok"):
             successful_tool_use = True
         else:
@@ -455,7 +515,7 @@ def _local_chat_with_tools(
             messages.append(
                 {
                     "role": "assistant",
-                    "content": getattr(message, "content", None),
+                    "content": getattr(message, "content", None) or "",
                     "tool_calls": serialized_calls,
                 }
             )
@@ -541,7 +601,7 @@ def _local_chat_with_tools(
             continue
 
         if require_tool and not successful_tool_use:
-            messages.append({"role": "assistant", "content": text or None})
+            messages.append({"role": "assistant", "content": text or ""})
             messages.append(
                 {
                     "role": "user",
@@ -556,27 +616,9 @@ def _local_chat_with_tools(
         return _postprocess_math(text) if postprocess else text
 
     if successful_tool_use:
-        # Last-resort finalization: no tools are exposed in this request, so the
-        # model cannot loop back into another function call.
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Сформируй финальный ответ прямо сейчас по уже полученным результатам инструментов. "
-                    "Никаких новых вычислений и вызовов инструментов."
-                ),
-            }
-        )
-        response = client.chat.completions.create(
-            model=settings.ai_model,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
-        message = response.choices[0].message
-        content = getattr(message, "content", None)
-        text = content.strip() if content else ""
-        if text:
-            return _postprocess_math(text) if postprocess else text
+        finalized = finalize_from_tools()
+        if finalized:
+            return finalized
 
     raise RuntimeError("AI не смог завершить ответ после вызова инструментов")
 
@@ -681,14 +723,16 @@ def _extract_loose_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
         if key != "text" or not value:
             continue
 
-        next_start = fields[index + 1].start() if index + 1 < len(fields) else min(len(source), match.end() + 300)
-        tail = source[match.end():next_start]
-        kind_match = re.search(
-            r'"kind"\s*:?\s*"(text|math|result|warning)"',
-            tail,
-            flags=re.I,
-        )
-        kind = kind_match.group(1).lower() if kind_match else "text"
+        kind = "text"
+        for following in fields[index + 1:index + 4]:
+            following_key = following.group("key").lower()
+            if following_key in {"text", "summary"}:
+                break
+            if following_key == "kind":
+                candidate_kind = _decode_loose_json_string(following.group("value")).strip().lower()
+                if candidate_kind in {"text", "math", "result", "warning"}:
+                    kind = candidate_kind
+                break
         steps.append({"text": value[:2000], "kind": kind})
         if len(steps) >= 40:
             break
@@ -860,6 +904,480 @@ def _merge_board_solution_steps(
         if len(merged) >= 40:
             break
     return merged
+
+
+def _board_hint_needs_retry(steps: list[dict[str, str]], response_locale: str) -> bool:
+    if not steps:
+        return True
+    joined = " ".join(step.get("text", "") for step in steps).strip()
+    lower = joined.lower()
+    if not joined:
+        return True
+
+    action_cues = {
+        "ru": ("найди", "найдите", "вычисли", "вычислите", "подстав", "раскрой", "вынеси", "сократ", "проверь", "сравни", "разлож", "определи", "дискриминант"),
+        "kk": ("тап", "есепте", "қой", "аш", "қысқарт", "тексер", "салыстыр"),
+        "en": ("find", "calculate", "compute", "substitute", "expand", "factor", "simplify", "check", "compare"),
+    }.get(response_locale, ("find", "calculate", "найди", "вычисли"))
+    if re.search(r"\b(?:math|physics|chemistry)_[a-z0-9_]+\b", lower):
+        return True
+    has_action = any(cue in lower for cue in action_cues)
+    has_math = bool(
+        re.search(
+            r"(?:[=+*/^√-]|\\[A-Za-z]+|[A-Za-z]\s*[_^]?\d*)",
+            joined,
+        )
+    )
+    generic = bool(
+        re.fullmatch(
+            r"(?:решаем|реши|solve|шешем|шешу)\s+.{0,35}(?:уравнение|задачу|equation|problem|теңдеу)[.!]?",
+            lower,
+        )
+    )
+    return generic or not (has_action or has_math)
+
+
+def _normalize_board_check_kinds(steps: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    error_cues = (
+        "ошиб", "невер", "неправ", "должно быть", "вместо",
+        "wrong", "incorrect", "error", "should be", "instead of",
+        "қате", "дұрыс емес", "болуы керек", "орнына",
+    )
+    ok_cues = (
+        "ошибок нет", "верно", "правильно", "correct", "no errors",
+        "қате жоқ", "дұрыс",
+    )
+    for step in steps:
+        item = dict(step)
+        text = item.get("text", "").lower()
+        if item.get("kind") not in {"warning", "result"}:
+            if any(cue in text for cue in error_cues):
+                item["kind"] = "warning"
+            elif any(cue in text for cue in ok_cues):
+                item["kind"] = "result"
+        normalized.append(item)
+    return normalized
+
+
+def _board_check_needs_retry(text: str, steps: list[dict[str, str]], response_locale: str) -> bool:
+    if not steps:
+        return True
+    joined = " ".join(step.get("text", "") for step in steps).lower()
+    if re.search(r"\b(?:math|physics|chemistry)_[a-z0-9_]+\b", joined):
+        return True
+    return not any(step.get("kind") in {"warning", "result"} for step in steps)
+
+
+def _compact_board_check_steps(steps: list[dict[str, str]]) -> list[dict[str, str]]:
+    if not steps:
+        return []
+    warning_index = next(
+        (index for index, step in enumerate(steps) if step.get("kind") == "warning"),
+        None,
+    )
+    if warning_index is not None:
+        warning = dict(steps[warning_index])
+        compact = [warning]
+        warning_text = warning.get("text", "").strip().lower()
+        already_corrects = any(
+            cue in warning_text
+            for cue in (
+                "должно быть",
+                "правильно:",
+                "верно:",
+                "should be",
+                "correct:",
+                "дұрысы",
+                "болуы керек",
+            )
+        )
+        if already_corrects:
+            return compact
+        for step in steps[warning_index + 1:]:
+            if step.get("text", "").strip():
+                compact.append(dict(step))
+                break
+        return compact
+
+    result = next(
+        (dict(step) for step in steps if step.get("kind") == "result"),
+        None,
+    )
+    if result is not None:
+        return [result]
+    return [dict(step) for step in steps[:2]]
+
+
+_NUMERIC_TOKEN_RE = re.compile(
+    r"(?<![A-Za-zА-Яа-яЁё0-9_])[-+]?\d+(?:[.,]\d+)?(?:/\d+(?:[.,]\d+)?)?"
+)
+
+
+def _canonical_numeric_token(value: str) -> str | None:
+    raw = value.strip().replace(",", ".")
+    if not raw:
+        return None
+    try:
+        if "/" in raw:
+            numerator, denominator = raw.split("/", 1)
+            den = Decimal(denominator)
+            if den == 0:
+                return raw.lstrip("+")
+            number = Decimal(numerator) / den
+        else:
+            number = Decimal(raw)
+        if number == 0:
+            return "0"
+        normalized = format(number.normalize(), "f")
+        return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return raw.lstrip("+")
+
+
+def _numeric_tokens(text: str) -> set[str]:
+    result: set[str] = set()
+    for match in _NUMERIC_TOKEN_RE.finditer(text or ""):
+        token = _canonical_numeric_token(match.group(0))
+        if token is not None:
+            result.add(token)
+    return result
+
+
+def _tool_result_numeric_facts(tool_trace: list[dict]) -> set[str]:
+    facts: set[str] = set()
+    for entry in tool_trace:
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        result = payload.get("result")
+        facts.update(_numeric_tokens(json.dumps(result, ensure_ascii=False)))
+    return facts
+
+
+def _board_check_conflicts_with_tools(
+    steps: list[dict[str, str]],
+    tool_trace: list[dict],
+) -> bool:
+    facts = _tool_result_numeric_facts(tool_trace)
+    if not facts:
+        return False
+    for step in steps:
+        if step.get("kind") != "result":
+            continue
+        claims = _numeric_tokens(step.get("text", ""))
+        if claims and not claims.issubset(facts):
+            return True
+    return False
+
+
+def _verify_board_check_against_tools(
+    client,
+    *,
+    problem: str,
+    candidate_text: str,
+    candidate_steps: list[dict[str, str]],
+    tool_trace: list[dict],
+    response_locale: str,
+) -> tuple[str, list[dict[str, str]]]:
+    verified_trace = [
+        {
+            "tool": entry.get("tool"),
+            "arguments": entry.get("arguments"),
+            "result": (entry.get("payload") or {}).get("result"),
+        }
+        for entry in tool_trace
+        if isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+    ]
+    language_rule = _response_language_rule(response_locale)
+    score_label = {
+        "ru": "Выполнено",
+        "kk": "Орындалды",
+        "en": "Completed",
+    }.get(response_locale, "Выполнено")
+    verifier_sys = (
+        f"{language_rule} "
+        "Ты проверяешь уже выполненную AI-проверку школьной работы. "
+        "Результаты вычислительных tools ниже являются авторитетными фактами: не пересчитывай их и не противоречь им. "
+        "Сравни запись ученика и черновик проверки с этими фактами. "
+        "Верни ТОЛЬКО JSON формата "
+        '{"summary":"' + score_label + ': NN%","steps":['
+        '{"text":"первая ошибка или подтверждение","kind":"warning|result|math"}]}. '
+        "Если в черновике или работе ученика есть числовое утверждение, противоречащее фактам tools, "
+        "обязательно пометь его как warning и коротко укажи проверенное значение. "
+        "Не упоминай внутренние имена tools/API. Для школьной алгебры не переходи к комплексным числам без явного требования."
+    )
+    verifier_user = (
+        "Запись на доске:\n"
+        + problem.strip()
+        + "\n\nАвторитетные результаты tools:\n"
+        + json.dumps(verified_trace, ensure_ascii=False)[:8000]
+        + "\n\nЧерновик проверки:\n"
+        + candidate_text[:5000]
+        + "\n\nParsed steps:\n"
+        + json.dumps(candidate_steps, ensure_ascii=False)[:5000]
+    )
+    response = client.chat.completions.create(
+        model=settings.ai_model,
+        messages=[
+            {"role": "system", "content": verifier_sys},
+            {"role": "user", "content": verifier_user},
+        ],
+        max_tokens=900,
+    )
+    message = response.choices[0].message
+    raw = (getattr(message, "content", None) or "").strip()
+    text, steps = _parse_board_solution(raw)
+    text, steps = _sanitize_board_language(text, steps, response_locale)
+    steps = _normalize_board_check_kinds(steps)
+    return text, steps
+
+
+def generate_board_response(
+    mode: str,
+    problem: str,
+    *,
+    subject: Optional[str] = None,
+    board_context: bool = True,
+    response_locale: str = "ru",
+) -> tuple[str, list[dict[str, str]]]:
+    if mode == "solution":
+        return generate_board_solution(
+            problem,
+            subject=subject,
+            board_context=board_context,
+            response_locale=response_locale,
+        )
+    if mode not in {"hint", "check"}:
+        raise ValueError(f"Unsupported board AI mode: {mode}")
+
+    api_key = get_openai_key()
+    base_url = settings.ai_base_url
+    if not base_url:
+        text = generate_ai_response(
+            mode,
+            problem,
+            subject=subject,
+            board_context=board_context,
+            response_locale=response_locale,
+        )
+        steps = [{"text": text, "kind": "text"}] if text else []
+        return _sanitize_board_language(text, steps, response_locale)
+
+    sys, user, max_tokens = _build_prompt(
+        mode,
+        problem,
+        None,
+        None,
+        False,
+        subject,
+        board_context,
+        response_locale,
+    )
+    language_rule = _response_language_rule(response_locale)
+    score_label = {
+        "ru": "Выполнено",
+        "kk": "Орындалды",
+        "en": "Completed",
+    }.get(response_locale, "Выполнено")
+
+    if mode == "hint":
+        sys += (
+            f"\n{language_rule} "
+            "Ответ будет написан прямо на доске рядом с работой ученика. "
+            "Верни ТОЛЬКО валидный JSON без markdown-обертки. "
+            "Формат: {\"summary\":\"кратко\",\"steps\":["
+            "{\"text\":\"подсказка\",\"kind\":\"text|math|warning\"}]}. "
+            "Дай 1-3 очень коротких шага. Не переписывай условие. "
+            "Не раскрывай конечный ответ и не выполняй последний решающий шаг за ученика. "
+            "Предпочитай формулу или короткую фразу длинному объяснению. "
+            "Не упоминай tools, функции, API или внутренние названия инструментов в тексте для ученика. "
+            "Для формул используй LaTeX в $$...$$."
+        )
+    else:
+        sys += (
+            f"\n{language_rule} "
+            "Ответ будет написан прямо на доске рядом с работой ученика. "
+            "Верни ТОЛЬКО валидный JSON без markdown-обертки. "
+            "Формат: {\"summary\":\"" + score_label + ": NN%\",\"steps\":["
+            "{\"text\":\"короткая проверка\",\"kind\":\"text|math|warning|result\"}]}. "
+            "Если есть ошибка, укажи первую конкретную ошибку короткой строкой с kind=warning, "
+            "затем при необходимости одной строкой покажи корректный вариант. "
+            "Если ошибок нет, дай одну короткую строку с kind=result. "
+            "Для проверки сначала получи независимый эталон из ИСХОДНОГО условия через подходящий tool; "
+            "не ограничивайся вычислением уже записанного учеником выражения, потому что оно само может быть ошибочным. "
+            "После первой найденной ошибки и одной корректирующей строки остановись. "
+            "В школьной алгебре, если D<0 и комплексные числа не требуются условием, "
+            "не пиши комплексные корни: достаточно указать, что действительных корней нет. "
+            "Не переписывай всё решение и не давай длинное объяснение. "
+            "Не упоминай tools, функции, API или внутренние названия инструментов в тексте для ученика. "
+            f"summary ОБЯЗАТЕЛЬНО должен быть ровно формата {score_label}: NN%. "
+            "Для формул используй LaTeX в $$...$$."
+        )
+
+    client_options = {
+        "api_key": api_key or "ollama",
+        "timeout": settings.ai_timeout_seconds,
+    }
+    if base_url:
+        client_options["base_url"] = base_url
+    client = OpenAI(**client_options)
+    tool_trace: list[dict] = []
+    raw = _local_chat_with_tools(
+        client,
+        sys=sys,
+        user=user,
+        max_tokens=min(max_tokens, 900 if mode == "hint" else 1200),
+        subject=subject,
+        postprocess=False,
+        require_tool=_requires_tool_use(subject, mode),
+        tool_trace=tool_trace,
+    )
+    text, steps = _parse_board_solution(raw)
+    text, steps = _sanitize_board_language(text, steps, response_locale)
+    if mode == "check":
+        steps = _normalize_board_check_kinds(steps)
+
+    needs_retry = (
+        _board_hint_needs_retry(steps, response_locale)
+        if mode == "hint"
+        else _board_check_needs_retry(text, steps, response_locale)
+    )
+    if needs_retry:
+        if mode == "hint":
+            retry_sys = (
+                sys
+                + "\nПредыдущая подсказка получилась слишком общей. "
+                + "Назови ОДНО конкретное следующее действие или формулу, которую ученик должен применить. "
+                + "Не пиши общие фразы вроде «решаем уравнение» и не раскрывай конечный ответ."
+            )
+        else:
+            retry_sys = (
+                sys
+                + "\nПредыдущая проверка ненадёжна. Перепроверь работу с нуля. "
+                + "Числовые равенства ученика обязательно сверяй с фактическими результатами tools. "
+                + "Если значение ученика отличается от результата инструмента, это и есть ошибка: "
+                + "первый такой шаг верни с kind=warning и покажи правильное значение. "
+                + "Не называй неверное вычисление верным. Не переходи к комплексным числам, если их не требует условие."
+            )
+        retry_user = (
+            user
+            + "\n\nТвой предыдущий черновик:\n"
+            + raw[:6000]
+            + "\n\nВерни исправленный JSON."
+        )
+        retry_raw = _local_chat_with_tools(
+            client,
+            sys=retry_sys,
+            user=retry_user,
+            max_tokens=min(max_tokens, 900 if mode == "hint" else 1200),
+            subject=subject,
+            postprocess=False,
+            require_tool=_requires_tool_use(subject, mode),
+            tool_trace=tool_trace,
+        )
+        retry_text, retry_steps = _parse_board_solution(retry_raw)
+        retry_text, retry_steps = _sanitize_board_language(
+            retry_text,
+            retry_steps,
+            response_locale,
+        )
+        if mode == "check":
+            retry_steps = _normalize_board_check_kinds(retry_steps)
+        retry_bad = (
+            _board_hint_needs_retry(retry_steps, response_locale)
+            if mode == "hint"
+            else _board_check_needs_retry(retry_text, retry_steps, response_locale)
+        )
+        if retry_bad:
+            fallback_messages = {
+                "hint": {
+                    "ru": "Определи следующий промежуточный шаг и выбери подходящую формулу.",
+                    "kk": "Келесі аралық қадамды анықтап, сәйкес формуланы таңда.",
+                    "en": "Identify the next intermediate step and choose the appropriate formula.",
+                },
+                "check": {
+                    "ru": "Не удалось надёжно определить ошибку. Проверь запись условия и промежуточные вычисления.",
+                    "kk": "Қатені сенімді анықтау мүмкін болмады. Шарт пен аралық есептеулерді тексер.",
+                    "en": "The error could not be determined reliably. Check the problem statement and intermediate calculations.",
+                },
+            }
+            fallback = fallback_messages[mode].get(
+                response_locale,
+                fallback_messages[mode]["ru"],
+            )
+            text = fallback
+            steps = [{
+                "text": fallback,
+                "kind": "warning" if mode == "check" else "text",
+            }]
+        else:
+            text, steps = retry_text, retry_steps
+
+    if mode == "check" and any(
+        isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+        for entry in tool_trace
+    ):
+        verified_text, verified_steps = _verify_board_check_against_tools(
+            client,
+            problem=problem,
+            candidate_text=text,
+            candidate_steps=steps,
+            tool_trace=tool_trace,
+            response_locale=response_locale,
+        )
+        verifier_bad = (
+            _board_check_needs_retry(verified_text, verified_steps, response_locale)
+            or _board_check_conflicts_with_tools(verified_steps, tool_trace)
+        )
+        if verifier_bad:
+            if any(step.get("kind") == "warning" for step in steps):
+                # The first pass found an explicit error; keep that safer diagnosis
+                # instead of replacing it with an unreliable verifier response.
+                pass
+            else:
+                fallback = {
+                    "ru": "Не удалось надёжно локализовать ошибку. Сверь промежуточное вычисление с проверенным результатом.",
+                    "kk": "Қатені нақты анықтау мүмкін болмады. Аралық есептеуді тексерілген нәтижемен салыстыр.",
+                    "en": "The exact error could not be located reliably. Compare the intermediate calculation with the verified result.",
+                }.get(
+                    response_locale,
+                    "Не удалось надёжно локализовать ошибку. Сверь промежуточное вычисление с проверенным результатом.",
+                )
+                text = fallback
+                steps = [{"text": fallback, "kind": "warning"}]
+        else:
+            text, steps = verified_text, verified_steps
+
+    if mode == "hint":
+        text = "\n".join(
+            f"{index + 1}. {step['text']}"
+            for index, step in enumerate(steps)
+        )
+    elif mode == "check":
+        steps = _compact_board_check_steps(steps)
+        score_patterns = {
+            "ru": r"Выполнено\s*:\s*(\d{1,3})%",
+            "kk": r"Орындалды\s*:\s*(\d{1,3})%",
+            "en": r"Completed\s*:\s*(\d{1,3})%",
+        }
+        score_match = re.search(
+            score_patterns.get(response_locale, score_patterns["ru"]),
+            text,
+            flags=re.I,
+        )
+        score_line = score_match.group(0) if score_match else ""
+        if score_match and any(step.get("kind") == "warning" for step in steps):
+            score_value = int(score_match.group(1))
+            if score_value >= 95:
+                score_line = ""
+        body = "\n".join(
+            f"{index + 1}. {step['text']}"
+            for index, step in enumerate(steps)
+        )
+        text = "\n\n".join(part for part in (score_line, body) if part)
+
+    return text, steps
 
 
 def generate_board_solution(
