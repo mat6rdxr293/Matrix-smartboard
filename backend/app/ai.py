@@ -8,7 +8,7 @@ from typing import Optional
 from openai import OpenAI
 
 from .settings import get_openai_key, settings
-from .ai_tools import ToolError, execute_tool, openai_chat_tools
+from .ai_tools import ToolError, execute_tool, math_quadratic, openai_chat_tools
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +391,14 @@ def generate_ai_response(
         response_locale,
     )
 
+    verified_quadratic = _quadratic_verified_context(problem, subject)
+    if verified_quadratic:
+        equation, facts = verified_quadratic
+        user += (
+            "\n\nПРОВЕРЕННЫЕ ВЫЧИСЛИТЕЛЬНЫЕ ФАКТЫ (SymPy; не пересчитывай и не противоречь им):\n"
+            + json.dumps({"equation": equation, **facts}, ensure_ascii=False)
+        )
+
     client_options = {
         "api_key": api_key or "ollama",
         "timeout": settings.ai_timeout_seconds,
@@ -644,6 +652,117 @@ def _merge_board_solution_steps(
     return merged
 
 
+def _extract_quadratic_equation(problem: str) -> str | None:
+    source = (problem or "")
+    source = source.replace("²", "^2").replace("³", "^3")
+    source = source.replace("−", "-").replace("–", "-").replace("—", "-")
+    source = source.replace("×", "*").replace("·", "*")
+    source = source.replace("х", "x").replace("Х", "X")
+    source = source.replace("\\(", " ").replace("\\)", " ").replace("$$", " ").replace("$", " ")
+    source = re.sub(r"\^\{([0-9]+)\}", r"^\1", source)
+    source = re.sub(r"(?<=\d),(?=\d)", ".", source)
+
+    candidates = re.findall(
+        r"[0-9xX+\-*/^().\s]{3,120}=[0-9xX+\-*/^().\s]{1,80}",
+        source,
+    )
+    for candidate in candidates:
+        normalized = re.sub(r"\s+", " ", candidate).strip(" .,:;")
+        normalized = re.sub(r"^\d+[.)]\s+", "", normalized)
+        if "x" not in normalized.lower():
+            continue
+        try:
+            math_quadratic(normalized, "x")
+            return normalized
+        except Exception:
+            continue
+    return None
+
+
+def _is_math_subject(subject: Optional[str]) -> bool:
+    value = (subject or "").strip().lower()
+    return not value or any(
+        token in value
+        for token in ("math", "algebra", "матем", "алгеб")
+    )
+
+
+def _quadratic_verified_context(problem: str, subject: Optional[str]) -> tuple[str, dict] | None:
+    if not _is_math_subject(subject):
+        return None
+    equation = _extract_quadratic_equation(problem)
+    if not equation:
+        return None
+    try:
+        return equation, math_quadratic(equation, "x")
+    except Exception:
+        return None
+
+
+def _quadratic_board_solution(
+    problem: str,
+    subject: Optional[str],
+    response_locale: str,
+) -> tuple[str, list[dict[str, str]]] | None:
+    verified = _quadratic_verified_context(problem, subject)
+    if not verified:
+        return None
+
+    _equation, facts = verified
+    a = facts["a"]["latex"]
+    b = facts["b"]["latex"]
+    c = facts["c"]["latex"]
+    d = facts["discriminant"]["latex"]
+    sign = facts.get("discriminant_sign")
+    roots = facts.get("real_roots") or []
+
+    labels = {
+        "ru": {
+            "coeff": "Коэффициенты",
+            "no_roots": "Ответ: действительных корней нет.",
+        },
+        "kk": {
+            "coeff": "Коэффициенттер",
+            "no_roots": "Жауап: нақты түбірлер жоқ.",
+        },
+        "en": {
+            "coeff": "Coefficients",
+            "no_roots": "Answer: no real roots.",
+        },
+    }.get(response_locale, {
+        "coeff": "Коэффициенты",
+        "no_roots": "Ответ: действительных корней нет.",
+    })
+
+    steps: list[dict[str, str]] = [
+        {
+            "text": labels["coeff"] + ": $$a=" + a + ",\\; b=" + b + ",\\; c=" + c + "$$",
+            "kind": "text",
+        },
+        {"text": "$$D=b^2-4ac=" + d + "$$", "kind": "math"},
+    ]
+
+    if sign is not None and sign < 0:
+        steps.append({"text": labels["no_roots"], "kind": "result"})
+    elif sign == 0 and roots:
+        root = roots[0]["latex"]
+        steps.append({"text": "$$" + facts["variable"] + "=" + root + "$$", "kind": "result"})
+    elif roots:
+        rendered = ",\\; ".join(
+            facts["variable"] + "_" + str(index + 1) + "=" + root["latex"]
+            for index, root in enumerate(roots)
+        )
+        steps.append({"text": "$$" + rendered + "$$", "kind": "result"})
+    else:
+        return None
+
+    text = "\n".join(
+        str(index + 1) + ". " + step["text"]
+        for index, step in enumerate(steps)
+    )
+    return text, steps
+
+
 def generate_board_solution(
     problem: str,
     *,
@@ -651,6 +770,10 @@ def generate_board_solution(
     board_context: bool = True,
     response_locale: str = "ru",
 ) -> tuple[str, list[dict[str, str]]]:
+    deterministic = _quadratic_board_solution(problem, subject, response_locale)
+    if deterministic is not None:
+        return deterministic
+
     api_key = get_openai_key()
     base_url = settings.ai_base_url
 

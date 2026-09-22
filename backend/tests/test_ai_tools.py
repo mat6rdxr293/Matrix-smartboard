@@ -8,6 +8,7 @@ from app.ai_tools import (
     list_tool_definitions,
     math_differentiate,
     math_integrate,
+    math_quadratic,
     math_solve,
     physics_check_dimensions,
     physics_convert_unit,
@@ -23,6 +24,18 @@ def test_math_tools_return_exact_results():
 
     integral = math_integrate("2*x", "x", 0, 3)
     assert integral["result"]["text"] == "9"
+
+
+def test_quadratic_tool_verifies_discriminant_and_real_roots():
+    result = math_quadratic("5*x^2 - 4*x + 5 = 0", "x")
+
+    assert result["a"]["text"] == "5"
+    assert result["b"]["text"] == "-4"
+    assert result["c"]["text"] == "5"
+    assert result["discriminant"]["text"] == "-84"
+    assert result["discriminant_sign"] == -1
+    assert result["has_real_roots"] is False
+    assert result["real_roots"] == []
 
 
 def test_physics_units_convert_and_check_dimensions():
@@ -45,6 +58,7 @@ def test_chemistry_tools_balance_and_molar_mass():
 def test_subject_routing_exposes_only_relevant_tools():
     physics = {item["name"] for item in list_tool_definitions("physics")}
     assert "math_solve" in physics
+    assert "math_quadratic" in physics
     assert "physics_convert_unit" in physics
     assert "chemistry_balance_equation" not in physics
 

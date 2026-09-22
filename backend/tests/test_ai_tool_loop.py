@@ -221,6 +221,7 @@ def test_board_solution_auto_continues_until_result(monkeypatch):
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "_quadratic_board_solution", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
     monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
@@ -257,6 +258,7 @@ def test_semantic_final_step_avoids_unnecessary_continuation(monkeypatch):
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "_quadratic_board_solution", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
     monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
@@ -284,3 +286,25 @@ def test_incomplete_result_tail_is_removed_and_previous_answer_promoted():
         {"text": "$$x_1 = 1$$", "kind": "text"},
         {"text": "$$x_2 = 2$$", "kind": "result"},
     ]
+
+
+def test_board_quadratic_solution_uses_deterministic_sympy_fast_path(monkeypatch):
+    class ExplodingOpenAI:
+        def __init__(self, **kwargs):
+            raise AssertionError("LLM must not be called for a recognized quadratic")
+
+    monkeypatch.setattr(ai_module, "OpenAI", ExplodingOpenAI)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps = ai_module.generate_board_solution(
+        "Решить квадратное уравнение 5x² - 4x + 5 = 0",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert any("D=b^2-4ac=-84" in step["text"] for step in steps)
+    assert steps[-1] == {
+        "text": "Ответ: действительных корней нет.",
+        "kind": "result",
+    }
+    assert "-84" in text

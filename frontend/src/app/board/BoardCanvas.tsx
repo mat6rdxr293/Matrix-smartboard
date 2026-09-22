@@ -1620,7 +1620,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const contentWidth = Math.max(1, Math.ceil(maxX - minX + padding * 2));
     const contentHeight = Math.max(1, Math.ceil(maxY - minY + padding * 2));
     const maxEdge = 4096;
-    const scale = Math.min(1, maxEdge / Math.max(contentWidth, contentHeight));
+    const scale = Math.min(2.2, maxEdge / Math.max(contentWidth, contentHeight));
     const outWidth = Math.max(1, Math.round(contentWidth * scale));
     const outHeight = Math.max(1, Math.round(contentHeight * scale));
 
@@ -1630,7 +1630,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const ctx = exportCanvas.getContext("2d");
     if (!ctx) return Promise.resolve(null);
 
-    drawStrokes(ctx, strokesRef.current, {
+    const normalizedStrokes = drawStrokesOnly.map((stroke) => ({
+      ...stroke,
+      color: "#111111",
+      width: Math.max(2.4, stroke.width * 1.2),
+    }));
+
+    drawStrokes(ctx, normalizedStrokes, {
       grid: false,
       width: outWidth,
       height: outHeight,
@@ -1641,6 +1647,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       },
       ratio: 1,
     });
+
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outWidth, outHeight);
+    ctx.restore();
 
     return new Promise((resolve) => {
       exportCanvas.toBlob((blob) => resolve(blob), "image/png");

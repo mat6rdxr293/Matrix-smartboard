@@ -132,6 +132,38 @@ def math_solve(equation: str, variable: Optional[str] = None) -> dict[str, Any]:
     }
 
 
+
+
+def math_quadratic(equation: str, variable: Optional[str] = None) -> dict[str, Any]:
+    parsed = _equation(equation)
+    symbol = _symbol([parsed.lhs, parsed.rhs], variable)
+    expression = sp.expand(parsed.lhs - parsed.rhs)
+    try:
+        poly = sp.Poly(expression, symbol)
+    except Exception as exc:
+        raise ToolError("Не удалось представить уравнение как полином") from exc
+    if poly.degree() != 2:
+        raise ToolError("Уравнение не является квадратным")
+
+    a, b, c = [sp.simplify(value) for value in poly.all_coeffs()]
+    discriminant = sp.simplify(b**2 - 4 * a * c)
+    roots = sp.solve(sp.Eq(expression, 0), symbol)
+    real_roots = [root for root in roots if root.is_real is not False]
+    return {
+        "equation": {"text": str(parsed), "latex": sp.latex(parsed)},
+        "variable": str(symbol),
+        "a": _math(a),
+        "b": _math(b),
+        "c": _math(c),
+        "discriminant": _math(discriminant),
+        "discriminant_sign": (
+            -1 if discriminant.is_negative else 1 if discriminant.is_positive else 0 if discriminant.is_zero else None
+        ),
+        "roots": [_math(root) for root in roots],
+        "real_roots": [_math(root) for root in real_roots],
+        "has_real_roots": bool(real_roots),
+    }
+
 def math_differentiate(expression: str, variable: Optional[str] = None, order: int = 1) -> dict[str, Any]:
     if order < 1 or order > 5:
         raise ToolError("Порядок производной должен быть 1..5")
@@ -338,6 +370,9 @@ TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition("math_solve", "math", "Решить уравнение.", _schema({
         "equation": {"type": "string"}, "variable": {"type": "string"},
     }, ["equation"]), math_solve),
+    ToolDefinition("math_quadratic", "math", "Точно разобрать квадратное уравнение: коэффициенты, дискриминант и корни.", _schema({
+        "equation": {"type": "string"}, "variable": {"type": "string"},
+    }, ["equation"]), math_quadratic),
     ToolDefinition("math_differentiate", "math", "Найти производную.", _schema({
         "expression": {"type": "string"}, "variable": {"type": "string"},
         "order": {"type": "integer", "minimum": 1, "maximum": 5},

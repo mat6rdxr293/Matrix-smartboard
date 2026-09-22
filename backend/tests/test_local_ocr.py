@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import app.ocr as ocr_module
 import app.settings as settings_module
 
@@ -64,3 +66,64 @@ def test_empty_values_from_env_example_do_not_break_settings(monkeypatch):
     assert fresh.practice_db_path.name == "practice.db"
     assert fresh.ai_base_url is None
     assert fresh.ocr_base_url is None
+
+
+def test_local_ocr_retries_after_refusal(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            content = (
+                "Не разобрал, пожалуйста напишите более разборчиво."
+                if len(calls) == 1
+                else "5x^2 - 4x + 5 = 0"
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == "5x^2 - 4x + 5 = 0"
+    assert len(calls) == 2
+
+
+def test_local_ocr_raises_only_after_all_retries(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="Не могу распознать текст")
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    with pytest.raises(RuntimeError, match="нескольких попыток"):
+        ocr_module.ocr_image(b"raw")
+
+    assert len(calls) == 3
