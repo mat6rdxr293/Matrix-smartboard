@@ -8,7 +8,7 @@ from typing import Optional
 from openai import OpenAI
 
 from .settings import get_openai_key, settings
-from .ai_tools import ToolError, execute_tool, math_quadratic, openai_chat_tools
+from .ai_tools import ToolError, execute_tool, openai_chat_tools
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +279,66 @@ def _build_prompt(
 
 
 
+def _requires_tool_use(subject: Optional[str], mode: str) -> bool:
+    if mode not in {"solution", "check"}:
+        return False
+    value = (subject or "").strip().lower()
+    if not value:
+        return False
+    is_stem = any(
+        token in value
+        for token in (
+            "math", "mathemat", "algebra", "geometry",
+            "матем", "алгеб", "геом",
+            "physics", "phys", "физ",
+            "chemistry", "chem", "хим",
+        )
+    )
+    return is_stem and bool(openai_chat_tools(subject))
+
+
+def _extract_pseudo_tool_calls(text: str, allowed_names: set[str]) -> list[tuple[str, dict]]:
+    source = (text or "").strip()
+    if not source or not allowed_names:
+        return []
+
+    decoder = json.JSONDecoder()
+    found: list[tuple[str, dict]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for index, char in enumerate(source):
+        if char != "{":
+            continue
+        try:
+            payload, _end = decoder.raw_decode(source[index:])
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        name = payload.get("name") or payload.get("tool")
+        arguments = payload.get("arguments")
+        if arguments is None:
+            arguments = payload.get("parameters")
+        if not isinstance(name, str) or name not in allowed_names:
+            continue
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except Exception:
+                continue
+        if not isinstance(arguments, dict):
+            continue
+
+        key = (name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((name, arguments))
+
+    return found
+
+
 def _local_chat_with_tools(
     client,
     *,
@@ -287,21 +347,36 @@ def _local_chat_with_tools(
     max_tokens: int,
     subject: Optional[str],
     postprocess: bool = True,
+    require_tool: bool = False,
 ) -> str:
     tools = openai_chat_tools(subject) if settings.ai_tools_enabled else []
+    allowed_tool_names = {
+        tool["function"]["name"]
+        for tool in tools
+        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+    }
+    require_tool = bool(require_tool and tools)
+    successful_tool_use = False
+
     system_text = sys
     if tools:
         system_text += (
             "\nДля точных вычислений используй доступные инструменты вместо догадок. "
-            "Не выдумывай результат инструмента. После вызова инструмента объясни результат ученику."
+            "Ты сам выбираешь подходящий инструмент и его аргументы. "
+            "Не вычисляй арифметику приблизительно в голове, если её может проверить инструмент. "
+            "Не выдумывай результат инструмента. После вызова инструмента используй его фактический результат."
         )
+        if require_tool:
+            system_text += (
+                "\nДля этой задачи перед финальным ответом ОБЯЗАТЕЛЬНО сделай хотя бы один успешный вызов инструмента."
+            )
 
     messages: list[dict] = [
         {"role": "system", "content": system_text},
         {"role": "user", "content": user},
     ]
 
-    for _ in range(5):
+    for round_index in range(7):
         request = {
             "model": settings.ai_model,
             "messages": messages,
@@ -309,59 +384,102 @@ def _local_chat_with_tools(
         }
         if tools:
             request["tools"] = tools
+            if require_tool and not successful_tool_use:
+                request["tool_choice"] = "required"
 
         response = client.chat.completions.create(**request)
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []
 
-        if not tool_calls:
-            content = getattr(message, "content", None)
-            text = content.strip() if content else ""
-            return _postprocess_math(text) if postprocess else text
-
-        serialized_calls = []
-        for call in tool_calls:
-            function = getattr(call, "function", None)
-            serialized_calls.append(
-                {
-                    "id": getattr(call, "id", ""),
-                    "type": "function",
-                    "function": {
-                        "name": getattr(function, "name", ""),
-                        "arguments": getattr(function, "arguments", "{}") or "{}",
-                    },
-                }
-            )
-
-        messages.append(
-            {
-                "role": "assistant",
-                "content": getattr(message, "content", None),
-                "tool_calls": serialized_calls,
-            }
-        )
-
-        for call in tool_calls:
-            function = getattr(call, "function", None)
-            name = getattr(function, "name", "")
-            raw_arguments = getattr(function, "arguments", "{}") or "{}"
-            try:
-                arguments = json.loads(raw_arguments)
-                if not isinstance(arguments, dict):
-                    raise ToolError("Аргументы инструмента должны быть объектом")
-                payload = execute_tool(name, arguments)
-            except Exception as exc:  # noqa: BLE001
-                payload = {"ok": False, "tool": name, "error": str(exc)}
+        if tool_calls:
+            serialized_calls = []
+            for call in tool_calls:
+                function = getattr(call, "function", None)
+                serialized_calls.append(
+                    {
+                        "id": getattr(call, "id", "") or f"call-{round_index}",
+                        "type": "function",
+                        "function": {
+                            "name": getattr(function, "name", ""),
+                            "arguments": getattr(function, "arguments", "{}") or "{}",
+                        },
+                    }
+                )
 
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": getattr(call, "id", ""),
-                    "content": json.dumps(payload, ensure_ascii=False),
+                    "role": "assistant",
+                    "content": getattr(message, "content", None),
+                    "tool_calls": serialized_calls,
                 }
             )
 
-    raise RuntimeError("AI tool loop exceeded 5 rounds")
+            for call in tool_calls:
+                function = getattr(call, "function", None)
+                name = getattr(function, "name", "")
+                raw_arguments = getattr(function, "arguments", "{}") or "{}"
+                try:
+                    arguments = json.loads(raw_arguments)
+                    if not isinstance(arguments, dict):
+                        raise ToolError("Аргументы инструмента должны быть объектом")
+                    payload = execute_tool(name, arguments)
+                    successful_tool_use = successful_tool_use or bool(payload.get("ok"))
+                except Exception as exc:  # noqa: BLE001
+                    payload = {"ok": False, "tool": name, "error": str(exc)}
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": getattr(call, "id", "") or f"call-{round_index}",
+                        "content": json.dumps(payload, ensure_ascii=False),
+                    }
+                )
+            continue
+
+        content = getattr(message, "content", None)
+        text = content.strip() if content else ""
+
+        # Some local models print a tool request as JSON in normal assistant text.
+        # Recover that intent instead of letting the pseudo-call leak onto the board.
+        pseudo_calls = _extract_pseudo_tool_calls(text, allowed_tool_names)
+        if pseudo_calls:
+            messages.append({"role": "assistant", "content": text})
+            results = []
+            for name, arguments in pseudo_calls:
+                try:
+                    payload = execute_tool(name, arguments)
+                    successful_tool_use = successful_tool_use or bool(payload.get("ok"))
+                except Exception as exc:  # noqa: BLE001
+                    payload = {"ok": False, "tool": name, "error": str(exc)}
+                results.append(payload)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Backend распознал твой текстовый запрос к инструменту и реально выполнил его. "
+                        "Вот фактические результаты; продолжи решение, опираясь только на них:\n"
+                        + json.dumps(results, ensure_ascii=False)
+                    ),
+                }
+            )
+            continue
+
+        if require_tool and not successful_tool_use:
+            messages.append({"role": "assistant", "content": text or None})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Финальный ответ пока запрещён: сначала вызови один из доступных инструментов "
+                        "для проверки вычислений. Сам выбери подходящий tool и аргументы."
+                    ),
+                }
+            )
+            continue
+
+        return _postprocess_math(text) if postprocess else text
+
+    raise RuntimeError("AI tool loop exceeded 7 rounds without a valid final answer")
 
 
 
@@ -391,14 +509,6 @@ def generate_ai_response(
         response_locale,
     )
 
-    verified_quadratic = _quadratic_verified_context(problem, subject)
-    if verified_quadratic:
-        equation, facts = verified_quadratic
-        user += (
-            "\n\nПРОВЕРЕННЫЕ ВЫЧИСЛИТЕЛЬНЫЕ ФАКТЫ (SymPy; не пересчитывай и не противоречь им):\n"
-            + json.dumps({"equation": equation, **facts}, ensure_ascii=False)
-        )
-
     client_options = {
         "api_key": api_key or "ollama",
         "timeout": settings.ai_timeout_seconds,
@@ -414,6 +524,7 @@ def generate_ai_response(
                 user=user,
                 max_tokens=max_tokens,
                 subject=subject,
+                require_tool=_requires_tool_use(subject, mode),
             )
 
         if not hasattr(client, "responses"):
@@ -652,117 +763,6 @@ def _merge_board_solution_steps(
     return merged
 
 
-def _extract_quadratic_equation(problem: str) -> str | None:
-    source = (problem or "")
-    source = source.replace("²", "^2").replace("³", "^3")
-    source = source.replace("−", "-").replace("–", "-").replace("—", "-")
-    source = source.replace("×", "*").replace("·", "*")
-    source = source.replace("х", "x").replace("Х", "X")
-    source = source.replace("\\(", " ").replace("\\)", " ").replace("$$", " ").replace("$", " ")
-    source = re.sub(r"\^\{([0-9]+)\}", r"^\1", source)
-    source = re.sub(r"(?<=\d),(?=\d)", ".", source)
-
-    candidates = re.findall(
-        r"[0-9xX+\-*/^().\s]{3,120}=[0-9xX+\-*/^().\s]{1,80}",
-        source,
-    )
-    for candidate in candidates:
-        normalized = re.sub(r"\s+", " ", candidate).strip(" .,:;")
-        normalized = re.sub(r"^\d+[.)]\s+", "", normalized)
-        if "x" not in normalized.lower():
-            continue
-        try:
-            math_quadratic(normalized, "x")
-            return normalized
-        except Exception:
-            continue
-    return None
-
-
-def _is_math_subject(subject: Optional[str]) -> bool:
-    value = (subject or "").strip().lower()
-    return not value or any(
-        token in value
-        for token in ("math", "algebra", "матем", "алгеб")
-    )
-
-
-def _quadratic_verified_context(problem: str, subject: Optional[str]) -> tuple[str, dict] | None:
-    if not _is_math_subject(subject):
-        return None
-    equation = _extract_quadratic_equation(problem)
-    if not equation:
-        return None
-    try:
-        return equation, math_quadratic(equation, "x")
-    except Exception:
-        return None
-
-
-def _quadratic_board_solution(
-    problem: str,
-    subject: Optional[str],
-    response_locale: str,
-) -> tuple[str, list[dict[str, str]]] | None:
-    verified = _quadratic_verified_context(problem, subject)
-    if not verified:
-        return None
-
-    _equation, facts = verified
-    a = facts["a"]["latex"]
-    b = facts["b"]["latex"]
-    c = facts["c"]["latex"]
-    d = facts["discriminant"]["latex"]
-    sign = facts.get("discriminant_sign")
-    roots = facts.get("real_roots") or []
-
-    labels = {
-        "ru": {
-            "coeff": "Коэффициенты",
-            "no_roots": "Ответ: действительных корней нет.",
-        },
-        "kk": {
-            "coeff": "Коэффициенттер",
-            "no_roots": "Жауап: нақты түбірлер жоқ.",
-        },
-        "en": {
-            "coeff": "Coefficients",
-            "no_roots": "Answer: no real roots.",
-        },
-    }.get(response_locale, {
-        "coeff": "Коэффициенты",
-        "no_roots": "Ответ: действительных корней нет.",
-    })
-
-    steps: list[dict[str, str]] = [
-        {
-            "text": labels["coeff"] + ": $$a=" + a + ",\\; b=" + b + ",\\; c=" + c + "$$",
-            "kind": "text",
-        },
-        {"text": "$$D=b^2-4ac=" + d + "$$", "kind": "math"},
-    ]
-
-    if sign is not None and sign < 0:
-        steps.append({"text": labels["no_roots"], "kind": "result"})
-    elif sign == 0 and roots:
-        root = roots[0]["latex"]
-        steps.append({"text": "$$" + facts["variable"] + "=" + root + "$$", "kind": "result"})
-    elif roots:
-        rendered = ",\\; ".join(
-            facts["variable"] + "_" + str(index + 1) + "=" + root["latex"]
-            for index, root in enumerate(roots)
-        )
-        steps.append({"text": "$$" + rendered + "$$", "kind": "result"})
-    else:
-        return None
-
-    text = "\n".join(
-        str(index + 1) + ". " + step["text"]
-        for index, step in enumerate(steps)
-    )
-    return text, steps
-
-
 def generate_board_solution(
     problem: str,
     *,
@@ -770,10 +770,6 @@ def generate_board_solution(
     board_context: bool = True,
     response_locale: str = "ru",
 ) -> tuple[str, list[dict[str, str]]]:
-    deterministic = _quadratic_board_solution(problem, subject, response_locale)
-    if deterministic is not None:
-        return deterministic
-
     api_key = get_openai_key()
     base_url = settings.ai_base_url
 
@@ -832,6 +828,7 @@ def generate_board_solution(
         max_tokens=max_tokens,
         subject=subject,
         postprocess=False,
+        require_tool=_requires_tool_use(subject, "solution"),
     )
     text, steps = _parse_board_solution(raw)
     text, steps = _sanitize_board_language(text, steps, response_locale)

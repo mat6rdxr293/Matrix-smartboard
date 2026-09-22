@@ -56,6 +56,8 @@ def test_local_ai_executes_tool_call_and_returns_final_answer(monkeypatch):
     assert result == "Корни: $$x=-2$$ и $$x=2$$"
     assert len(requests) == 2
     assert requests[0]["tools"]
+    assert requests[0]["tool_choice"] == "required"
+    assert "tool_choice" not in requests[1]
     assert requests[0]["messages"][0]["role"] == "system"
     assert requests[1]["messages"][-1]["role"] == "tool"
     assert '"solutions"' in requests[1]["messages"][-1]["content"]
@@ -221,7 +223,6 @@ def test_board_solution_auto_continues_until_result(monkeypatch):
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
-    monkeypatch.setattr(ai_module, "_quadratic_board_solution", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
     monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
@@ -258,7 +259,6 @@ def test_semantic_final_step_avoids_unnecessary_continuation(monkeypatch):
 
     monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
-    monkeypatch.setattr(ai_module, "_quadratic_board_solution", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
     monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
@@ -288,13 +288,54 @@ def test_incomplete_result_tail_is_removed_and_previous_answer_promoted():
     ]
 
 
-def test_board_quadratic_solution_uses_deterministic_sympy_fast_path(monkeypatch):
-    class ExplodingOpenAI:
-        def __init__(self, **kwargs):
-            raise AssertionError("LLM must not be called for a recognized quadratic")
+def test_board_solution_requires_model_selected_tool_before_structured_answer(monkeypatch):
+    requests = []
+    tool_call = SimpleNamespace(
+        id="quad-1",
+        function=SimpleNamespace(
+            name="math_quadratic",
+            arguments='{"equation":"5*x^2 - 4*x + 5 = 0","variable":"x"}',
+        ),
+    )
+    responses = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=None, tool_calls=[tool_call])
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"summary":"Решение","steps":['
+                            '{"text":"$$D=-84$$","kind":"math"},'
+                            '{"text":"Действительных корней нет.","kind":"result"}'
+                            ']}'
+                        ),
+                        tool_calls=[],
+                    )
+                )
+            ]
+        ),
+    ]
 
-    monkeypatch.setattr(ai_module, "OpenAI", ExplodingOpenAI)
+    class FakeCompletions:
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            return responses[len(requests) - 1]
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
     monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
+    monkeypatch.setattr(ai_module.settings, "ai_tools_enabled", True)
 
     text, steps = ai_module.generate_board_solution(
         "Решить квадратное уравнение 5x² - 4x + 5 = 0",
@@ -302,9 +343,71 @@ def test_board_quadratic_solution_uses_deterministic_sympy_fast_path(monkeypatch
         response_locale="ru",
     )
 
-    assert any("D=b^2-4ac=-84" in step["text"] for step in steps)
-    assert steps[-1] == {
-        "text": "Ответ: действительных корней нет.",
-        "kind": "result",
-    }
-    assert "-84" in text
+    assert len(requests) == 2
+    assert requests[0]["tool_choice"] == "required"
+    assert requests[0]["tools"]
+    assert "tool_choice" not in requests[1]
+    assert requests[1]["messages"][-1]["role"] == "tool"
+    assert '"discriminant"' in requests[1]["messages"][-1]["content"]
+    assert '"text": "-84"' in requests[1]["messages"][-1]["content"]
+    assert steps[-1] == {"text": "Действительных корней нет.", "kind": "result"}
+    assert "$$D=-84$$" in text
+
+
+def test_local_ai_recovers_pseudo_tool_call_printed_as_text(monkeypatch):
+    requests = []
+    responses = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"name":"math_evaluate","arguments":'
+                            '{"expression":"(-4)^2 - 4*5*5"}}'
+                        ),
+                        tool_calls=[],
+                    )
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="Дискриминант равен $$D=-84$$.",
+                        tool_calls=[],
+                    )
+                )
+            ]
+        ),
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            return responses[len(requests) - 1]
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
+    monkeypatch.setattr(ai_module.settings, "ai_tools_enabled", True)
+
+    result = ai_module.generate_ai_response(
+        "solution",
+        "Вычисли дискриминант для 5x^2 - 4x + 5 = 0",
+        subject="algebra",
+        response_locale="ru",
+    )
+
+    assert result == "Дискриминант равен $$D=-84$$."
+    assert len(requests) == 2
+    assert requests[0]["tool_choice"] == "required"
+    assert "tool_choice" not in requests[1]
+    assert requests[1]["messages"][-1]["role"] == "user"
+    assert "math_evaluate" in requests[1]["messages"][-1]["content"]
+    assert "-84" in requests[1]["messages"][-1]["content"]
