@@ -202,3 +202,85 @@ def test_general_ai_prompt_follows_ui_locale():
     assert "Жауапты тек қазақ тілінде бер" in kk_sys
     assert "Орындалды: NN%" in kk_user
     assert "Пиши по-русски" not in kk_sys
+
+
+def test_board_solution_auto_continues_until_result(monkeypatch):
+    responses = [
+        '{"summary":"Решение","steps":[{"text":"$$D=b^2-4ac$$","kind":"math"}]}',
+        '{"summary":"Продолжение","steps":[{"text":"$$D=-84<0$$","kind":"math"},{"text":"Действительных корней нет.","kind":"result"}]}',
+    ]
+    calls = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        calls.append(kwargs)
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
+
+    text, steps = ai_module.generate_board_solution(
+        "5x^2 - 4x + 5 = 0",
+        subject="algebra",
+        response_locale="ru",
+    )
+
+    assert len(calls) == 2
+    assert steps[-1] == {"text": "Действительных корней нет.", "kind": "result"}
+    assert "$$D=b^2-4ac$$" in text
+    assert "Действительных корней нет." in text
+    assert "не повторяй" in calls[1]["sys"].lower()
+
+
+def test_semantic_final_step_avoids_unnecessary_continuation(monkeypatch):
+    raw = (
+        '{"summary":"Решение","steps":['
+        '{"text":"$$D=16-100=-84$$","kind":"math"},'
+        '{"text":"Итак, уравнение не имеет действительных корней.","kind":"text"}'
+        ']}'
+    )
+    calls = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        calls.append(kwargs)
+        return raw
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module.settings, "ai_model", "qwen2.5:7b")
+
+    _text, steps = ai_module.generate_board_solution(
+        "5x^2 - 4x + 5 = 0",
+        subject="algebra",
+        response_locale="ru",
+    )
+
+    assert len(calls) == 1
+    assert steps[-1]["kind"] == "result"
+
+
+def test_incomplete_result_tail_is_removed_and_previous_answer_promoted():
+    steps = [
+        {"text": "$$x_1 = 1$$", "kind": "text"},
+        {"text": "$$x_2 = 2$$", "kind": "text"},
+        {"text": "Добавим корректные обозначения:", "kind": "result"},
+    ]
+
+    normalized = ai_module._normalize_board_result_tail(steps, "ru")
+
+    assert normalized == [
+        {"text": "$$x_1 = 1$$", "kind": "text"},
+        {"text": "$$x_2 = 2$$", "kind": "result"},
+    ]

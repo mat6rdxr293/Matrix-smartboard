@@ -554,6 +554,96 @@ def _sanitize_board_language(
     return clean(text), cleaned_steps
 
 
+def _promote_semantic_result(
+    steps: list[dict[str, str]],
+    response_locale: str,
+) -> list[dict[str, str]]:
+    if not steps or steps[-1].get("kind") == "result":
+        return steps
+
+    final_text = steps[-1].get("text", "").strip()
+    lower = final_text.lower()
+    cues = {
+        "ru": ("ответ", "итак", "следовательно", "корней нет", "не имеет действительных корней", "получаем"),
+        "kk": ("жауап", "түбір", "сондықтан", "нақты түбірі жоқ", "аламыз"),
+        "en": ("answer", "therefore", "no real roots", "has no real roots", "we get"),
+    }.get(response_locale, ("ответ", "итак", "answer", "therefore"))
+
+    has_cue = any(cue in lower for cue in cues)
+    has_final_assignment = bool(
+        re.search(
+            r"(?:^|[\s$\\(])(x|y|z|t|n)(?:_\{?\d+\}?)?\s*(?:=|\\in)\s*[^=]+$",
+            final_text,
+            flags=re.I,
+        )
+    )
+    if not has_cue and not has_final_assignment:
+        return steps
+
+    promoted = [dict(step) for step in steps]
+    promoted[-1]["kind"] = "result"
+    return promoted
+
+
+def _normalize_board_result_tail(
+    steps: list[dict[str, str]],
+    response_locale: str,
+) -> list[dict[str, str]]:
+    normalized = [dict(step) for step in steps]
+    incomplete_cues = (
+        "добавим",
+        "найдем",
+        "найдём",
+        "рассчитаем",
+        "вычислим",
+        "подставим",
+        "используем",
+        "продолжим",
+        "add ",
+        "find ",
+        "calculate",
+        "substitute",
+        "continue",
+        "табамыз",
+        "есептейміз",
+        "қоямыз",
+        "жалғастырамыз",
+    )
+    while len(normalized) > 1 and normalized[-1].get("kind") == "result":
+        text = normalized[-1].get("text", "").strip()
+        lower = text.lower()
+        if not text.endswith((':', '=', '→', '-')) and not any(cue in lower for cue in incomplete_cues):
+            break
+        normalized.pop()
+
+    return _promote_semantic_result(normalized, response_locale)
+
+
+def _board_solution_has_result(steps: list[dict[str, str]]) -> bool:
+    return bool(steps) and steps[-1].get("kind") == "result" and bool(steps[-1].get("text", "").strip())
+
+
+def _merge_board_solution_steps(
+    existing: list[dict[str, str]],
+    continuation: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    merged = [dict(step) for step in existing]
+    seen = {
+        re.sub(r"\s+", " ", step.get("text", "")).strip().lower()
+        for step in merged
+        if step.get("text")
+    }
+    for step in continuation:
+        key = re.sub(r"\s+", " ", step.get("text", "")).strip().lower()
+        if not key or key in seen:
+            continue
+        merged.append(dict(step))
+        seen.add(key)
+        if len(merged) >= 40:
+            break
+    return merged
+
+
 def generate_board_solution(
     problem: str,
     *,
@@ -593,6 +683,15 @@ def generate_board_solution(
         "Формат: {\"summary\":\"кратко\",\"steps\":["
         "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "
         "Каждый логический шаг должен быть отдельным элементом. "
+        "Это запись НА ДОСКЕ: пиши предельно кратко, как ученик или учитель от руки. "
+        "Не переписывай условие задачи и не объясняй очевидные действия длинными предложениями. "
+        "Обычно используй 3-7 коротких шагов, по возможности одну строку на шаг; предпочитай формулы словам. "
+        "В школьной алгебре решай над действительными числами, если комплексные числа явно не требуются условием. "
+        "Если дискриминант D < 0, пиши кратко: действительных корней нет; не переходи к комплексным корням. "
+        "Не смешивай язык ответа с английскими математическими словами: используй терминологию выбранного языка UI. "
+        "Обязательно доведи решение до конечного ответа. "
+        "Последний элемент steps ОБЯЗАТЕЛЬНО должен иметь kind=result и содержать конечный ответ, "
+        "а не промежуточную формулу. "
         "Для формул внутри text используй LaTeX в $$...$$."
     )
 
@@ -612,4 +711,44 @@ def generate_board_solution(
         postprocess=False,
     )
     text, steps = _parse_board_solution(raw)
-    return _sanitize_board_language(text, steps, response_locale)
+    text, steps = _sanitize_board_language(text, steps, response_locale)
+    steps = _normalize_board_result_tail(steps, response_locale)
+
+    if steps and not _board_solution_has_result(steps):
+        continuation_sys = (
+            sys
+            + "\nПредыдущий ответ оборвался до конечного результата. "
+            + "Верни ТОЛЬКО недостающие шаги в том же JSON-формате. "
+            + "Не повторяй уже готовые шаги. Последний шаг ОБЯЗАТЕЛЬНО kind=result."
+        )
+        continuation_user = (
+            user
+            + "\n\nУже полученные шаги:\n"
+            + json.dumps(steps, ensure_ascii=False)
+            + "\n\nПродолжи строго с места остановки и доведи решение до конечного ответа."
+        )
+        raw_continuation = _local_chat_with_tools(
+            client,
+            sys=continuation_sys,
+            user=continuation_user,
+            max_tokens=max_tokens,
+            subject=subject,
+            postprocess=False,
+        )
+        continuation_text, continuation_steps = _parse_board_solution(raw_continuation)
+        continuation_text, continuation_steps = _sanitize_board_language(
+            continuation_text,
+            continuation_steps,
+            response_locale,
+        )
+        if continuation_steps:
+            steps = _merge_board_solution_steps(steps, continuation_steps)
+            steps = _normalize_board_result_tail(steps, response_locale)
+            text = "\n".join(
+                f"{index + 1}. {step['text']}"
+                for index, step in enumerate(steps)
+            )
+        elif continuation_text.strip():
+            text = f"{text}\n{continuation_text}".strip()
+
+    return text, steps

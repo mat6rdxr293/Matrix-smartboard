@@ -141,6 +141,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const drawFrameRef = useRef<() => void>(() => undefined);
   const workerEnabledRef = useRef(false);
   const strokesRef = useRef<Stroke[]>(initialStrokes);
+  const aiStrokeAnimationActiveRef = useRef(false);
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
   const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
   const solutionsRef = useRef<AiSolutionBlock[]>(initialSolutions);
@@ -1295,6 +1296,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, []);
 
   useEffect(() => {
+    if (aiStrokeAnimationActiveRef.current) return;
     strokesRef.current = [...initialStrokes];
     setShowClearConfirm(false);
     setClearSlideValue(0);
@@ -1418,12 +1420,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     shouldCancel?: () => boolean,
     lowMotion = false,
   ) => {
-    const committed: Stroke[] = [];
-    const frameDelay = lowMotion ? 0 : 5;
-    const penLiftDelay = lowMotion ? 0 : 7;
+    const sources = incoming.filter((stroke) => stroke.points.length >= 2);
+    if (!sources.length) return [] as Stroke[];
 
-    const densify = (points: Stroke["points"], maxSegment = 2.2) => {
-      if (points.length < 2) return points.map((point) => ({ ...point }));
+    const cloneStroke = (stroke: Stroke): Stroke => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ ...point })),
+    });
+
+    if (lowMotion) {
+      const committed = sources.map(cloneStroke);
+      strokesRef.current.push(...committed.map(cloneStroke));
+      scheduleRender();
+      return committed;
+    }
+
+    const densify = (points: Stroke["points"], maxSegment = 4.5) => {
       const result: Stroke["points"] = [{ ...points[0] }];
       for (let index = 1; index < points.length; index += 1) {
         const start = points[index - 1];
@@ -1441,63 +1453,100 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       return result;
     };
 
-    for (const source of incoming) {
-      if (shouldCancel?.()) break;
-      if (source.points.length < 2) continue;
+    const paths = sources.map((source) => ({
+      source,
+      points: densify(source.points),
+    }));
+    const totalUnits = paths.reduce(
+      (sum, path) => sum + Math.max(1, path.points.length - 1),
+      0,
+    );
+    // Keep the visible writing gesture, but cap long solutions so they do not
+    // take tens of seconds. Typical school solutions finish in ~2-4.5 seconds.
+    const targetDurationMs = Math.min(3200, Math.max(1200, sources.length * 3.2));
+    const targetFrames = Math.max(1, Math.round(targetDurationMs / 16.67));
+    const unitsPerFrame = Math.max(1, Math.ceil(totalUnits / targetFrames));
 
-      const animationPoints = lowMotion ? source.points : densify(source.points);
-      const preview: Stroke = {
-        ...source,
-        points: [{ ...animationPoints[0] }],
-      };
-      strokesRef.current.push(preview);
+    const committed: Stroke[] = [];
+    let pathIndex = 0;
+    let pointIndex = 1;
+    let preview: Stroke | null = null;
+    aiStrokeAnimationActiveRef.current = true;
 
-      const stride = lowMotion
-        ? animationPoints.length
-        : Math.max(1, Math.ceil(animationPoints.length / 14));
+    try {
+      await new Promise<void>((resolve) => {
+        const frame = () => {
+          if (shouldCancel?.()) {
+            resolve();
+            return;
+          }
 
-      for (let index = 1; index < animationPoints.length; index += stride) {
-        if (shouldCancel?.()) break;
-        preview.points = animationPoints
-          .slice(0, Math.min(animationPoints.length, index + stride))
-          .map((point) => ({ ...point }));
-        scheduleRender();
+          // If the tab gets backgrounded, finish immediately instead of letting
+          // browser timer throttling leave a half-written solution.
+          let budget = document.hidden ? totalUnits : unitsPerFrame;
 
-        if (!lowMotion) {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, frameDelay);
-          });
-        }
-      }
+          while (budget > 0 && pathIndex < paths.length) {
+            const current = paths[pathIndex];
+            if (!preview) {
+              preview = {
+                ...current.source,
+                points: [{ ...current.points[0] }],
+              };
+              strokesRef.current.push(preview);
+              pointIndex = 1;
+            }
 
-      if (shouldCancel?.()) {
-        if (preview.points.length < 2) {
-          strokesRef.current.pop();
-        } else {
-          committed.push({
-            ...source,
-            points: source.points.map((point) => ({ ...point })),
-          });
-        }
-        scheduleRender();
-        break;
-      }
+            const remaining = current.points.length - pointIndex;
+            const take = Math.max(0, Math.min(remaining, budget));
+            if (take > 0) {
+              preview.points.push(
+                ...current.points
+                  .slice(pointIndex, pointIndex + take)
+                  .map((point) => ({ ...point })),
+              );
+              pointIndex += take;
+              budget -= take;
+            }
 
-      preview.points = source.points.map((point) => ({ ...point }));
-      committed.push({
-        ...source,
-        points: source.points.map((point) => ({ ...point })),
+            if (pointIndex >= current.points.length) {
+              preview.points = current.source.points.map((point) => ({ ...point }));
+              committed.push(cloneStroke(current.source));
+              preview = null;
+              pathIndex += 1;
+              pointIndex = 1;
+              // A pen lift still exists visually because the next path begins
+              // in sequence, but we no longer wait a timer for every tiny glyph.
+            } else if (take === 0) {
+              break;
+            }
+          }
+
+          scheduleRender();
+
+          if (pathIndex >= paths.length || shouldCancel?.()) {
+            resolve();
+            return;
+          }
+          window.requestAnimationFrame(frame);
+        };
+
+        window.requestAnimationFrame(frame);
       });
-      scheduleRender();
 
-      if (!lowMotion) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, penLiftDelay);
-        });
+      if (shouldCancel?.() && preview && preview.points.length >= 2) {
+        // Never leave a transient preview stroke in a shape that cannot be
+        // represented by the persisted command.
+        const current = paths[Math.min(pathIndex, paths.length - 1)];
+        if (current) {
+          preview.points = current.source.points.map((point) => ({ ...point }));
+          committed.push(cloneStroke(current.source));
+        }
       }
+      scheduleRender();
+      return committed;
+    } finally {
+      aiStrokeAnimationActiveRef.current = false;
     }
-
-    return committed;
   };
 
   const handleUndo = () => {

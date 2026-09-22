@@ -183,6 +183,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [lastLocalBackupAt, setLastLocalBackupAt] = useState<number | null>(null);
   const [siteBackground, setSiteBackground] = useState<SiteBackground>(DEFAULT_SITE_BACKGROUND);
   const continueTokenRef = useRef(0);
+  const solutionRunRef = useRef(0);
   const activeSolutionTokenRef = useRef<{ id: string; token: number } | null>(null);
   const storageReadyRef = useRef(false);
   const autoSavingRef = useRef(false);
@@ -807,7 +808,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const cancelAiSolution = (solutionId: string) => {
     const active = activeSolutionTokenRef.current;
     if (!active || active.id !== solutionId) return;
-    continueTokenRef.current += 1;
+    solutionRunRef.current += 1;
     activeSolutionTokenRef.current = null;
     const current = boardHistory.document.solutions.find((solution) => solution.id === solutionId);
     if (current && (current.status === "thinking" || current.status === "streaming")) {
@@ -830,12 +831,12 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setTimerRunning(false);
     setAssistantOpen(false);
 
-    const token = ++continueTokenRef.current;
+    const token = ++solutionRunRef.current;
     const solutionId = crypto.randomUUID();
     activeSolutionTokenRef.current = { id: solutionId, token };
 
     const isCancelled = () =>
-      continueTokenRef.current !== token ||
+      solutionRunRef.current !== token ||
       activeSolutionTokenRef.current?.id !== solutionId;
 
     try {
@@ -905,7 +906,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       if (activeSolutionTokenRef.current?.id === solutionId) {
         activeSolutionTokenRef.current = null;
       }
-      if (continueTokenRef.current === token) setAssistantLoading(false);
+      if (solutionRunRef.current === token) setAssistantLoading(false);
     }
   };
 
