@@ -123,3 +123,30 @@ def test_parse_board_solution_falls_back_to_plain_text():
 
     assert text == "Обычный ответ"
     assert steps == [{"text": "Обычный ответ", "kind": "text"}]
+
+
+def test_parse_board_solution_recovers_malformed_json_like_output():
+    raw = (
+        '"summary" "Решаем квадратное уравнение", '
+        '"steps" ["text" "На доске записано $$5x^2-20=0$$", '
+        '"kind" "math", "text" "$$x^2=4$$", "kind" "math", '
+        '"text" "$$x=\\pm2$$", "kind" "result"]'
+    )
+
+    text, steps = ai_module._parse_board_solution(raw)
+
+    assert [step["text"] for step in steps] == [
+        "На доске записано $$5x^2-20=0$$",
+        "$$x^2=4$$",
+        "$$x=\\pm2$$",
+    ]
+    assert '"summary"' not in text
+    assert '"steps"' not in text
+
+
+def test_parse_board_solution_never_falls_back_to_raw_structured_envelope():
+    raw = '{"summary":"broken","steps":[{"text": }]}'
+
+    _text, steps = ai_module._parse_board_solution(raw)
+
+    assert steps == []

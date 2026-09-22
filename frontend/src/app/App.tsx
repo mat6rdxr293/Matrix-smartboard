@@ -11,7 +11,7 @@ import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
-import { solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
+import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
@@ -853,12 +853,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       );
       if (isCancelled()) return;
 
-      const rawSteps = res.steps?.length
-        ? res.steps
-        : res.text.trim()
-          ? [{ text: res.text.trim(), kind: "text" as const }]
-          : [];
-      if (!rawSteps.length) throw new Error(tl("unknown_error"));
+      const rawSteps = extractSafeHandwritingSteps(res.steps, res.text);
+      if (!rawSteps.length) {
+        throw new Error("AI вернул поврежденный structured response");
+      }
 
       const placement = boardCanvasRef.current?.allocateSolutionPlacement(560, 480) ?? {
         x: 48,

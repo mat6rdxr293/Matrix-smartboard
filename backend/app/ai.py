@@ -396,6 +396,49 @@ def generate_ai_response(
         logger.warning("AI request failed: %s", exc)
         raise
 
+def _decode_loose_json_string(value: str) -> str:
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        decoded = re.sub(r'\\(["\\/])', r'\1', value)
+        decoded = decoded.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+        return decoded
+
+
+def _extract_loose_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
+    source = (raw or "").strip()
+    field_pattern = re.compile(
+        r'"(?P<key>summary|text|kind)"\s*:?\s*"(?P<value>(?:\\.|[^"\\])*)"',
+        re.I | re.S,
+    )
+    fields = list(field_pattern.finditer(source))
+
+    summary = ""
+    steps: list[dict[str, str]] = []
+    for index, match in enumerate(fields):
+        key = match.group("key").lower()
+        value = _decode_loose_json_string(match.group("value")).strip()
+        if key == "summary" and not summary:
+            summary = value[:2000]
+            continue
+        if key != "text" or not value:
+            continue
+
+        next_start = fields[index + 1].start() if index + 1 < len(fields) else min(len(source), match.end() + 300)
+        tail = source[match.end():next_start]
+        kind_match = re.search(
+            r'"kind"\s*:?\s*"(text|math|result|warning)"',
+            tail,
+            flags=re.I,
+        )
+        kind = kind_match.group(1).lower() if kind_match else "text"
+        steps.append({"text": value[:2000], "kind": kind})
+        if len(steps) >= 40:
+            break
+
+    return summary, steps
+
+
 def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
     cleaned = (raw or "").strip()
     fence = chr(96) * 3
@@ -427,8 +470,15 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
                 steps.append({"text": text.strip()[:2000], "kind": kind})
 
     if not steps:
+        loose_summary, loose_steps = _extract_loose_board_solution(cleaned)
+        if loose_steps:
+            summary = summary or loose_summary
+            steps = loose_steps
+
+    if not steps:
         fallback = _postprocess_math((raw or "").strip())
-        if fallback:
+        looks_structured = bool(re.search(r'"(?:summary|steps|text|kind)"\s*:?', fallback, flags=re.I))
+        if fallback and not looks_structured:
             steps = [{"text": fallback[:12000], "kind": "text"}]
         return fallback, steps
 

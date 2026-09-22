@@ -34,6 +34,49 @@ const SUPERSCRIPT: Record<string, string> = {
 const toSuperscript = (value: string) =>
   value.split("").map((char) => SUPERSCRIPT[char] ?? char).join("");
 
+const decodeLooseStructuredString = (value: string) =>
+  value
+    .replace(/\\(["\\/])/g, "$1")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t");
+
+export function extractSafeHandwritingSteps(
+  steps: HandwritingStep[] | null | undefined,
+  fallbackText: string,
+): HandwritingStep[] {
+  const clean = (steps ?? []).filter(
+    (step) => typeof step?.text === "string" && step.text.trim().length > 0,
+  );
+
+  const looksStructured = (value: string) =>
+    /"(?:summary|steps|text|kind)"\s*:?/i.test(value) ||
+    /^\s*[\[{]/.test(value);
+
+  if (clean.length > 1 || (clean.length === 1 && !looksStructured(clean[0].text))) {
+    return clean.map((step) => ({
+      text: step.text.trim(),
+      kind: step.kind,
+    }));
+  }
+
+  const source = clean.length === 1 ? clean[0].text : fallbackText;
+  if (!source.trim()) return [];
+  if (!looksStructured(source)) {
+    return [{ text: source.trim(), kind: "text" }];
+  }
+
+  const extracted: HandwritingStep[] = [];
+  const pattern = /"text"\s*:?\s*"((?:\\.|[^"\\])*)"/gi;
+  for (const match of source.matchAll(pattern)) {
+    const text = decodeLooseStructuredString(match[1]).trim();
+    if (!text) continue;
+    extracted.push({ text, kind: "text" });
+    if (extracted.length >= 40) break;
+  }
+  return extracted;
+}
+
 export function normalizeHandwritingText(source: string) {
   let text = (source || "").trim();
   text = text.replace(/\$\$/g, "").replace(/\$/g, "");
