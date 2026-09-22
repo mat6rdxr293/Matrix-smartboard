@@ -96,7 +96,8 @@ def test_local_ocr_retries_after_refusal(monkeypatch):
     result = ocr_module.ocr_image(b"raw")
 
     assert result == "5x^2 - 4x + 5 = 0"
-    assert len(calls) == 2
+    # После первого успешного математического чтения выполняется независимая проверка.
+    assert len(calls) == 3
 
 
 def test_local_ocr_raises_only_after_all_retries(monkeypatch):
@@ -127,3 +128,75 @@ def test_local_ocr_raises_only_after_all_retries(monkeypatch):
         ocr_module.ocr_image(b"raw")
 
     assert len(calls) == 3
+
+
+def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(monkeypatch):
+    calls = []
+    responses = [
+        r"\[\int_{0}^{4\pi} \cos x \, dx\]",
+        r"int_[0]^[4*pi](cos x) dx",
+        r"int_[0]^[4](3x^2 + cos(4*pi)) dx",
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=responses[len(calls) - 1])
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == "int_[0]^[4](3x^2 + cos(4*pi)) dx"
+    assert len(calls) == 3
+    final_prompt = calls[-1]["messages"][0]["content"][0]["text"]
+    assert "нижний предел" in final_prompt
+    assert "интегранд" in final_prompt
+
+
+def test_plain_text_ocr_stays_single_pass(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="Тема урока: Серебряный век")
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == "Тема урока: Серебряный век"
+    assert len(calls) == 1
+
+
+def test_ocr_normalizer_removes_outer_display_math_wrapper():
+    assert ocr_module._normalize_ocr_text(r"\[ x^2 + 1 \]") == "x^2 + 1"
