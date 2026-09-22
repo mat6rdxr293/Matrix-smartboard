@@ -131,6 +131,33 @@ def _postprocess_math(text: str) -> str:
 
 
 
+_RESPONSE_LANGUAGE_RULES = {
+    "ru": (
+        "Отвечай только на русском языке. Не используй казахский, английский, китайский или другие языки "
+        "в обычном тексте. Математические обозначения и латинские переменные разрешены."
+    ),
+    "kk": (
+        "Жауапты тек қазақ тілінде бер. Орысша, ағылшынша, қытайша немесе басқа тілдегі сөздерді араластырма. "
+        "Табиғи әрі қарапайым қазақ тілін қолдан. «шаг», «берем», «ответ» сияқты орысша сөздерді қолданба. "
+        "Математикалық таңбалар мен латын әріптерімен берілген айнымалыларды қолдануға болады."
+    ),
+    "en": (
+        "Answer only in English. Do not mix Russian, Kazakh, Chinese, or other languages into ordinary prose. "
+        "Mathematical notation and Latin variable names are allowed."
+    ),
+}
+
+_RESPONSE_LANGUAGE_REMINDERS = {
+    "ru": "Ответ дай только по-русски.",
+    "kk": "Жауапты тек қазақ тілінде бер. Орысша сөздерді араластырма.",
+    "en": "Answer only in English.",
+}
+
+
+def _response_language_rule(response_locale: str) -> str:
+    return _RESPONSE_LANGUAGE_RULES.get(response_locale, _RESPONSE_LANGUAGE_RULES["ru"])
+
+
 def _build_prompt(
     mode: str,
     problem: str,
@@ -139,7 +166,15 @@ def _build_prompt(
     continue_from: bool,
     subject: Optional[str],
     board_context: bool = False,
+    response_locale: str = "ru",
 ) -> tuple[str, str, int]:
+    response_locale = response_locale if response_locale in {"ru", "kk", "en"} else "ru"
+    language_rule = _response_language_rule(response_locale)
+    score_label = {
+        "ru": "Выполнено",
+        "kk": "Орындалды",
+        "en": "Completed",
+    }[response_locale]
     subject_label = (subject or "алгебра").strip() or "алгебра"
     lower_subject = subject_label.lower()
     is_formula_heavy = any(
@@ -161,7 +196,7 @@ def _build_prompt(
                 "Проверь только то решение и условие, которые реально видны в распознанном содержимом текущей доски. "
                 "Не сравнивай запись с карточками заданий, выбранным заданием, прошлым заданием или любым скрытым эталоном. "
                 "Если видимого условия достаточно, проверь логику каждого шага, укажи первую ошибку и в конце дай строку "
-                "Выполнено: NN%. Если условия недостаточно, чтобы честно определить полноту решения, прямо скажи об этом "
+                f"{score_label}: NN%. Если условия недостаточно, чтобы честно определить полноту решения, прямо скажи об этом "
                 "и не ставь 0%, не придумывай процент и не утверждай, что ученик решил не то задание."
             )
         else:
@@ -187,7 +222,7 @@ def _build_prompt(
             " Оценку ставь только за предметную корректность и полноту."
             " Не снижай балл за оформление, стиль записи, пунктуацию и опечатки."
             " Если нет ошибок, похвали. И посчитай на сколько процентов ученик решил задание. "
-            " В самом конце дай отдельную строку строго в формате: Выполнено: NN%"
+            f" В самом конце дай отдельную строку строго в формате: {score_label}: NN%"
         )
     else:
         max_tokens = 2000
@@ -198,7 +233,8 @@ def _build_prompt(
 
     base_sys = (
         f"Ты школьный учитель по предмету «{subject_label}». "
-        "Пиши по-русски, понятным школьным языком, шагами 1..N. "
+        f"{language_rule} "
+        "Пиши понятным школьным языком, шагами 1..N. "
         "Для подсказки не раскрывай полный ответ. "
         "Если найдена ошибка, укажи первый неверный шаг и корректный вариант. "
     )
@@ -210,7 +246,7 @@ def _build_prompt(
         )
     else:
         base_sys += (
-            "В режиме проверки всегда завершай ответ строкой строго формата: Выполнено: NN%, где NN от 0 до 100. "
+            f"В режиме проверки всегда завершай ответ строкой строго формата: {score_label}: NN%, где NN от 0 до 100. "
         )
 
     if is_formula_heavy:
@@ -236,6 +272,7 @@ def _build_prompt(
             f"{assistant_context.strip()}"
         )
 
+    user += f"\n\n{_RESPONSE_LANGUAGE_REMINDERS[response_locale]}"
     source_label = "Распознано с текущей доски" if board_context else "Задача"
     user += f"\n\n{source_label}:\n{problem.strip()}"
     return sys, user, max_tokens
@@ -336,6 +373,7 @@ def generate_ai_response(
     continue_from: bool = False,
     subject: Optional[str] = None,
     board_context: bool = False,
+    response_locale: str = "ru",
 ) -> str:
     api_key = get_openai_key()
     base_url = settings.ai_base_url
@@ -350,6 +388,7 @@ def generate_ai_response(
         continue_from,
         subject,
         board_context,
+        response_locale,
     )
 
     client_options = {
@@ -531,6 +570,7 @@ def generate_board_solution(
             problem,
             subject=subject,
             board_context=board_context,
+            response_locale=response_locale,
         )
         steps = [{"text": text, "kind": "text"}] if text else []
         return _sanitize_board_language(text, steps, response_locale)
@@ -543,16 +583,12 @@ def generate_board_solution(
         False,
         subject,
         board_context,
+        response_locale,
     )
-    language_name = {
-        "ru": "русском",
-        "kk": "казахском",
-        "en": "английском",
-    }.get(response_locale, "русском")
+    language_rule = _response_language_rule(response_locale)
     sys += (
-        f"\nОтвечай ТОЛЬКО на {language_name} языке. "
-        "Не вставляй китайские, японские, корейские или другие языки, если их нет в условии задачи. "
-        "Математические обозначения и латинские переменные разрешены. "
+        f"\n{language_rule} "
+        "Не вставляй текст на других языках, если его нет в условии задачи. "
         "Верни ТОЛЬКО валидный JSON без markdown-обертки. "
         "Формат: {\"summary\":\"кратко\",\"steps\":["
         "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "

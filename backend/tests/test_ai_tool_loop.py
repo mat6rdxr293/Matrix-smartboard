@@ -161,3 +161,44 @@ def test_board_language_sanitizer_removes_cjk_for_russian():
 
     assert text == "Решение: нет."
     assert steps == [{"text": "Корней нет.", "kind": "result"}]
+
+
+def test_general_ai_prompt_follows_ui_locale():
+    _, _, _ = ai_module._build_prompt(
+        "hint",
+        "2+2",
+        None,
+        None,
+        False,
+        "math",
+        True,
+        "ru",
+    )
+
+    en_sys, en_user, _ = ai_module._build_prompt(
+        "check",
+        "2+2=4",
+        None,
+        None,
+        False,
+        "math",
+        True,
+        "en",
+    )
+    assert "Answer only in English" in en_sys
+    assert "Completed: NN%" in en_user
+    assert "Пиши по-русски" not in en_sys
+
+    kk_sys, kk_user, _ = ai_module._build_prompt(
+        "check",
+        "2+2=4",
+        None,
+        None,
+        False,
+        "math",
+        True,
+        "kk",
+    )
+    assert "Жауапты тек қазақ тілінде бер" in kk_sys
+    assert "Орындалды: NN%" in kk_user
+    assert "Пиши по-русски" not in kk_sys

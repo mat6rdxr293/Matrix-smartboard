@@ -585,6 +585,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 payload.continue_from,
                 payload.subject,
                 payload.board_context,
+                payload.response_locale or "ru",
             )
         async with ai_history_lock:
             _append_ai_history(

@@ -790,7 +790,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   const extractCheckPercent = (text: string): number | null => {
     const normalized = text.replace(",", ".");
-    const strict = /(?:^|\n)\s*\**\s*выполнено\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
+    const strict = /(?:^|\n)\s*\**\s*(?:выполнено|орындалды|completed)\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
     const strictMatch = normalized.match(strict);
     if (!strictMatch) return null;
     const value = Number(strictMatch[1]);
@@ -854,7 +854,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       );
       if (isCancelled()) return;
 
-      const rawSteps = extractSafeHandwritingSteps(res.steps, res.text);
+      const rawSteps = extractSafeHandwritingSteps(res.steps, res.text, locale);
       if (!rawSteps.length) {
         throw new Error("AI вернул поврежденный structured response");
       }
@@ -945,6 +945,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           lesson.id,
           crypto.randomUUID(),
           true,
+          undefined,
+          locale,
         );
         fullText = res.text || "";
         await typeText(
@@ -966,6 +968,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
             lesson.id,
             crypto.randomUUID(),
             true,
+            undefined,
+            locale,
           );
           const next = continuation.text || "";
           if (!next.trim()) break;
@@ -1018,6 +1022,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         lesson.id,
         crypto.randomUUID(),
         true,
+        undefined,
+        locale,
       );
       await typeText(res.text, (partial) => updateMessage(id, partial), () => continueTokenRef.current !== token);
     } catch (err) {
