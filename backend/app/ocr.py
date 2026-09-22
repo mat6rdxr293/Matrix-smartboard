@@ -116,6 +116,63 @@ def _choose_math_candidate(candidates: list[str]) -> str:
     return max(usable, key=lambda item: (_math_structure_score(item), len(item)))
 
 
+def _fit_image(
+    image: Image.Image,
+    *,
+    max_longest: int,
+    min_longest: int = 0,
+) -> Image.Image:
+    longest = max(image.size)
+    if not longest:
+        return image
+    factor = 1.0
+    if longest > max_longest:
+        factor = max_longest / longest
+    elif min_longest and longest < min_longest:
+        factor = min(min_longest / longest, max_longest / longest)
+    if abs(factor - 1.0) < 0.01:
+        return image
+    return image.resize(
+        (
+            max(1, round(image.width * factor)),
+            max(1, round(image.height * factor)),
+        ),
+        Image.Resampling.LANCZOS,
+    )
+
+
+def _compact_ocr_image(image_bytes: bytes, *, max_longest: int = 1280) -> bytes | None:
+    """Tightly crop handwriting and bound visual tokens for local VL models."""
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        white = Image.new("RGBA", image.size, (255, 255, 255, 255))
+        white.alpha_composite(image)
+        rgb = white.convert("RGB")
+
+        bbox = _ink_bbox(rgb)
+        if bbox:
+            left, top, right, bottom = bbox
+            width = max(1, right - left)
+            height = max(1, bottom - top)
+            margin_x = max(10, round(width * 0.04))
+            margin_y = max(10, round(height * 0.08))
+            bbox = (
+                max(0, left - margin_x),
+                max(0, top - margin_y),
+                min(rgb.width, right + margin_x),
+                min(rgb.height, bottom + margin_y),
+            )
+            rgb = rgb.crop(bbox)
+
+        rgb = _fit_image(rgb, max_longest=max_longest, min_longest=640)
+        output = io.BytesIO()
+        rgb.save(output, format="PNG", optimize=True)
+        return output.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OCR compact preprocessing skipped: %s", exc)
+        return None
+
+
 def _contrast_variant(image_bytes: bytes) -> bytes | None:
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
@@ -123,19 +180,9 @@ def _contrast_variant(image_bytes: bytes) -> bytes | None:
         white.alpha_composite(image)
         gray = ImageOps.grayscale(white.convert("RGB"))
         gray = ImageOps.autocontrast(gray, cutoff=1)
+        gray = _fit_image(gray, max_longest=1280, min_longest=640)
 
-        longest = max(gray.size)
-        if longest and longest < 2400:
-            factor = min(2.0, 2400 / longest)
-            gray = gray.resize(
-                (
-                    max(1, round(gray.width * factor)),
-                    max(1, round(gray.height * factor)),
-                ),
-                Image.Resampling.LANCZOS,
-            )
-
-        # Keep antialiasing around thin handwriting, but remove most grid/background noise.
+        # Keep handwriting and remove most grid/background noise.
         contrasted = gray.point(lambda value: 0 if value < 205 else 255)
         output = io.BytesIO()
         contrasted.save(output, format="PNG", optimize=True)
@@ -158,16 +205,7 @@ def _ink_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
 
 def _crop_png(image: Image.Image, box: tuple[int, int, int, int]) -> bytes:
     cropped = image.crop(box).convert("RGB")
-    longest = max(cropped.size)
-    if longest and longest < 1800:
-        factor = min(3.0, 1800 / longest)
-        cropped = cropped.resize(
-            (
-                max(1, round(cropped.width * factor)),
-                max(1, round(cropped.height * factor)),
-            ),
-            Image.Resampling.LANCZOS,
-        )
+    cropped = _fit_image(cropped, max_longest=576, min_longest=360)
     output = io.BytesIO()
     cropped.save(output, format="PNG", optimize=True)
     return output.getvalue()
@@ -201,7 +239,7 @@ def _math_zone_crops(image_bytes: bytes) -> list[tuple[str, bytes]]:
 
         # Limits live close to the integral sign, which is normally in the
         # left half of the formula. Give them a generous left-side crop.
-        limits_right = min(right, left + round(width * 0.55))
+        limits_right = min(right, left + round(width * 0.42))
         upper_bottom = min(bottom, top + round(height * 0.48))
         lower_top = max(top, top + round(height * 0.48))
 
@@ -259,7 +297,7 @@ def _request_ocr(
         response = client.chat.completions.create(
             model=settings.ocr_model,
             messages=[{"role": "user", "content": content}],
-            max_tokens=1200,
+            max_tokens=512,
             temperature=0,
         )
         text = response.choices[0].message.content
@@ -275,7 +313,7 @@ def _request_ocr(
         response = client.responses.create(
             model=settings.ocr_model,
             input=[{"role": "user", "content": content}],
-            max_output_tokens=1200,
+            max_output_tokens=512,
         )
         text = response.output_text
     return _normalize_ocr_text(text)
@@ -311,11 +349,19 @@ def _extract_json_object(text: str) -> dict[str, str] | None:
     match = re.search(r"\{.*\}", value, flags=re.S)
     if not match:
         return None
+    import json
+    payload = match.group(0)
     try:
-        import json
-        parsed = json.loads(match.group(0))
+        parsed = json.loads(payload)
     except Exception:
-        return None
+        # Vision models often emit LaTeX backslashes inside JSON strings
+        # without escaping them (e.g. "\cos", "\pi"). Repair only
+        # backslashes that are not valid JSON escapes, then retry.
+        repaired = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', payload)
+        try:
+            parsed = json.loads(repaired)
+        except Exception:
+            return None
     if not isinstance(parsed, dict):
         return None
     result: dict[str, str] = {}
@@ -374,9 +420,10 @@ def ocr_image(png_bytes: bytes) -> str:
         client_options["base_url"] = base_url
     client = OpenAI(**client_options)
 
-    contrast = _contrast_variant(png_bytes)
-    variants = [png_bytes]
-    if contrast and contrast != png_bytes:
+    compact = _compact_ocr_image(png_bytes) or png_bytes
+    contrast = _contrast_variant(compact)
+    variants = [compact]
+    if contrast and contrast != compact:
         variants.append(contrast)
 
     candidates: list[str] = []
@@ -404,6 +451,11 @@ def ocr_image(png_bytes: bytes) -> str:
             if not math_mode:
                 return candidate
 
+            # Integrals get a dedicated spatial pass, so a second generic
+            # full-image reading only adds latency without adding structure.
+            if _INTEGRAL_RE.search(candidate):
+                break
+
             if len(candidates) >= 2:
                 break
         except Exception as exc:  # noqa: BLE001
@@ -418,13 +470,27 @@ def ocr_image(png_bytes: bytes) -> str:
         if needs_reconcile:
             try:
                 if _INTEGRAL_RE.search(best):
-                    spatial_raw = _request_ocr(
-                        client,
-                        prompt=_integral_spatial_prompt(candidates),
-                        image_bytes=png_bytes,
-                        base_url=base_url,
-                        extra_images=_math_zone_crops(contrast or png_bytes),
-                    )
+                    zones = _math_zone_crops(compact)
+                    if zones:
+                        main = next(
+                            (item for item in zones if "основной" in item[0].lower()),
+                            zones[-1],
+                        )
+                        extras = [item for item in zones if item is not main]
+                        spatial_raw = _request_ocr(
+                            client,
+                            prompt=_integral_spatial_prompt(candidates),
+                            image_bytes=main[1],
+                            base_url=base_url,
+                            extra_images=extras,
+                        )
+                    else:
+                        spatial_raw = _request_ocr(
+                            client,
+                            prompt=_integral_spatial_prompt(candidates),
+                            image_bytes=compact,
+                            base_url=base_url,
+                        )
                     spatial = _integral_from_spatial_response(spatial_raw)
                     if _usable_ocr_text(spatial):
                         candidates.append(spatial)

@@ -135,7 +135,6 @@ def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(
     calls = []
     responses = [
         r"\[\int_{0}^{4\pi} \cos x \, dx\]",
-        r"int_[0]^[4*pi](cos x) dx",
         '{"lower_limit":"0","upper_limit":"4","integrand":"3x^2 + cos(4*pi)","differential":"dx"}',
     ]
 
@@ -163,7 +162,7 @@ def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(
     result = ocr_module.ocr_image(b"raw")
 
     assert result == r"\int_{0}^{4} (3x^2 + cos(4*pi)) dx"
-    assert len(calls) == 3
+    assert len(calls) == 2
     final_prompt = calls[-1]["messages"][0]["content"][0]["text"]
     assert "lower_limit" in final_prompt
     assert "upper_limit" in final_prompt
@@ -208,7 +207,6 @@ def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeyp
     calls = []
     responses = [
         r"\int_{-\pi}^{\pi} \sqrt{x+1} - x^2 \, dx",
-        r"int_[-pi]^[pi](sqrt(x+1) - x^2) dx",
         '{"lower_limit":"-pi","upper_limit":"(4*sqrt(pi))/(11)",'
         '"integrand":"cos(sqrt(x+1)) - 2*x^2","differential":"dx"}',
     ]
@@ -249,14 +247,25 @@ def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeyp
         r"\int_{-pi}^{(4*sqrt(pi))/(11)} "
         r"(cos(sqrt(x+1)) - 2*x^2) dx"
     )
-    assert len(calls) == 3
+    assert len(calls) == 2
 
     final_content = calls[-1]["messages"][0]["content"]
     image_parts = [item for item in final_content if item["type"] == "image_url"]
-    assert len(image_parts) == 4
+    assert len(image_parts) == 3
 
     final_prompt = final_content[0]["text"]
     assert "lower_limit" in final_prompt
     assert "upper_limit" in final_prompt
     assert "integrand" in final_prompt
     assert "коэффициент" in final_prompt
+
+
+def test_spatial_json_parser_repairs_unescaped_latex_backslashes():
+    raw = (
+        'json\n{"lower_limit":"0","upper_limit":"4",'
+        '"integrand":"3x^2 + \\cos 4\\pi","differential":"dx"}'
+    )
+
+    parsed = ocr_module._integral_from_spatial_response(raw)
+
+    assert parsed == r"\int_{0}^{4} (3x^2 + \cos 4\pi) dx"
