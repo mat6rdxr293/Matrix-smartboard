@@ -45,3 +45,18 @@
 - Запуск на доске — **без mmap** (`-lm none`; флага `--no-mmap` в этой версии уже нет), иначе RSS почти вдвое больше.
 - Замеры: `benchmark/board_speed.md`. Бенчмарк качества: `python benchmark/run_bench.py --model <hf_id|path>`.
 - PDF → текст: `python scripts/extract_pdf.py [--ocr]`, вход `textbooks/<предмет>/<класс>/*.pdf`, выход `data/raw/`.
+
+## Конвейер (скрипты)
+- Обучение: `scripts/make_test_sft.py` (временные 50 пар → `data/sft/train.jsonl`) →
+  `scripts/finetune.py` (QLoRA, Unsloth; формат `{"messages": [...]}`, лосс только по ответу) →
+  `scripts/export_gguf.py --adapter models/<lora> --name <имя>` (слияние → GGUF Q4_K_M в `models/`).
+  В export_gguf.py есть обход бага Unsloth: шарды базы копируются из кэша HF с режимом 0444.
+- RAG: `scripts/fetch_wiki.py` (тестовый корпус, CC BY-SA) → `scripts/build_index.py --source wiki_test|raw`
+  (фрагменты ~300 токенов, эмбеддер по умолчанию e5-small, индекс в `data/index/<source>_<model>/`) →
+  `scripts/rag.py` (`Retriever.search`, top-3). Сравнение эмбеддеров: `benchmark/embed_compare.md`.
+- Промпты (системный + шаблон RAG) — единые в `scripts/prompts.py`: их используют обучение, бенчмарк и бэкенд.
+- Бенчмарк: `benchmark/run_bench.py [--rag]` → `benchmark/score.py results_*.jsonl`
+  (LLM-судья через OpenAI-совместимый API, оценки предварительные; ручная колонка `human_score` в `scores_*.csv`).
+- Сервер для бэкенда: `scripts/serve.sh` (llama-server, без mmap, 4 потока) — `docs/API_FOR_BACKEND.md`.
+- Не использовать `pkill -f llama-server` из Bash-инструмента: под шаблон попадает сама оболочка.
+  Нужно `pkill -x llama-server`.
