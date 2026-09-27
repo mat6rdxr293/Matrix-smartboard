@@ -11,6 +11,27 @@ const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): 
 });
 
 describe("clusterOcrStrokes", () => {
+  it("reattaches a detached trailing digit on the same equation row", () => {
+    const strokes = [
+      // Main equation row, deliberately wide and internally connected.
+      stroke(40, 100, 110, 165),
+      stroke(115, 125, 185, 125),
+      stroke(190, 95, 260, 165),
+      stroke(265, 125, 335, 125),
+      stroke(340, 95, 410, 165),
+      stroke(415, 125, 485, 125),
+      // Final digit is visibly on the same row, but beyond the normal 84 px gap.
+      stroke(600, 100, 655, 165),
+      stroke(655, 100, 610, 135),
+    ];
+
+    const clusters = clusterOcrStrokes(strokes);
+
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(clusters[0].bounds.right).toBeGreaterThan(650);
+  });
+
   it("keeps two nearby equations as separate blocks and picks the most recent one", () => {
     const strokes = [
       stroke(50, 80, 120, 140),

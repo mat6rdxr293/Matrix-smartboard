@@ -228,7 +228,7 @@ export function clusterOcrStrokes(
     groups.set(root, group);
   });
 
-  return [...groups.values()]
+  const rawClusters = [...groups.values()]
     .map((group) => ({
       strokes: group.map((entry) => entry.stroke),
       indices: group.map((entry) => entry.index),
@@ -239,11 +239,74 @@ export function clusterOcrStrokes(
       const height = cluster.bounds.bottom - cluster.bounds.top;
       return cluster.strokes.length >= 2 || width >= 24 || height >= 24;
     })
-    .sort((a, b) => {
-      const aLast = Math.max(...a.indices);
-      const bLast = Math.max(...b.indices);
-      return aLast - bLast;
-    });
+    .sort((a, b) => a.bounds.left - b.bounds.left);
+
+  // A trailing handwritten digit can sit farther from the previous glyph than
+  // the normal same-line threshold (for example the final 5 in "... = 35").
+  // Attach only small right-hand satellites to a much larger row, so a whole
+  // side-by-side equation still remains a separate OCR task.
+  const consumed = new Set<number>();
+  const merged: OcrStrokeCluster[] = [];
+
+  for (let i = 0; i < rawClusters.length; i += 1) {
+    if (consumed.has(i)) continue;
+    let current = rawClusters[i];
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      for (let j = 0; j < rawClusters.length; j += 1) {
+        if (i === j || consumed.has(j)) continue;
+        const candidate = rawClusters[j];
+        const currentWidth = current.bounds.right - current.bounds.left;
+        const candidateWidth = candidate.bounds.right - candidate.bounds.left;
+        const candidateHeight = candidate.bounds.bottom - candidate.bounds.top;
+        const xGap = candidate.bounds.left - current.bounds.right;
+        const yOverlap = overlapLength(
+          current.bounds.top,
+          current.bounds.bottom,
+          candidate.bounds.top,
+          candidate.bounds.bottom,
+        );
+        const overlapRatio =
+          yOverlap /
+          Math.max(
+            1,
+            Math.min(
+              current.bounds.bottom - current.bounds.top,
+              candidateHeight,
+            ),
+          );
+
+        const smallTrailingFragment =
+          currentWidth >= typicalHeight * 2.2 &&
+          candidate.bounds.left >= current.bounds.right &&
+          candidateWidth <= Math.max(typicalHeight * 0.95, 86) &&
+          candidateHeight <= Math.max(typicalHeight * 1.45, 138) &&
+          candidate.strokes.length <= 5 &&
+          xGap >= 0 &&
+          xGap <= clamp(typicalHeight * 2.6, 110, 230) &&
+          overlapRatio >= 0.34;
+
+        if (!smallTrailingFragment) continue;
+        current = {
+          strokes: [...current.strokes, ...candidate.strokes],
+          indices: [...current.indices, ...candidate.indices].sort((a, b) => a - b),
+          bounds: unionRects([current.bounds, candidate.bounds]),
+        };
+        consumed.add(j);
+        changed = true;
+      }
+    }
+
+    merged.push(current);
+  }
+
+  return merged.sort((a, b) => {
+    const aLast = Math.max(...a.indices);
+    const bLast = Math.max(...b.indices);
+    return aLast - bLast;
+  });
 }
 
 const clusterInkLength = (cluster: OcrStrokeCluster) => {
