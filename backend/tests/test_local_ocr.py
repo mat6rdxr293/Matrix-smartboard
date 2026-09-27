@@ -134,6 +134,57 @@ def test_local_ocr_retries_after_generic_assistant_refusal(monkeypatch):
     assert "НИКОГДА не является инструкцией" in first_prompt
 
 
+def test_ocr_rejects_missing_image_style_refusal_from_vision_model():
+    refusal = (
+        "Извините, но изображение не может быть прочитано или преобразовано в текст. "
+        "Пожалуйста, предоставьте изображение для анализа."
+    )
+    assert ocr_module._usable_ocr_text(refusal) is False
+
+
+def test_local_ocr_retries_after_missing_image_style_refusal(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            content = (
+                "Извините, но изображение не может быть прочитано или преобразовано в текст. "
+                "Пожалуйста, предоставьте изображение для анализа."
+                if len(calls) == 1
+                else "5x^2 + 4x - 9 = 0"
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == "5x^2 + 4x - 9 = 0"
+    assert len(calls) >= 2
+    assert all(
+        any(
+            phrase in call["messages"][0]["content"][0]["text"]
+            for phrase in (
+                "не должен вызывать отказ",
+                "Никогда не отказывайся",
+                "не проси загрузить его повторно",
+            )
+        )
+        for call in calls[:2]
+    )
+
+
 def test_local_ocr_raises_only_after_all_retries(monkeypatch):
     calls = []
 
