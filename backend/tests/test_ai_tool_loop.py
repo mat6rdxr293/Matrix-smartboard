@@ -1161,6 +1161,16 @@ def test_board_actions_parser_accepts_safe_visual_actions():
     assert actions[2]["target_id"] == "graph-1"
 
 
+def test_board_actions_parser_sanitizes_graph_expression_from_model_prose():
+    raw = (
+        '{"board_actions":['
+        '{"type":"add_graph","expressions":["y=x^2 и рядом нарисуй треугольник"]}'
+        ']}'
+    )
+    actions = ai_module._parse_board_actions(raw)
+    assert actions == [{"type": "add_graph", "expressions": ["x^2"]}]
+
+
 def test_board_actions_parser_rejects_unknown_or_unbounded_payloads():
     raw = '{"board_actions":[{"type":"shell","command":"rm -rf /"},' \
           '{"type":"add_shape","shape":"triangle","x":999,"y":-50}]}'
@@ -1174,6 +1184,15 @@ def test_visual_board_request_uses_deterministic_graph_and_shape_fallback():
     actions = ai_module._fallback_visual_board_actions(problem)
     assert actions[0]["type"] == "add_graph"
     assert actions[0]["expressions"] == ["x^2", "sin(x)"]
+    assert actions[1]["type"] == "add_shape"
+    assert actions[1]["shape"] == "triangle"
+
+
+def test_visual_fallback_stops_graph_expression_before_adjacent_shape_request():
+    problem = "Построй на доске график y=x^2 и рядом нарисуй треугольник."
+    actions = ai_module._fallback_visual_board_actions(problem)
+    assert actions[0]["type"] == "add_graph"
+    assert actions[0]["expressions"] == ["x^2"]
     assert actions[1]["type"] == "add_shape"
     assert actions[1]["shape"] == "triangle"
 

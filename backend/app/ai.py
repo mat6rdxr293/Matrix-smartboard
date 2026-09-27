@@ -1059,6 +1059,12 @@ def _normalize_graph_expression(value: str) -> str:
         result,
         maxsplit=1,
     )[0].strip()
+    result = re.split(
+        r"(?i)\s+(?:и|and)\s+(?:(?:рядом|затем|потом|ещ[её])\s+)*"
+        r"(?:нарис\w*|постро\w*|изобраз\w*|draw\w*|plot\w*|sketch\w*)\b",
+        result,
+        maxsplit=1,
+    )[0].strip()
     result = re.sub(r"(?<=\d)(?=[A-Za-zπ])", "*", result)
     result = re.sub(r"[.!?]+$", "", result).strip()
     return result[:160]
@@ -1083,7 +1089,9 @@ def _fallback_visual_board_actions(
         "change", "replace", "move", "resize",
     )) and ("граф" in lower or "graph" in lower)
     graph_matches = re.findall(
-        r"(?i)\by\s*=\s*(.+?)(?=\s+(?:и|and)\s+(?:y\s*=|нарис|постро|изобраз|draw|plot)|[,;\n]|$)",
+        r"(?i)\by\s*=\s*(.+?)(?="
+        r"\s+(?:и|and)\s+(?:(?:рядом|затем|потом|ещ[её])\s+)*(?:y\s*=|нарис|постро|изобраз|draw|plot|sketch)"
+        r"|[,;\n]|$)",
         text,
     )
     expressions = [
