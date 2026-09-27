@@ -1119,6 +1119,162 @@ def _board_solution_has_result(steps: list[dict[str, str]]) -> bool:
     return bool(steps) and steps[-1].get("kind") == "result" and bool(steps[-1].get("text", "").strip())
 
 
+def _strip_solution_meta_steps(
+    steps: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    meta_cues = (
+        "проверка подтвердила",
+        "проверим наше решение",
+        "проверим решение",
+        "verification confirms",
+        "check confirms",
+        "тексеру растайды",
+    )
+    cleaned: list[dict[str, str]] = []
+    for step in steps:
+        lower = step.get("text", "").strip().lower()
+        if step.get("kind") != "result" and any(cue in lower for cue in meta_cues):
+            continue
+        cleaned.append(dict(step))
+    return cleaned
+
+
+def _integral_domain_failure(tool_trace: list[dict]) -> dict | None:
+    for entry in reversed(tool_trace):
+        if entry.get("tool") != "math_integrate":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        result = payload.get("result")
+        if isinstance(result, dict) and result.get("domain_valid") is False:
+            return result
+    return None
+
+
+def _domain_failure_board_steps(
+    failure: dict,
+    response_locale: str,
+) -> list[dict[str, str]]:
+    domain_item = failure.get("domain") or {}
+    invalid_item = failure.get("invalid_part") or {}
+    domain = str(domain_item.get("latex") or domain_item.get("text") or "").strip()
+    invalid = str(invalid_item.get("latex") or invalid_item.get("text") or "").strip()
+
+    domain_step = {"text": f"$$D_f={domain}$$", "kind": "math"}
+
+    if response_locale == "en":
+        return [
+            domain_step,
+            {"text": f"On $$ {invalid} $$ the integrand is not real-defined.", "kind": "warning"},
+            {"text": "Therefore the real definite integral is not defined.", "kind": "result"},
+        ]
+    if response_locale == "kk":
+        return [
+            domain_step,
+            {"text": f"$$ {invalid} $$ аралығында интеграл астындағы функция анықталмаған.", "kind": "warning"},
+            {"text": "Сондықтан нақты сандарда анықталған интеграл жоқ.", "kind": "result"},
+        ]
+    return [
+        domain_step,
+        {"text": f"На участке $$ {invalid} $$ интегранд не определён.", "kind": "warning"},
+        {"text": "Поэтому в действительных числах определённый интеграл не существует.", "kind": "result"},
+    ]
+
+
+def _verified_integral_board_steps(
+    tool_trace: list[dict],
+    response_locale: str,
+) -> list[dict[str, str]] | None:
+    result = None
+    for entry in reversed(tool_trace):
+        if entry.get("tool") != "math_integrate":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        candidate = payload.get("result")
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("domain_valid") is True
+            and candidate.get("bounds")
+            and candidate.get("antiderivative")
+            and candidate.get("upper_value")
+            and candidate.get("lower_value")
+            and candidate.get("result")
+        ):
+            result = candidate
+            break
+    if result is None:
+        return None
+
+    bounds = result["bounds"]
+    if not isinstance(bounds, list) or len(bounds) != 2:
+        return None
+
+    def latex(item) -> str:
+        if isinstance(item, dict):
+            return str(item.get("latex") or item.get("text") or "").strip()
+        return str(item or "").strip()
+
+    lower = latex(bounds[0])
+    upper = latex(bounds[1])
+    antiderivative = latex(result["antiderivative"])
+    upper_value = latex(result["upper_value"])
+    lower_value = latex(result["lower_value"])
+    final_value = latex(result["result"])
+    variable = str(result.get("variable") or "x")
+
+    if not all((lower, upper, antiderivative, upper_value, lower_value, final_value)):
+        return None
+
+    answer_prefix = {
+        "ru": "Ответ",
+        "kk": "Жауап",
+        "en": "Answer",
+    }.get(response_locale, "Ответ")
+
+    return [
+        {"text": f"$$F({variable})={antiderivative}$$", "kind": "math"},
+        {
+            "text": f"$$I=F\\left({upper}\\right)-F\\left({lower}\\right)$$",
+            "kind": "math",
+        },
+        {
+            "text": f"$$F\\left({upper}\\right)={upper_value}$$",
+            "kind": "math",
+        },
+        {
+            "text": f"$$F\\left({lower}\\right)={lower_value}$$",
+            "kind": "math",
+        },
+        {
+            "text": f"$$I={upper_value}-\\left({lower_value}\\right)={final_value}$$",
+            "kind": "math",
+        },
+        {"text": f"{answer_prefix}: $$I={final_value}$$", "kind": "result"},
+    ]
+
+
+def _board_solution_min_steps(problem: str, subject: Optional[str]) -> int:
+    kind = _check_task_kind(problem, subject)
+    if kind == "integral":
+        return 6
+    if kind in {"equation", "system", "inequality", "derivative", "limit", "geometry"}:
+        return 5
+    if kind in {
+        "probability",
+        "sequence_nth",
+        "sequence_sum",
+        "statistics_mean",
+        "statistics_median",
+        "statistics_mode",
+        "statistics_variance",
+    }:
+        return 4
+    return 3
+
+
 def _merge_board_solution_steps(
     existing: list[dict[str, str]],
     continuation: list[dict[str, str]],
@@ -2353,9 +2509,15 @@ def generate_board_solution(
         "Формат: {\"summary\":\"кратко\",\"steps\":["
         "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "
         "Каждый логический шаг должен быть отдельным элементом. "
-        "Это запись НА ДОСКЕ: пиши предельно кратко, как ученик или учитель от руки. "
-        "Не переписывай условие задачи и не объясняй очевидные действия длинными предложениями. "
-        "Обычно используй 3-7 коротких шагов, по возможности одну строку на шаг; предпочитай формулы словам. "
+        "Это ПОЛНОЕ решение для записи на доске: пиши компактно, но НЕ пропускай существенные преобразования, "
+        "вычисления, подстановки и проверки. Не переписывай условие целиком и не растягивай очевидные фразы. "
+        "Обычно используй 5-12 содержательных шагов; если задача требует больше, добавь столько шагов, сколько нужно. "
+        "Каждый нетривиальный переход должен быть виден ученику. Предпочитай формулы коротким пояснениям, "
+        "но не схлопывай несколько важных действий в одну строку. "
+        "Не добавляй пустые мета-фразы вроде «проверка подтвердила решение»; вместо них покажи само вычисление или проверку. "
+        "Для определённых интегралов сначала проверь область определения интегранда на всём промежутке; "
+        "если функция не определена на части промежутка в действительных числах, явно остановись и укажи это вместо фиктивного численного ответа. "
+        "Если интеграл допустим, покажи упрощение констант/тригонометрии, первообразную, подстановку обоих пределов и арифметику до ответа. "
         "В школьной алгебре решай над действительными числами, если комплексные числа явно не требуются условием. "
         "Для неравенств: знак неравенства меняется ТОЛЬКО при умножении или делении обеих частей на отрицательное число; "
         "обычный перенос слагаемого или прибавление/вычитание одного и того же числа знак не меняет. "
@@ -2380,7 +2542,7 @@ def generate_board_solution(
         client,
         sys=sys,
         user=user,
-        max_tokens=max_tokens,
+        max_tokens=max(max_tokens, 1400),
         subject=subject,
         task_text=problem,
         postprocess=False,
@@ -2392,7 +2554,98 @@ def generate_board_solution(
     steps = _strip_repeated_problem_steps(steps, problem)
     steps = _normalize_board_result_tail(steps, response_locale)
     verified_reference = _reference_answer_from_trace(problem, subject, tool_trace)
-    steps = _enforce_verified_board_result(steps, verified_reference)
+    domain_failure = _integral_domain_failure(tool_trace)
+    if domain_failure is not None:
+        steps = _domain_failure_board_steps(domain_failure, response_locale)
+    else:
+        steps = _enforce_verified_board_result(steps, verified_reference)
+        steps = _strip_solution_meta_steps(steps)
+
+        minimum_steps = _board_solution_min_steps(problem, subject)
+        verified_integral_steps = _verified_integral_board_steps(
+            tool_trace,
+            response_locale,
+        )
+        if (
+            verified_integral_steps
+            and steps
+            and _board_solution_has_result(steps)
+            and len(steps) < minimum_steps
+        ):
+            steps = verified_integral_steps
+        elif (
+            steps
+            and _board_solution_has_result(steps)
+            and len(steps) < minimum_steps
+            and any(
+                isinstance(entry.get("payload"), dict)
+                and entry["payload"].get("ok")
+                for entry in tool_trace
+            )
+        ):
+            verified_trace = [
+                entry
+                for entry in tool_trace
+                if isinstance(entry.get("payload"), dict)
+                and entry["payload"].get("ok")
+            ]
+            rewrite_sys = (
+                sys
+                + "\nПредыдущая версия решения получилась слишком сжатой. "
+                + f"ПЕРЕПИШИ ВСЁ решение целиком минимум в {minimum_steps} содержательных шагах. "
+                + "Не добавляй пустые мета-фразы. Каждый промежуточный математический переход должен быть виден. "
+                + "Используй проверенные вычислительные данные ниже как источник истины для формул и конечного ответа. "
+                + "Верни только полный JSON того же формата; последний шаг kind=result."
+            )
+            rewrite_user = (
+                user
+                + "\n\nПроверенные вычислительные данные:\n"
+                + json.dumps(verified_trace, ensure_ascii=False)[:12000]
+                + "\n\nСлишком сжатая версия:\n"
+                + json.dumps(steps, ensure_ascii=False)
+                + "\n\nПерепиши решение полностью и подробно по действиям."
+            )
+            request = {
+                "model": settings.ai_model,
+                "messages": [
+                    {"role": "system", "content": rewrite_sys},
+                    {"role": "user", "content": rewrite_user},
+                ],
+                "max_tokens": max(max_tokens, 1600),
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            }
+            try:
+                rewritten_response = client.chat.completions.create(**request)
+            except Exception:
+                request.pop("response_format", None)
+                rewritten_response = client.chat.completions.create(**request)
+
+            rewritten_raw = (
+                getattr(rewritten_response.choices[0].message, "content", None) or ""
+            ).strip()
+            _rewritten_text, rewritten_steps = _parse_board_solution(rewritten_raw)
+            _rewritten_text, rewritten_steps = _sanitize_board_language(
+                _rewritten_text,
+                rewritten_steps,
+                response_locale,
+            )
+            rewritten_steps = _strip_repeated_problem_steps(rewritten_steps, problem)
+            rewritten_steps = _normalize_board_result_tail(
+                rewritten_steps,
+                response_locale,
+            )
+            rewritten_steps = _enforce_verified_board_result(
+                rewritten_steps,
+                verified_reference,
+            )
+            rewritten_steps = _strip_solution_meta_steps(rewritten_steps)
+            if (
+                len(rewritten_steps) >= len(steps)
+                and _board_solution_has_result(rewritten_steps)
+            ):
+                steps = rewritten_steps
+
     if steps:
         text = "\n".join(
             f"{index + 1}. {step['text']}"

@@ -252,3 +252,22 @@ def test_execute_tool_normalizes_local_model_argument_aliases():
         {"favorable_outcomes": 3, "total_outcomes": 8},
     )["result"]
     assert probability["result"]["text"] == "3/8"
+
+
+def test_definite_integral_rejects_interval_outside_real_domain():
+    result = math_integrate(
+        "cos(sqrt(x+1)) - 2*x^2",
+        "x",
+        "-sqrt(pi)",
+        "4*sqrt(pi)/11",
+    )
+    assert result["domain_valid"] is False
+    assert result["result"] is None
+    assert "Interval(-1, oo)" in result["domain"]["text"]
+    assert "Interval.Ropen(-sqrt(pi), -1)" in result["invalid_part"]["text"]
+
+
+def test_definite_integral_still_solves_valid_real_interval():
+    result = math_integrate("3*x^2 + cos(4*pi)", "x", 0, 4)
+    assert result["domain_valid"] is True
+    assert result["result"]["text"] == "68"

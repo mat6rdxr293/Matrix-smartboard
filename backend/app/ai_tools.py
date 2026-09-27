@@ -211,9 +211,60 @@ def math_integrate(
     else:
         low = _expr(str(lower))
         high = _expr(str(upper))
-        result = sp.integrate(parsed, (symbol, low, high))
         bounds = [_math(low), _math(high)]
-    return {"input": _math(parsed), "variable": str(symbol), "bounds": bounds, "result": _math(result)}
+
+        domain = None
+        requested_interval = None
+        missing_domain = None
+        domain_valid = True
+        try:
+            domain = sp.calculus.util.continuous_domain(parsed, symbol, sp.S.Reals)
+            delta = sp.simplify(high - low)
+            if delta.is_nonnegative:
+                requested_interval = sp.Interval(low, high)
+            elif delta.is_nonpositive:
+                requested_interval = sp.Interval(high, low)
+
+            if requested_interval is not None:
+                missing_domain = sp.simplify(requested_interval - domain)
+                missing_measure = sp.simplify(missing_domain.measure)
+                if missing_measure.is_positive:
+                    domain_valid = False
+        except Exception:
+            # Domain analysis is an additional guard. If SymPy cannot prove it,
+            # preserve the normal integration path instead of inventing a failure.
+            domain = None
+            requested_interval = None
+            missing_domain = None
+            domain_valid = True
+
+        if not domain_valid:
+            return {
+                "input": _math(parsed),
+                "variable": str(symbol),
+                "bounds": bounds,
+                "domain": _math(domain) if domain is not None else None,
+                "domain_valid": False,
+                "invalid_part": _math(missing_domain) if missing_domain is not None else None,
+                "result": None,
+                "message": "Интегранд не определён в действительных числах на части заданного промежутка.",
+            }
+
+        antiderivative = sp.integrate(parsed, symbol)
+        upper_value = sp.simplify(antiderivative.subs(symbol, high))
+        lower_value = sp.simplify(antiderivative.subs(symbol, low))
+        result = sp.simplify(upper_value - lower_value)
+    return {
+        "input": _math(parsed),
+        "variable": str(symbol),
+        "bounds": bounds,
+        "domain": _math(domain) if lower is not None and domain is not None else None,
+        "domain_valid": True,
+        "antiderivative": _math(antiderivative) if lower is not None else _math(result),
+        "upper_value": _math(upper_value) if lower is not None else None,
+        "lower_value": _math(lower_value) if lower is not None else None,
+        "result": _math(result),
+    }
 
 
 def math_intersections(expression_a: str, expression_b: str, variable: str = "x") -> dict[str, Any]:

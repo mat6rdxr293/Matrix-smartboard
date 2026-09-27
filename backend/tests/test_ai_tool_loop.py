@@ -320,6 +320,24 @@ def test_board_solution_requires_model_selected_tool_before_structured_answer(mo
                 )
             ]
         ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"summary":"Полное решение","steps":['
+                            '{"text":"$$a=5, b=-4, c=5$$","kind":"math"},'
+                            '{"text":"$$D=b^2-4ac$$","kind":"math"},'
+                            '{"text":"$$D=16-100=-84$$","kind":"math"},'
+                            '{"text":"$$D<0$$","kind":"math"},'
+                            '{"text":"Действительных корней нет.","kind":"result"}'
+                            ']}'
+                        ),
+                        tool_calls=[],
+                    )
+                )
+            ]
+        ),
     ]
 
     class FakeCompletions:
@@ -343,7 +361,7 @@ def test_board_solution_requires_model_selected_tool_before_structured_answer(mo
         response_locale="ru",
     )
 
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert requests[0]["tool_choice"] == "required"
     assert requests[0]["tools"]
     assert "tool_choice" not in requests[1]
@@ -351,7 +369,7 @@ def test_board_solution_requires_model_selected_tool_before_structured_answer(mo
     assert '"discriminant"' in requests[1]["messages"][-1]["content"]
     assert '"text": "-84"' in requests[1]["messages"][-1]["content"]
     assert steps[-1] == {"text": "Действительных корней нет.", "kind": "result"}
-    assert "$$D=-84$$" in text
+    assert "$$D=16-100=-84$$" in text
 
 
 def test_local_ai_recovers_pseudo_tool_call_printed_as_text(monkeypatch):
@@ -1086,3 +1104,42 @@ def test_repeated_problem_step_is_removed_from_board_solution():
     cleaned = ai_module._strip_repeated_problem_steps(steps, problem)
     assert len(cleaned) == 2
     assert all(step["text"] != problem for step in cleaned)
+
+
+def test_full_board_solution_prompt_requires_visible_work(monkeypatch):
+    calls = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def fake_local_chat(client, **kwargs):
+        calls.append(kwargs)
+        return (
+            '{"summary":"Решение","steps":['
+            '{"text":"Шаг 1","kind":"text"},'
+            '{"text":"Шаг 2","kind":"math"},'
+            '{"text":"Шаг 3","kind":"math"},'
+            '{"text":"Шаг 4","kind":"math"},'
+            '{"text":"Ответ","kind":"result"}'
+            ']}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    _text, steps = ai_module.generate_board_solution(
+        "Вычислить определенный интеграл от 0 до 4 функции 3x^2+1 dx",
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 5
+    prompt = calls[0]["sys"]
+    assert "5-12" in prompt
+    assert "НЕ пропускай существенные преобразования" in prompt
+    assert "область определения интегранда" in prompt
+    assert "первообразную" in prompt
+    assert "подстановку обоих пределов" in prompt
