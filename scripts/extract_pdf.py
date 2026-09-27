@@ -21,7 +21,9 @@ import json
 import re
 import shutil
 import sys
+import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pymupdf
@@ -115,6 +117,7 @@ def strip_lines(text, boilerplate):
 
 
 def process_pdf(pdf_path, src_root, subject, grade, out_path, do_ocr):
+    t0 = time.perf_counter()
     doc = pymupdf.open(pdf_path)
     doc_id = f"{subject}_{grade}_{pdf_path.stem}"
     stats = {"pages": len(doc), "text": 0, "ocr": 0, "needs_ocr": 0}
@@ -152,6 +155,7 @@ def process_pdf(pdf_path, src_root, subject, grade, out_path, do_ocr):
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     tmp_path.replace(out_path)
+    stats["time_s"] = time.perf_counter() - t0
     return stats
 
 
@@ -161,6 +165,7 @@ def main():
     ap.add_argument("--out", default=str(ROOT / "data" / "raw"))
     ap.add_argument("--ocr", action="store_true", help="распознать помеченные страницы Tesseract")
     ap.add_argument("--force", action="store_true", help="перезаписывать уже готовые jsonl")
+    ap.add_argument("--jobs", type=int, default=1, help="сколько PDF обрабатывать параллельно")
     args = ap.parse_args()
 
     src, out_dir = Path(args.textbooks), Path(args.out)
@@ -176,7 +181,7 @@ def main():
         print(f"PDF не найдено. Ожидается структура {src}/<предмет>/<класс>/*.pdf")
         return
 
-    total = {"pages": 0, "text": 0, "ocr": 0, "needs_ocr": 0}
+    jobs = []
     for pdf in pdfs:
         subject, grade = pdf.parent.parent.name, pdf.parent.name
         grade = int(grade) if grade.isdigit() else grade
@@ -184,17 +189,25 @@ def main():
         if out_path.exists() and not args.force:
             print(f"пропуск (уже есть): {out_path.name}")
             continue
-        try:
-            st = process_pdf(pdf, src, subject, grade, out_path, args.ocr)
-        except Exception as e:  # noqa: BLE001 — один битый PDF не должен ронять весь прогон
-            print(f"ОШИБКА {pdf}: {e}")
-            continue
-        for k in total:
-            total[k] += st[k]
-        print(f"{pdf.relative_to(src)}: {st['pages']} стр., текст {st['text']}, "
-              f"OCR {st['ocr']}, требуют OCR {st['needs_ocr']} → {out_path.name}")
-        if st.get("boilerplate"):
-            print(f"  вырезаны повторяющиеся строки: {st['boilerplate']}")
+        jobs.append((pdf, src, subject, grade, out_path, args.ocr))
+
+    total = {"pages": 0, "text": 0, "ocr": 0, "needs_ocr": 0}
+    # несколько PDF параллельно (для подготовки данных); на доске — один учебник, --jobs 1
+    with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+        futures = {ex.submit(process_pdf, *job): job for job in jobs}
+        for fut in as_completed(futures):
+            pdf, out_path = futures[fut][0], futures[fut][4]
+            try:
+                st = fut.result()
+            except Exception as e:  # noqa: BLE001 — один битый PDF не должен ронять весь прогон
+                print(f"ОШИБКА {pdf}: {e}", flush=True)
+                continue
+            for k in total:
+                total[k] += st[k]
+            print(f"{pdf.relative_to(src)}: {st['pages']} стр., текст {st['text']}, OCR {st['ocr']}, "
+                  f"требуют OCR {st['needs_ocr']}, {st['time_s']:.0f} с → {out_path.name}", flush=True)
+            if st.get("boilerplate"):
+                print(f"  вырезаны повторяющиеся строки: {st['boilerplate']}", flush=True)
 
     print(f"\nИтого: {total['pages']} стр., текст {total['text']}, OCR {total['ocr']}, "
           f"требуют OCR {total['needs_ocr']}")
