@@ -573,7 +573,8 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
         steps = None
         board_actions = None
         if payload.board_output and payload.mode in {"hint", "check", "solution"}:
-            text, steps, board_actions = generate_board_response(
+            text, steps, board_actions = await asyncio.to_thread(
+                generate_board_response,
                 payload.mode,
                 payload.problem,
                 subject=payload.subject,
@@ -583,7 +584,8 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 board_state=payload.board_state,
             )
         else:
-            text = generate_ai_response(
+            text = await asyncio.to_thread(
+                generate_ai_response,
                 payload.mode,
                 payload.problem,
                 payload.student_attempt,
@@ -654,7 +656,7 @@ async def ocr_endpoint(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail="Поддерживаются только PNG/JPEG")
     data = await file.read()
     try:
-        text = ocr_image(data)
+        text = await asyncio.to_thread(ocr_image, data)
         return {"text": text}
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"OCR недоступен: {exc}") from exc

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractSafeHandwritingSteps, normalizeHandwritingText } from "./aiHandwriting";
+import {
+  buildDistinctSixPoints,
+  extractSafeHandwritingSteps,
+  normalizeHandwritingText,
+  splitMathAwareWrapUnits,
+} from "./aiHandwriting";
 
 describe("normalizeHandwritingText", () => {
   it("converts common school LaTeX into board-friendly unicode", () => {
@@ -94,6 +99,31 @@ describe("normalizeHandwritingText", () => {
       .toBe("(1)/(2)+√(2)");
   });
 
+  it("normalizes deeply nested SymPy fractions and radicals without leaking LaTeX", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`\frac{\sqrt{70}\sqrt{\pi}\left(\cos\left(\frac{32779}{140}\right)C\left(\frac{\sqrt{70}(70x+11)}{70\sqrt{\pi}}\right)\right)}{70}`,
+    );
+
+    expect(normalized).toContain("(32779)/(140)");
+    expect(normalized).toContain("C(");
+    expect(normalized).toContain("√(70)");
+    expect(normalized).toContain("√(π)");
+    expect(normalized).toMatch(/^\(.+\)\/\(70\)$/);
+    expect(normalized).not.toMatch(/\\(?:frac|sqrt|left|right)\b/);
+  });
+
+  it("wraps only at top-level spaces so nested fractions stay intact", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`F(x)=\frac{\sqrt{70}\sqrt{\pi}(a+b)}{70} + \frac{x\sin^2(3x+2)}{2}`,
+    );
+
+    expect(splitMathAwareWrapUnits(normalized)).toEqual([
+      "F(x)=(√(70)√(π)(a+b))/(70)",
+      "+",
+      "(xsin²(3x+2))/(2)",
+    ]);
+  });
+
   it("covers additional school symbols without leaking LaTeX command names", () => {
     const normalized = normalizeHandwritingText(
       String.raw`\measuredangle ABC=60\degree, \ell\perp m, \Re z+\Im z, \nexists x, A\subsetneq B, p\oplus q`,
@@ -110,6 +140,20 @@ describe("normalizeHandwritingText", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");
   });
+});
+
+it("draws 6 with a high entry stroke instead of a closed zero-like loop", () => {
+  const points = buildDistinctSixPoints(10, 20, 30, 17);
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  expect(points.length).toBeGreaterThan(30);
+  expect(Math.min(...ys)).toBeLessThan(23);
+  expect(Math.max(...ys)).toBeGreaterThan(47);
+  expect(first.x).toBeGreaterThan(Math.min(...xs) + 6);
+  expect(Math.hypot(first.x - last.x, first.y - last.y)).toBeGreaterThan(12);
 });
 
 it("extracts text fields from malformed JSON-like AI output instead of drawing metadata", () => {

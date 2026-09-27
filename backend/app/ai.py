@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -739,6 +740,11 @@ def _local_chat_with_tools(
         finalized = finalize_from_tools()
         if finalized:
             return finalized
+        # The computation already succeeded. Returning an empty structured
+        # response lets the board layer render a deterministic fallback from
+        # the verified tool trace instead of turning a formatting failure into
+        # a 503 for the whole task.
+        return ""
 
     raise RuntimeError("AI не смог завершить ответ после вызова инструментов")
 
@@ -910,6 +916,67 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
     return _postprocess_math(text), steps
 
 
+def _repair_board_solution_response(
+    client,
+    *,
+    raw: str,
+    problem: str,
+    response_locale: str,
+    tool_trace: list[dict],
+    include_actions: bool,
+) -> tuple[str, list[dict[str, str]], list[dict]]:
+    if not (raw or "").strip():
+        return "", [], []
+
+    language_rule = _response_language_rule(response_locale)
+    sys = (
+        f"{language_rule} "
+        "Ты исправляешь поврежденный structured response локальной модели. "
+        "Верни ТОЛЬКО один валидный JSON-объект без markdown. "
+        "Обязательный формат: "
+        '{"summary":"кратко","steps":[{"text":"шаг","kind":"text|math|result|warning"}]'
+        + (',"board_actions":[]}' if include_actions else "}")
+        + ". Не удаляй полезные математические шаги. Последний шаг должен быть kind=result, "
+        "если исходный ответ уже содержит конечный результат. "
+        "Не придумывай новый ответ вопреки проверенным вычислительным данным."
+    )
+    verified = [
+        entry
+        for entry in tool_trace
+        if isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+    ]
+    user = (
+        "Задача:\n"
+        + problem[:5000]
+        + "\n\nПроверенные вычислительные данные:\n"
+        + json.dumps(verified, ensure_ascii=False)[:10000]
+        + "\n\nПоврежденный ответ:\n"
+        + raw[:12000]
+    )
+    request = {
+        "model": settings.ai_model,
+        "messages": [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": 1400,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        response = client.chat.completions.create(**request)
+    except Exception:
+        request.pop("response_format", None)
+        response = client.chat.completions.create(**request)
+
+    repaired_raw = (
+        getattr(response.choices[0].message, "content", None) or ""
+    ).strip()
+    text, steps = _parse_board_solution(repaired_raw)
+    actions = _parse_board_actions(repaired_raw) if include_actions else []
+    return text, steps, actions
+
+
 _BOARD_ACTION_TYPES = {
     "add_graph",
     "update_graph",
@@ -1050,6 +1117,261 @@ def _is_visual_board_request(problem: str) -> bool:
     return any(term in lower for term in visual_terms)
 
 
+_SOLVE_AND_VISUAL_RE = re.compile(
+    r"\b(?:реши|решить|решите|решение|найди|найти|вычисли|вычислить|"
+    r"определи|определить|solve|calculate|compute|find)\b",
+    re.I,
+)
+
+
+def _visual_request_requires_solution(problem: str) -> bool:
+    text = (problem or "").strip()
+    if not _is_visual_board_request(text):
+        return False
+    if _SOLVE_AND_VISUAL_RE.search(text):
+        return True
+    # A zero-form equation plus a graph request is a school task, not merely
+    # a drawing command. Full-solution mode must solve it and then plot f(x).
+    return bool(
+        re.search(
+            r"[-+()0-9A-Za-zπ√^²³*/·×.,\s]+\s*=\s*0(?:\b|$)",
+            text,
+            flags=re.I,
+        )
+    )
+
+
+def _extract_zero_equation_for_graph(problem: str) -> str | None:
+    match = re.search(
+        r"([-+()0-9A-Za-zπ√^²³*/·×.,\s]+?)\s*=\s*0(?:\b|$)",
+        problem or "",
+        flags=re.I,
+    )
+    if not match:
+        return None
+    left = _normalize_graph_expression(match.group(1))
+    return f"{left}=0" if left else None
+
+
+def _extract_quadratic_equation(problem: str) -> str | None:
+    for raw_line in (problem or "").splitlines():
+        line = raw_line.strip()
+        if not line or "=" not in line:
+            continue
+        if re.match(
+            r"^(?:D|Δ|Д|д)\s*=|^[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=",
+            line,
+            flags=re.I,
+        ):
+            continue
+        if not re.search(r"[xх].*(?:\^\s*2|²)", line, flags=re.I):
+            continue
+
+        line = re.sub(
+            r"^(?:реши(?:ть|те)?|решить|solve|найди(?:те)?|find)\s*:?\s*",
+            "",
+            line,
+            flags=re.I,
+        )
+        left_raw, right_raw = line.split("=", 1)
+        right_raw = re.split(
+            r"\s+(?:и\s+)?(?:реши(?:ть|те)?|построй(?:те)?|нарисуй(?:те)?|"
+            r"solve|plot|graph|draw)\b",
+            right_raw,
+            maxsplit=1,
+            flags=re.I,
+        )[0]
+        left = _normalize_graph_expression(left_raw.replace("х", "x").replace("Х", "X"))
+        right = _normalize_graph_expression(right_raw.replace("х", "x").replace("Х", "X"))
+        if left and right:
+            return f"{left}={right}"
+    return None
+
+
+def _balanced_group(
+    source: str,
+    start: int,
+    opening: str,
+    closing: str,
+) -> tuple[str, int] | None:
+    if start >= len(source) or source[start] != opening:
+        return None
+    depth = 0
+    for index in range(start, len(source)):
+        char = source[index]
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return source[start + 1:index], index + 1
+    return None
+
+
+def _repair_latex_fraction_prefix(value: str) -> str:
+    result = value
+    result = re.sub(r"(?<![A-Za-z\\])rac(?=\s*\{)", r"\\frac", result)
+    result = re.sub(r"(?<![A-Za-z\\])frac(?=\s*\{)", r"\\frac", result)
+    return result
+
+
+def _latexish_to_tool_expression(value: str) -> str:
+    result = _repair_latex_fraction_prefix(value.strip())
+    result = result.replace("−", "-").replace("π", "pi")
+    result = result.replace("²", "^2").replace("³", "^3")
+    result = result.replace("\\left", "").replace("\\right", "")
+    result = result.replace("\\cdot", "*").replace("\\times", "*")
+    result = result.replace("×", "*").replace("·", "*")
+    result = result.replace("\\pi", "pi")
+
+    while "\\frac" in result:
+        start = result.find("\\frac")
+        cursor = start + len("\\frac")
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        numerator_group = _balanced_group(result, cursor, "{", "}")
+        if numerator_group is None:
+            break
+        numerator, cursor = numerator_group
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        denominator_group = _balanced_group(result, cursor, "{", "}")
+        if denominator_group is None:
+            break
+        denominator, end = denominator_group
+        replacement = (
+            f"(({_latexish_to_tool_expression(numerator)})/"
+            f"({_latexish_to_tool_expression(denominator)}))"
+        )
+        result = result[:start] + replacement + result[end:]
+
+    while "\\sqrt" in result:
+        start = result.find("\\sqrt")
+        cursor = start + len("\\sqrt")
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        group = _balanced_group(result, cursor, "{", "}")
+        if group is None:
+            break
+        inner, end = group
+        result = (
+            result[:start]
+            + f"sqrt({_latexish_to_tool_expression(inner)})"
+            + result[end:]
+        )
+
+    result = re.sub(r"\\(sin|cos|tan|ln|log|exp)\b", r"\1", result)
+
+    trig_power = re.compile(
+        r"\b(sin|cos|tan)\s*\^\s*(?:\{\s*([^{}]+?)\s*\}|([0-9]+))\s*\("
+    )
+    while True:
+        match = trig_power.search(result)
+        if not match:
+            break
+        group = _balanced_group(result, match.end() - 1, "(", ")")
+        if group is None:
+            break
+        argument, end = group
+        power = (match.group(2) or match.group(3) or "1").strip()
+        replacement = (
+            f"({match.group(1)}({_latexish_to_tool_expression(argument)}))"
+            f"^({_latexish_to_tool_expression(power)})"
+        )
+        result = result[:match.start()] + replacement + result[end:]
+
+    previous = None
+    while previous != result:
+        previous = result
+        result = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", result)
+
+    result = result.replace("{", "(").replace("}", ")")
+    result = re.sub(r"\\[,;:! ]", "", result)
+    result = result.replace("\\", "")
+    result = re.sub(r"\s+", " ", result).strip()
+    return result
+
+
+def _extract_definite_integral_tool_args(problem: str) -> dict | None:
+    task, _answer = _split_problem_and_marked_answer(problem)
+    source = _repair_latex_fraction_prefix(task.strip())
+
+    compact_match = re.search(
+        r"(?is)\bint_\[([^\]]+)\]\^\[([^\]]+)\]\s*(.*?)\s*d([A-Za-z])\s*$",
+        source,
+    )
+    if compact_match:
+        lower, upper, expression, variable = compact_match.groups()
+        expression = expression.strip()
+        if expression.startswith("(") and expression.endswith(")"):
+            expression = expression[1:-1].strip()
+        return {
+            "expression": _latexish_to_tool_expression(expression),
+            "variable": variable,
+            "lower": _latexish_to_tool_expression(lower),
+            "upper": _latexish_to_tool_expression(upper),
+        }
+
+    integral_match = re.search(r"(?:\\int|∫)", source)
+    if not integral_match:
+        return None
+    cursor = integral_match.end()
+
+    def read_script(marker: str) -> str | None:
+        nonlocal cursor
+        while cursor < len(source) and source[cursor].isspace():
+            cursor += 1
+        if cursor >= len(source) or source[cursor] != marker:
+            return None
+        cursor += 1
+        while cursor < len(source) and source[cursor].isspace():
+            cursor += 1
+        if cursor < len(source) and source[cursor] == "{":
+            group = _balanced_group(source, cursor, "{", "}")
+            if group is None:
+                return None
+            value, cursor = group
+            return value
+        if cursor < len(source) and source[cursor] == "[":
+            group = _balanced_group(source, cursor, "[", "]")
+            if group is None:
+                return None
+            value, cursor = group
+            return value
+        start = cursor
+        while cursor < len(source) and not source[cursor].isspace() and source[cursor] not in "^_":
+            cursor += 1
+        return source[start:cursor] or None
+
+    lower = read_script("_")
+    upper = read_script("^")
+    if lower is None or upper is None:
+        return None
+
+    remainder = source[cursor:].strip()
+    differential = re.search(
+        r"(?is)(?:\\[,;:]\s*)?d\s*([A-Za-z])\s*$",
+        remainder,
+    )
+    if not differential:
+        return None
+    variable = differential.group(1)
+    expression = remainder[:differential.start()].strip()
+    expression = re.sub(r"^\s*\\?left\s*", "", expression)
+    expression = re.sub(r"\\?right\s*$", "", expression)
+    if expression.startswith("(") and expression.endswith(")"):
+        expression = expression[1:-1].strip()
+    if not expression:
+        return None
+
+    return {
+        "expression": _latexish_to_tool_expression(expression),
+        "variable": variable,
+        "lower": _latexish_to_tool_expression(lower),
+        "upper": _latexish_to_tool_expression(upper),
+    }
+
+
 def _normalize_graph_expression(value: str) -> str:
     result = value.strip().replace("²", "^2").replace("³", "^3")
     result = result.replace("π", "pi").replace("×", "*").replace("·", "*")
@@ -1099,6 +1421,16 @@ def _fallback_visual_board_actions(
         for match in graph_matches
         if _normalize_graph_expression(match)
     ]
+    if not expressions and ("граф" in lower or "graph" in lower or "plot" in lower):
+        zero_equation = re.search(
+            r"([-+()0-9A-Za-zπ√^²³*/·×.,\s]+?)\s*=\s*0(?:\b|$)",
+            text,
+            flags=re.I,
+        )
+        if zero_equation:
+            expression = _normalize_graph_expression(zero_equation.group(1))
+            if expression:
+                expressions.append(expression)
     target_graph = known_graphs[0] if len(known_graphs) == 1 else None
     if graph_delete and target_graph:
         actions.append({
@@ -1465,8 +1797,12 @@ def _strip_solution_meta_steps(
         "проверка подтвердила",
         "проверим наше решение",
         "проверим решение",
+        "проверим результаты",
+        "используем функцию math_",
+        "используем инструмент",
         "verification confirms",
         "check confirms",
+        "use the math_",
         "тексеру растайды",
     )
     cleaned: list[dict[str, str]] = []
@@ -1520,6 +1856,412 @@ def _domain_failure_board_steps(
         {"text": "Поэтому в действительных числах определённый интеграл не существует.", "kind": "result"},
     ]
 
+
+def _verified_quadratic_board_steps(
+    tool_trace: list[dict],
+    response_locale: str,
+) -> list[dict[str, str]] | None:
+    result = None
+    for entry in reversed(tool_trace):
+        if entry.get("tool") != "math_quadratic":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        candidate = payload.get("result")
+        if isinstance(candidate, dict):
+            result = candidate
+            break
+    if result is None:
+        return None
+
+    def math_text(item) -> str:
+        if isinstance(item, dict):
+            return str(item.get("latex") or item.get("text") or "").strip()
+        return str(item or "").strip()
+
+    def decimal_value(item) -> Decimal | None:
+        if isinstance(item, dict):
+            raw = str(item.get("text") or item.get("latex") or "").strip()
+        else:
+            raw = str(item or "").strip()
+        raw = raw.replace(",", ".")
+        try:
+            if "/" in raw and re.fullmatch(r"[-+]?\d+\s*/\s*\d+", raw):
+                num, den = raw.split("/", 1)
+                return Decimal(num.strip()) / Decimal(den.strip())
+            return Decimal(raw)
+        except (InvalidOperation, ValueError, ZeroDivisionError):
+            return None
+
+    def pretty_decimal(value: Decimal) -> str:
+        if value == value.to_integral_value():
+            return str(int(value))
+        rendered = format(value.normalize(), "f").rstrip("0").rstrip(".")
+        return rendered or "0"
+
+    def factor_text(value: str) -> str:
+        cleaned = value.strip()
+        return f"({cleaned})" if cleaned.startswith("-") else cleaned
+
+    def negated_text(value: str) -> str:
+        cleaned = value.strip()
+        return f"-({cleaned})" if cleaned.startswith("-") else f"-{cleaned}"
+
+    variable = str(result.get("variable") or "x")
+    a = math_text(result.get("a"))
+    b = math_text(result.get("b"))
+    c = math_text(result.get("c"))
+    discriminant = math_text(result.get("discriminant"))
+    if not all((a, b, c, discriminant)):
+        return None
+
+    labels = {
+        "ru": {
+            "coeff": "Коэффициенты квадратного уравнения:",
+            "disc": "Вычислим дискриминант:",
+            "roots_formula": "Используем формулу корней:",
+            "no_roots": "Так как дискриминант отрицательный, действительных корней нет.",
+            "answer": "Ответ",
+        },
+        "kk": {
+            "coeff": "Квадрат теңдеудің коэффициенттері:",
+            "disc": "Дискриминантты есептейміз:",
+            "roots_formula": "Түбірлер формуласын қолданамыз:",
+            "no_roots": "Дискриминант теріс болғандықтан, нақты түбірлер жоқ.",
+            "answer": "Жауап",
+        },
+        "en": {
+            "coeff": "Quadratic coefficients:",
+            "disc": "Compute the discriminant:",
+            "roots_formula": "Use the quadratic formula:",
+            "no_roots": "Since the discriminant is negative, there are no real roots.",
+            "answer": "Answer",
+        },
+    }.get(response_locale, {})
+    coeff_label = labels.get("coeff", "Коэффициенты квадратного уравнения:")
+    disc_label = labels.get("disc", "Вычислим дискриминант:")
+    formula_label = labels.get("roots_formula", "Используем формулу корней:")
+    answer_prefix = labels.get("answer", "Ответ")
+
+    a_num = decimal_value(result.get("a"))
+    b_num = decimal_value(result.get("b"))
+    c_num = decimal_value(result.get("c"))
+    d_num = decimal_value(result.get("discriminant"))
+
+    disc_substitution = f"$$D=b^2-4ac={factor_text(b)}^2-4\\cdot{factor_text(a)}\\cdot{factor_text(c)}={discriminant}$$"
+    sqrt_value: int | None = None
+    if d_num is not None and d_num >= 0 and d_num == d_num.to_integral_value():
+        d_int = int(d_num)
+        candidate_sqrt = math.isqrt(d_int)
+        if candidate_sqrt * candidate_sqrt == d_int:
+            sqrt_value = candidate_sqrt
+
+    if a_num is not None and b_num is not None and c_num is not None and d_num is not None:
+        b_squared = b_num * b_num
+        minus_four_ac = -(Decimal(4) * a_num * c_num)
+        disc_substitution = (
+            f"$$D=b^2-4ac={factor_text(b)}^2-4\\cdot{factor_text(a)}\\cdot{factor_text(c)}"
+            f"={pretty_decimal(b_squared)}"
+        )
+        sign = "+" if minus_four_ac >= 0 else ""
+        disc_substitution += f"{sign}{pretty_decimal(minus_four_ac)}={discriminant}$$"
+
+    base_steps: list[dict[str, str]] = [
+        {"text": coeff_label, "kind": "text"},
+        {"text": f"$$a={a},\\;b={b},\\;c={c}$$", "kind": "math"},
+        {"text": disc_label, "kind": "text"},
+        {"text": disc_substitution, "kind": "math"},
+    ]
+
+    if not result.get("has_real_roots"):
+        base_steps.extend([
+            {"text": labels.get("no_roots", "Действительных корней нет."), "kind": "text"},
+            {
+                "text": f"{answer_prefix}: действительных корней нет"
+                if response_locale == "ru"
+                else (
+                    f"{answer_prefix}: no real roots"
+                    if response_locale == "en"
+                    else f"{answer_prefix}: нақты түбірлер жоқ"
+                ),
+                "kind": "result",
+            },
+        ])
+        return base_steps
+
+    roots = [
+        item
+        for item in (result.get("real_roots") or [])
+        if math_text(item)
+    ]
+    if not roots:
+        return None
+
+    base_steps.append({"text": formula_label, "kind": "text"})
+    base_steps.append({
+        "text": f"$${variable}_{{1,2}}=\\frac{{-b\\pm\\sqrt{{D}}}}{{2a}}$$",
+        "kind": "math",
+    })
+
+    detailed_root_steps: list[dict[str, str]] = []
+    if (
+        a_num is not None
+        and a_num != 0
+        and b_num is not None
+        and d_num is not None
+        and sqrt_value is not None
+    ):
+        denominator = Decimal(2) * a_num
+        plus_value = (-b_num + Decimal(sqrt_value)) / denominator
+        minus_value = (-b_num - Decimal(sqrt_value)) / denominator
+
+        def matching_root_item(value: Decimal):
+            for item in roots:
+                candidate = decimal_value(item)
+                if candidate is not None and abs(candidate - value) <= Decimal("1e-12"):
+                    return item
+            return None
+
+        def exact_latex_for(value: Decimal) -> str:
+            item = matching_root_item(value)
+            return math_text(item) if item is not None else pretty_decimal(value)
+
+        def decimal_suffix_for(value: Decimal) -> str:
+            item = matching_root_item(value)
+            raw = ""
+            if isinstance(item, dict):
+                raw = str(item.get("text") or "").strip()
+            elif item is not None:
+                raw = str(item).strip()
+
+            fraction = re.fullmatch(r"\s*([-+]?\d+)\s*/\s*(\d+)\s*", raw)
+            if not fraction:
+                return ""
+
+            numerator = int(fraction.group(1))
+            denominator_raw = int(fraction.group(2))
+            divisor = math.gcd(abs(numerator), denominator_raw)
+            reduced_denominator = denominator_raw // max(1, divisor)
+            finite = reduced_denominator
+            for factor in (2, 5):
+                while finite % factor == 0:
+                    finite //= factor
+
+            if finite == 1:
+                return f"={pretty_decimal(value)}"
+
+            rounded = value.quantize(Decimal("0.001"))
+            return f"\\approx{pretty_decimal(rounded)}"
+
+        plus_exact = exact_latex_for(plus_value)
+        minus_exact = exact_latex_for(minus_value)
+        denominator_text = pretty_decimal(denominator)
+        plus_display = f"{plus_exact}{decimal_suffix_for(plus_value)}"
+        minus_display = f"{minus_exact}{decimal_suffix_for(minus_value)}"
+
+        base_steps.append({
+            "text": f"$$\\sqrt{{D}}=\\sqrt{{{discriminant}}}={sqrt_value}$$",
+            "kind": "math",
+        })
+        detailed_root_steps = [
+            {
+                "text": (
+                    f"$${variable}_1=\\frac{{{negated_text(b)}+{sqrt_value}}}{{{denominator_text}}}"
+                    f"={plus_display}$$"
+                ),
+                "kind": "math",
+            },
+            {
+                "text": (
+                    f"$${variable}_2=\\frac{{{negated_text(b)}-{sqrt_value}}}{{{denominator_text}}}"
+                    f"={minus_display}$$"
+                ),
+                "kind": "math",
+            },
+        ]
+        root_display = f"{variable}_1={plus_display},\\;{variable}_2={minus_display}"
+    else:
+        root_latex = [math_text(item) for item in roots]
+        detailed_root_steps = [
+            {"text": f"$${variable}_1={root_latex[0]}$$", "kind": "math"}
+        ]
+        if len(root_latex) > 1:
+            detailed_root_steps.append({
+                "text": f"$${variable}_2={root_latex[1]}$$",
+                "kind": "math",
+            })
+        root_display = ",\\;".join(
+            f"{variable}_{index + 1}={value}"
+            for index, value in enumerate(root_latex)
+        )
+
+    base_steps.extend(detailed_root_steps)
+    base_steps.append({
+        "text": f"{answer_prefix}: $${root_display}$$",
+        "kind": "result",
+    })
+    return base_steps
+
+
+def _verified_quadratic_check_steps(
+    problem: str,
+    quadratic_payload: dict,
+    response_locale: str,
+) -> list[dict[str, str]] | None:
+    if not isinstance(quadratic_payload, dict) or not quadratic_payload.get("ok"):
+        return None
+    result = quadratic_payload.get("result")
+    if not isinstance(result, dict) or not result.get("has_real_roots"):
+        return None
+
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in (problem or "").splitlines()
+        if line.strip()
+    ]
+    if len(lines) < 2:
+        return None
+
+    discriminant_item = result.get("discriminant")
+    expected_d_raw = (
+        str(discriminant_item.get("text") or "").strip()
+        if isinstance(discriminant_item, dict)
+        else str(discriminant_item or "").strip()
+    )
+    expected_d = _canonical_numeric_token(expected_d_raw)
+
+    d_line = next(
+        (
+            line
+            for line in lines
+            if re.search(r"(?:^|\s)(?:D|Δ|Д|д)\s*=", line, flags=re.I)
+        ),
+        None,
+    )
+
+    def final_numeric(line: str) -> str | None:
+        rhs = line.rsplit("=", 1)[-1].strip()
+        tokens = list(_NUMERIC_TOKEN_RE.finditer(rhs))
+        if len(tokens) != 1:
+            return None
+        return _canonical_numeric_token(tokens[0].group(0))
+
+    if d_line and expected_d is not None:
+        actual_d = final_numeric(d_line)
+        if actual_d is not None and actual_d != expected_d:
+            message = {
+                "ru": f"Ошибка в дискриминанте: у тебя D={actual_d}, должно быть D={expected_d}.",
+                "kk": f"Дискриминантта қате: сенде D={actual_d}, дұрысы D={expected_d}.",
+                "en": f"Discriminant error: you have D={actual_d}, but D={expected_d}.",
+            }.get(response_locale)
+            return [{"text": message or f"D={expected_d}", "kind": "warning"}]
+
+    root_lines: list[tuple[str, str]] = []
+    root_pattern = re.compile(
+        r"(?:^|\s)[xх]\s*(?:_?\{?\s*([12])\s*\}?|([₁₂]))\s*=",
+        flags=re.I,
+    )
+    subscript_map = {"₁": "1", "₂": "2"}
+    for line in lines:
+        match = root_pattern.search(line)
+        if not match:
+            continue
+        index = match.group(1) or subscript_map.get(match.group(2) or "")
+        if index:
+            root_lines.append((index, line))
+
+    if len(root_lines) < 2:
+        return None
+
+    expected_roots = {
+        token
+        for item in (result.get("real_roots") or [])
+        for token in _numeric_tokens(
+            str(item.get("text") or "") if isinstance(item, dict) else str(item)
+        )
+    }
+    actual_roots: set[str] = set()
+    actual_by_index: dict[str, str] = {}
+
+    for index, line in root_lines:
+        parts = [part.strip() for part in line.split("=")]
+        if len(parts) < 2:
+            return None
+        actual = final_numeric(line)
+        if actual is None:
+            return None
+        actual_roots.add(actual)
+        actual_by_index[index] = actual
+
+        if len(parts) >= 3:
+            calculation = parts[-2]
+            final_value = parts[-1]
+            try:
+                equivalent = execute_tool(
+                    "math_equivalent",
+                    {
+                        "expression_a": calculation.replace(",", "."),
+                        "expression_b": final_value.replace(",", "."),
+                    },
+                )
+                is_equivalent = bool(
+                    ((equivalent.get("result") or {}).get("equivalent"))
+                )
+            except Exception:
+                is_equivalent = True
+            if not is_equivalent:
+                message = {
+                    "ru": (
+                        f"Ошибка в вычислении x_{index}: выражение {calculation} "
+                        f"не равно {final_value}. Проверь арифметику этой строки."
+                    ),
+                    "kk": (
+                        f"x_{index} есептеуінде қате: {calculation} өрнегі "
+                        f"{final_value} мәніне тең емес."
+                    ),
+                    "en": (
+                        f"Arithmetic error in x_{index}: {calculation} "
+                        f"does not equal {final_value}."
+                    ),
+                }.get(response_locale)
+                return [{"text": message or line, "kind": "warning"}]
+
+    if expected_roots and actual_roots != expected_roots:
+        expected_display = ", ".join(
+            _pretty_reference_value(value)
+            for value in sorted(expected_roots)
+        )
+        actual_display = ", ".join(
+            _pretty_reference_value(value)
+            for value in sorted(actual_roots)
+        )
+        message = {
+            "ru": f"Корни вычислены неверно: у тебя {actual_display}; правильные корни: {expected_display}.",
+            "kk": f"Түбірлер қате: сенде {actual_display}; дұрыс түбірлер: {expected_display}.",
+            "en": f"The roots are incorrect: you have {actual_display}; the correct roots are {expected_display}.",
+        }.get(response_locale)
+        return [{"text": message or expected_display, "kind": "warning"}]
+
+    root_1 = _pretty_reference_value(actual_by_index.get("1", ""))
+    root_2 = _pretty_reference_value(actual_by_index.get("2", ""))
+    if response_locale == "kk":
+        return [
+            {"text": f"D = {expected_d} — дұрыс.", "kind": "math"},
+            {"text": f"x_1 = {root_1}, x_2 = {root_2} — дұрыс.", "kind": "math"},
+            {"text": "Шешім дұрыс орындалған.", "kind": "result"},
+        ]
+    if response_locale == "en":
+        return [
+            {"text": f"D = {expected_d} — correct.", "kind": "math"},
+            {"text": f"x_1 = {root_1}, x_2 = {root_2} — correct.", "kind": "math"},
+            {"text": "The solution is correct.", "kind": "result"},
+        ]
+    return [
+        {"text": f"D = {expected_d} — верно.", "kind": "math"},
+        {"text": f"x_1 = {root_1}, x_2 = {root_2} — верно.", "kind": "math"},
+        {"text": "Решение выполнено правильно.", "kind": "result"},
+    ]
 
 def _verified_integral_board_steps(
     tool_trace: list[dict],
@@ -1595,12 +2337,106 @@ def _verified_integral_board_steps(
     ]
 
 
+def _augment_verified_steps_with_explanations(
+    client,
+    *,
+    problem: str,
+    verified_steps: list[dict[str, str]],
+    response_locale: str,
+    explanation_hints: Optional[list[str]] = None,
+) -> list[dict[str, str]]:
+    if not verified_steps:
+        return verified_steps
+
+    language_rule = _response_language_rule(response_locale)
+    verified_payload = []
+    for index, step in enumerate(verified_steps):
+        item = {
+            "index": index + 1,
+            "kind": step.get("kind", "text"),
+            "verified_step": step.get("text", ""),
+        }
+        if explanation_hints and index < len(explanation_hints):
+            item["purpose"] = explanation_hints[index]
+        verified_payload.append(item)
+    system = (
+        f"{language_rule} "
+        "Ты объясняешь УЖЕ ПРОВЕРЕННОЕ математическое решение ученику. "
+        "Не пересчитывай и не изменяй ни одну формулу. "
+        "Для каждого verified_step дай одно короткое содержательное пояснение, "
+        "что именно делается на этом шаге и зачем. Если у шага есть purpose, "
+        "строго объясняй именно этот purpose и не сдвигай смысл на соседний шаг. "
+        "Пояснения должны быть только словами: без новых чисел, формул, знаков '=', "
+        "LaTeX и без упоминаний tools/API/backend. "
+        "Верни ТОЛЬКО JSON вида "
+        '{"explanations":["пояснение 1","пояснение 2",...]}. '
+        "Количество explanations должно ТОЧНО совпадать с количеством verified_step."
+    )
+    user = (
+        "УСЛОВИЕ:\n"
+        + problem
+        + "\n\nПРОВЕРЕННЫЕ ШАГИ:\n"
+        + json.dumps(verified_payload, ensure_ascii=False)
+    )
+
+    for attempt in range(2):
+        request = {
+            "model": settings.ai_model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": 700,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            response = client.chat.completions.create(**request)
+        except Exception:
+            try:
+                request.pop("response_format", None)
+                response = client.chat.completions.create(**request)
+            except Exception:
+                return verified_steps
+
+        content = getattr(response.choices[0].message, "content", None)
+        if not content:
+            continue
+        try:
+            payload = json.loads(content.strip())
+        except Exception:
+            continue
+        explanations = payload.get("explanations") if isinstance(payload, dict) else None
+        if not isinstance(explanations, list) or len(explanations) != len(verified_steps):
+            continue
+
+        expanded: list[dict[str, str]] = []
+        valid_count = 0
+        for explanation, step in zip(explanations, verified_steps):
+            clean = str(explanation or "").strip()
+            if (
+                clean
+                and len(clean) <= 180
+                and not re.search(r"[0-9=<>∫√^\\]", clean)
+            ):
+                expanded.append({"text": clean, "kind": "text"})
+                valid_count += 1
+            expanded.append(dict(step))
+
+        if valid_count >= max(2, len(verified_steps) // 2):
+            return expanded
+
+    return verified_steps
+
+
 def _board_solution_min_steps(problem: str, subject: Optional[str]) -> int:
     kind = _check_task_kind(problem, subject)
     if kind == "integral":
+        return 8
+    if kind in {"equation", "system", "inequality"}:
+        return 7
+    if kind in {"derivative", "limit", "geometry"}:
         return 6
-    if kind in {"equation", "system", "inequality", "derivative", "limit", "geometry"}:
-        return 5
     if kind in {
         "probability",
         "sequence_nth",
@@ -1689,11 +2525,44 @@ def _normalize_board_check_kinds(steps: list[dict[str, str]]) -> list[dict[str, 
     return normalized
 
 
+_FORMATTING_ONLY_CHECK_CUES = (
+    "нет финального ответа",
+    "нет окончательного ответа",
+    "не указан финальный ответ",
+    "не указан окончательный ответ",
+    "не записан финальный ответ",
+    "не записан ответ",
+    "не оформлен ответ",
+    "отсутствует ответ",
+    "missing final answer",
+    "no final answer",
+    "answer is not written",
+    "жауап жазылмаған",
+    "соңғы жауап жоқ",
+)
+
+
+def _board_check_is_formatting_only(steps: list[dict[str, str]]) -> bool:
+    substantive = [
+        step.get("text", "").strip().lower()
+        for step in steps
+        if step.get("text", "").strip()
+    ]
+    if not substantive:
+        return False
+    return all(
+        any(cue in text for cue in _FORMATTING_ONLY_CHECK_CUES)
+        for text in substantive
+    )
+
+
 def _board_check_needs_retry(text: str, steps: list[dict[str, str]], response_locale: str) -> bool:
     if not steps:
         return True
     joined = " ".join(step.get("text", "") for step in steps).lower()
     if re.search(r"\b(?:math|physics|chemistry)_[a-z0-9_]+\b", joined):
+        return True
+    if _board_check_is_formatting_only(steps):
         return True
     return not any(step.get("kind") in {"warning", "result"} for step in steps)
 
@@ -1794,18 +2663,52 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
     lower = task.lower()
     subject_value = (subject or "").lower()
 
-    if any(cue in lower for cue in ("неравен", "inequal", "теңсіз", "<", ">")):
-        return "inequality"
-    if any(cue in lower for cue in ("систем", "system of equations", "теңдеулер жүй")):
+    if (
+        any(cue in lower for cue in ("предел", "limit", "шек"))
+        or re.search(r"(?i)(?:\\lim|\blim\s*(?:_|\^|\(|\[))", task)
+    ):
+        return "limit"
+    if (
+        any(cue in lower for cue in ("производн", "derivative", "туынды"))
+        or re.search(
+            r"(?i)(?:\bd\s*/\s*d[a-z]\b|\bd[a-z]\s*/\s*d[a-z]\b|"
+            r"\\frac\s*\{?d\}?\s*\{?d[a-z]\}?|"
+            r"\b[a-z][a-z0-9_]*\s*'\s*\()",
+            task,
+        )
+    ):
+        return "derivative"
+    if (
+        any(cue in lower for cue in ("интеграл", "integral", "интегралын"))
+        or "∫" in task
+        or "\\int" in task
+        or re.search(r"(?i)\bint\s*(?:_|\^|\[|\()", task)
+    ):
+        return "integral"
+
+    equation_lines = [line for line in task.splitlines() if "=" in line]
+    if (
+        any(cue in lower for cue in ("систем", "system of equations", "теңдеулер жүй"))
+        or "\\begin{cases}" in task
+        or (len(equation_lines) >= 2 and any(mark in task for mark in ("{", "⎧")))
+    ):
         return "system"
+
+    inequality_view = (
+        task.replace("->", "")
+        .replace("→", "")
+        .replace("⇒", "")
+        .replace("⟶", "")
+    )
+    if (
+        any(cue in lower for cue in ("неравен", "inequal", "теңсіз"))
+        or any(symbol in inequality_view for symbol in ("<", ">", "≤", "≥"))
+    ):
+        return "inequality"
+
     if any(cue in lower for cue in ("област", "domain", "одз", "анықталу облысы")):
         return "domain"
-    if any(cue in lower for cue in ("предел", "limit", "шек")):
-        return "limit"
-    if any(cue in lower for cue in ("производн", "derivative", "туынды")):
-        return "derivative"
-    if any(cue in lower for cue in ("интеграл", "integral", "интегралын")):
-        return "integral"
+
     if any(cue in lower for cue in ("раскры", "expand", "жақшаны аш")):
         return "expand"
     if any(cue in lower for cue in ("упрост", "simplif", "ықшамда")):
@@ -1992,9 +2895,8 @@ def _pretty_inequality_text(value: str, variable: str = "x") -> str:
 
 def _problem_has_intermediate_work(problem: str) -> bool:
     task, answer = _split_problem_and_marked_answer(problem)
-    if not answer:
-        return False
-    return "\n" in task or ";" in task
+    source = task if answer else (problem or "")
+    return "\n" in source or ";" in source
 
 
 def _geometry_reference_key(problem: str, result: dict) -> str | None:
@@ -2435,6 +3337,10 @@ def _verify_board_check_against_tools(
         '{"text":"первая ошибка или подтверждение","kind":"warning|result|math"}]}. '
         "Если в черновике или работе ученика есть числовое утверждение, противоречащее фактам tools, "
         "обязательно пометь его как warning и коротко укажи проверенное значение. "
+        "Проверяй математическую эквивалентность, а не оформление. Отсутствие отдельной строки «Ответ:» не является ошибкой, "
+        "если конечный результат уже однозначно записан в последних вычислениях. Не придирайся к порядку корней, "
+        "x1/x_1/x₁, пробелам, переносу строк, десятичной точке/запятой или эквивалентным дробной и десятичной формам. "
+        "Не снижай процент за оформление и никогда не возвращай замечание «нет финального ответа», если результат виден из решения. "
         "Не упоминай внутренние имена tools/API. Для школьной алгебры не переходи к комплексным числам без явного требования."
     )
     verifier_user = (
@@ -2487,6 +3393,25 @@ def generate_board_response(
 
     def finish(result_text: str, result_steps: list[dict[str, str]]):
         return (result_text, result_steps, []) if include_actions else (result_text, result_steps)
+
+    if mode == "check" and _problem_has_intermediate_work(problem):
+        equation = _extract_quadratic_equation(problem)
+        if equation:
+            try:
+                quadratic_payload = execute_tool("math_quadratic", {"equation": equation})
+                verified_steps = _verified_quadratic_check_steps(
+                    problem,
+                    quadratic_payload,
+                    response_locale,
+                )
+                if verified_steps:
+                    verified_text = "\n".join(
+                        f"{index + 1}. {step['text']}"
+                        for index, step in enumerate(verified_steps)
+                    )
+                    return finish(verified_text, verified_steps)
+            except ToolError:
+                pass
 
     api_key = get_openai_key()
     base_url = settings.ai_base_url
@@ -2563,8 +3488,15 @@ def generate_board_response(
             "Для проверки сначала получи независимый эталон из ИСХОДНОГО условия через подходящий tool; "
             "не ограничивайся вычислением уже записанного учеником выражения, потому что оно само может быть ошибочным. "
             + reference_tool_rule
-            + " Если в записи есть явный «Ответ:», ОБЯЗАТЕЛЬНО сравни его с эталонным результатом tool. "
-            "После первой найденной ошибки и одной корректирующей строки остановись. "
+            + " Проверяй МАТЕМАТИЧЕСКИЙ СМЫСЛ, а не оформление. "
+            "Не считай ошибкой отсутствие отдельной строки «Ответ:», если итог однозначно виден из последних вычислений. "
+            "Не снижай оценку за порядок корней, обозначения x1/x_1/x₁, пробелы, переносы строк, "
+            "точку или запятую в десятичной дроби, а также за эквивалентные формы вроде -9/5 и -1.8. "
+            "Если в записи есть явный «Ответ:», сравни его с эталоном, но само наличие слова «Ответ» НЕ обязательно. "
+            "Никогда не выдавай замечания вроде «нет финального ответа», «не оформлен ответ» или «неверное оформление», "
+            "если из работы уже однозначно следует правильный математический результат. "
+            "Процент выполнения оценивай только по математической правильности и полноте вычислений, не по оформлению. "
+            "После первой РЕАЛЬНОЙ математической ошибки и одной корректирующей строки остановись. "
             "В школьной алгебре, если D<0 и комплексные числа не требуются условием, "
             "не пиши комплексные корни: достаточно указать, что действительных корней нет. "
             "Не переписывай всё решение и не давай длинное объяснение. "
@@ -2648,6 +3580,10 @@ def generate_board_response(
                 + "Числовые и символические ответы ученика обязательно сверяй с фактическим результатом reference-tool. "
                 + "Если значение ученика отличается от результата инструмента, это и есть ошибка: "
                 + "первый такой шаг верни с kind=warning и покажи правильное значение. "
+                + "Игнорируй чисто оформительские различия. Отдельная строка «Ответ:» НЕ обязательна, "
+                + "если результат уже однозначно следует из вычислений. Не снижай оценку за x1/x_1/x₁, "
+                + "порядок корней, пробелы, переносы, точку/запятую или эквивалентные дробь и десятичную запись. "
+                + "Не возвращай «нет финального ответа» как ошибку. "
                 + "Не называй неверное вычисление верным. Не переходи к комплексным числам, если их не требует условие."
             )
         retry_user = (
@@ -2817,6 +3753,28 @@ def generate_board_response(
     return finish(text, steps)
 
 
+_MULTI_BOARD_TASK_RE = re.compile(
+    r"(?im)^\s*(?:задание|task|тапсырма)\s*(\d+)\s*:\s*(.*)$"
+)
+
+
+def _split_labeled_board_tasks(problem: str) -> list[tuple[int, str]]:
+    text = (problem or "").strip()
+    matches = list(_MULTI_BOARD_TASK_RE.finditer(text))
+    if len(matches) < 2:
+        return []
+
+    tasks: list[tuple[int, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        first_line = (match.group(2) or "").strip()
+        remainder = text[match.end():end].strip()
+        body = "\n".join(part for part in (first_line, remainder) if part).strip()
+        if body:
+            tasks.append((int(match.group(1)), body))
+    return tasks if len(tasks) >= 2 else []
+
+
 def generate_board_solution(
     problem: str,
     *,
@@ -2829,7 +3787,143 @@ def generate_board_solution(
     api_key = get_openai_key()
     base_url = settings.ai_base_url
 
-    if include_actions and _is_visual_board_request(problem):
+    multi_tasks = _split_labeled_board_tasks(problem)
+    if multi_tasks:
+        heading_word = {
+            "ru": "Задание",
+            "kk": "Тапсырма",
+            "en": "Task",
+        }.get(response_locale, "Задание")
+        combined_steps: list[dict[str, str]] = []
+        combined_actions: list[dict] = []
+
+        for display_index, (_source_number, task) in enumerate(multi_tasks, start=1):
+            combined_steps.append({
+                "text": f"{heading_word} {display_index}",
+                "kind": "text",
+            })
+            result = generate_board_solution(
+                task,
+                subject=subject,
+                board_context=board_context,
+                response_locale=response_locale,
+                include_actions=include_actions,
+                board_state=board_state,
+            )
+            if include_actions:
+                task_text, task_steps, task_actions = result
+                combined_actions.extend(task_actions or [])
+            else:
+                task_text, task_steps = result
+            if task_steps:
+                combined_steps.extend(task_steps)
+            elif task_text:
+                combined_steps.append({"text": task_text, "kind": "result"})
+
+        combined_text = "\n".join(
+            f"{index + 1}. {step['text']}"
+            for index, step in enumerate(combined_steps)
+        )
+        if include_actions:
+            return combined_text, combined_steps, combined_actions
+        return combined_text, combined_steps
+
+    equation = _extract_quadratic_equation(problem)
+    if include_actions and equation and _check_task_kind(problem, subject) == "equation":
+        try:
+            payload = execute_tool("math_quadratic", {"equation": equation})
+            deterministic_steps = _verified_quadratic_board_steps(
+                [{"tool": "math_quadratic", "payload": payload}],
+                response_locale,
+            )
+            if deterministic_steps:
+                deterministic_text = "\n".join(
+                    f"{index + 1}. {step['text']}"
+                    for index, step in enumerate(deterministic_steps)
+                )
+                deterministic_actions = (
+                    _fallback_visual_board_actions(problem, board_state)
+                    if include_actions and _is_visual_board_request(problem)
+                    else []
+                )
+                if include_actions:
+                    return deterministic_text, deterministic_steps, deterministic_actions
+                return deterministic_text, deterministic_steps
+        except ToolError:
+            pass
+
+    if include_actions and _check_task_kind(problem, subject) == "integral":
+        integral_arguments = _extract_definite_integral_tool_args(problem)
+        if integral_arguments:
+            try:
+                payload = execute_tool("math_integrate", integral_arguments)
+                trace = [{
+                    "tool": "math_integrate",
+                    "arguments": integral_arguments,
+                    "payload": payload,
+                }]
+                domain_failure = _integral_domain_failure(trace)
+                deterministic_steps = (
+                    _domain_failure_board_steps(domain_failure, response_locale)
+                    if domain_failure is not None
+                    else _verified_integral_board_steps(trace, response_locale)
+                )
+                if deterministic_steps:
+                    explained_steps = deterministic_steps
+                    if base_url or api_key:
+                        client_options = {
+                            "api_key": api_key or "ollama",
+                            "timeout": min(settings.ai_timeout_seconds, 15),
+                        }
+                        if base_url:
+                            client_options["base_url"] = base_url
+                        try:
+                            explanation_client = OpenAI(**client_options)
+                            integral_hints = {
+                                "ru": [
+                                    "Нахождение первообразной подынтегральной функции.",
+                                    "Применение формулы Ньютона Лейбница.",
+                                    "Подстановка верхнего предела в первообразную.",
+                                    "Подстановка нижнего предела в первообразную.",
+                                    "Вычитание значений первообразной и упрощение результата.",
+                                    "Запись окончательного ответа.",
+                                ],
+                                "kk": [
+                                    "Интеграл астындағы функцияның алғашқы функциясын табу.",
+                                    "Ньютон Лейбниц формуласын қолдану.",
+                                    "Жоғарғы шекті алғашқы функцияға қою.",
+                                    "Төменгі шекті алғашқы функцияға қою.",
+                                    "Алғашқы функция мәндерін азайтып нәтижені ықшамдау.",
+                                    "Соңғы жауапты жазу.",
+                                ],
+                                "en": [
+                                    "Find an antiderivative of the integrand.",
+                                    "Apply the Newton Leibniz formula.",
+                                    "Substitute the upper bound into the antiderivative.",
+                                    "Substitute the lower bound into the antiderivative.",
+                                    "Subtract the endpoint values and simplify.",
+                                    "State the final answer.",
+                                ],
+                            }.get(response_locale)
+                            explained_steps = _augment_verified_steps_with_explanations(
+                                explanation_client,
+                                problem=problem,
+                                verified_steps=deterministic_steps,
+                                response_locale=response_locale,
+                                explanation_hints=integral_hints,
+                            )
+                        except Exception:
+                            explained_steps = deterministic_steps
+
+                    deterministic_text = "\n".join(
+                        f"{index + 1}. {step['text']}"
+                        for index, step in enumerate(explained_steps)
+                    )
+                    return deterministic_text, explained_steps, []
+            except ToolError:
+                pass
+
+    if include_actions and _is_visual_board_request(problem) and not _visual_request_requires_solution(problem):
         if base_url or api_key:
             return _generate_visual_board_plan(
                 problem,
@@ -2877,9 +3971,11 @@ def generate_board_solution(
         "Формат: {\"summary\":\"кратко\",\"steps\":["
         "{\"text\":\"шаг\",\"kind\":\"text|math|result|warning\"}]}. "
         "Каждый логический шаг должен быть отдельным элементом. "
-        "Это ПОЛНОЕ решение для записи на доске: пиши компактно, но НЕ пропускай существенные преобразования, "
-        "вычисления, подстановки и проверки. Не переписывай условие целиком и не растягивай очевидные фразы. "
-        "Обычно используй 5-12 содержательных шагов; если задача требует больше, добавь столько шагов, сколько нужно. "
+        "Это ПОЛНОЕ решение для записи на доске: пиши подробно и по школьному оформлению, но без воды. "
+        "НЕ пропускай существенные преобразования, вычисления, подстановки и проверки. Не переписывай условие целиком. "
+        "Обычно используй 7-14 содержательных шагов; если задача требует больше, добавь столько шагов, сколько нужно. "
+        "Для вычислительной задачи отдельно покажи: выбранную формулу, подстановку конкретных значений, "
+        "промежуточную арифметику/упрощение и конечный ответ. Не заменяй эти действия фразой «получаем». "
         "Каждый нетривиальный переход должен быть виден ученику. Предпочитай формулы коротким пояснениям, "
         "но не схлопывай несколько важных действий в одну строку. "
         "Не добавляй пустые мета-фразы вроде «проверка подтвердила решение»; вместо них покажи само вычисление или проверку. "
@@ -2929,20 +4025,167 @@ def generate_board_solution(
     if base_url:
         client_options["base_url"] = base_url
     client = OpenAI(**client_options)
+    task_kind = _check_task_kind(problem, subject)
+    required_reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
+    constrained_tools = (
+        set(required_reference_tools)
+        if include_actions and required_reference_tools
+        else None
+    )
+    return_after_verified_tool = (
+        set(required_reference_tools)
+        if include_actions and task_kind == "integral"
+        else None
+    )
+
     tool_trace: list[dict] = []
     raw = _local_chat_with_tools(
         client,
         sys=sys,
         user=user,
-        max_tokens=max(max_tokens, 1400),
+        max_tokens=max(max_tokens, 2000),
         subject=subject,
         task_text=problem,
         postprocess=False,
         require_tool=_requires_tool_use(subject, "solution"),
         tool_trace=tool_trace,
+        only_tool_names=constrained_tools,
+        return_after_tool_names=return_after_verified_tool,
     )
+
+    if include_actions and required_reference_tools and not _check_trace_covers_task(
+        problem,
+        subject,
+        tool_trace,
+    ):
+        task_kind_labels = {
+            "equation": "уравнение",
+            "system": "система уравнений",
+            "inequality": "неравенство",
+            "domain": "область определения",
+            "limit": "предел",
+            "derivative": "производная",
+            "integral": "интеграл",
+            "expand": "раскрытие скобок",
+            "simplify": "упрощение выражения",
+            "factor": "разложение на множители",
+            "percent": "задача на проценты",
+            "sequence_nth": "последовательность",
+            "sequence_sum": "сумма последовательности",
+            "sequence_both": "последовательность",
+            "combinatorics": "комбинаторика",
+            "probability": "вероятность",
+            "statistics_mean": "среднее значение",
+            "statistics_median": "медиана",
+            "statistics_mode": "мода",
+            "statistics_variance": "дисперсия",
+            "number_theory": "теория чисел",
+            "function_analysis": "исследование функции",
+            "trig_value": "тригонометрическое выражение",
+            "trig_equation": "тригонометрическое уравнение",
+            "vector": "векторная задача",
+            "geometry": "геометрическая задача",
+            "arithmetic": "вычисление выражения",
+            "unit_convert": "перевод единиц",
+            "molar_mass": "молярная масса",
+            "chem_balance": "балансировка химического уравнения",
+        }
+        task_label = task_kind_labels.get(task_kind, task_kind)
+        retry_trace: list[dict] = []
+        raw = _local_chat_with_tools(
+            client,
+            sys=(
+                sys
+                + f"\nКРИТИЧНО: тип исходной задачи уже определён как «{task_label}». "
+                + "Нельзя подменять её задачей другого типа. "
+                + "Для независимой проверки ОБЯЗАТЕЛЬНО используй один из подходящих "
+                + "вычислительных инструментов: "
+                + ", ".join(required_reference_tools)
+                + ". Сохрани все исходные математические данные и решай именно исходную запись."
+            ),
+            user=user,
+            max_tokens=max(max_tokens, 2000),
+            subject=subject,
+            task_text=problem,
+            postprocess=False,
+            require_tool=True,
+            tool_trace=retry_trace,
+            only_tool_names=set(required_reference_tools),
+            return_after_tool_names=(
+                set(required_reference_tools)
+                if task_kind == "integral"
+                else None
+            ),
+        )
+        tool_trace = retry_trace
+
+        if not _check_trace_covers_task(problem, subject, tool_trace):
+            raise RuntimeError(
+                f"Не удалось надежно подтвердить решение задачи типа «{task_label}». "
+                "Вычислительный модуль не подтвердил исходную запись. "
+                "Попробуйте распознать задание ещё раз."
+            )
+
     actions = _parse_board_actions(raw) if include_actions else []
     text, steps = _parse_board_solution(raw)
+
+    if not steps:
+        verified_fallback_steps = (
+            _verified_quadratic_board_steps(tool_trace, response_locale)
+            or _verified_integral_board_steps(tool_trace, response_locale)
+        )
+        if verified_fallback_steps is None:
+            domain_failure = _integral_domain_failure(tool_trace)
+            if domain_failure is not None:
+                verified_fallback_steps = _domain_failure_board_steps(
+                    domain_failure,
+                    response_locale,
+                )
+
+        if verified_fallback_steps is None:
+            reference = _reference_answer_from_trace(problem, subject, tool_trace)
+            if reference and str(reference.get("display") or "").strip():
+                display = str(reference["display"]).strip()
+                answer_prefix = {
+                    "ru": "Ответ",
+                    "kk": "Жауап",
+                    "en": "Answer",
+                }.get(response_locale, "Ответ")
+                verified_fallback_steps = [
+                    {
+                        "text": {
+                            "ru": "Используем проверенный результат вычислений.",
+                            "kk": "Тексерілген есептеу нәтижесін қолданамыз.",
+                            "en": "Use the verified computation result.",
+                        }.get(response_locale, "Используем проверенный результат вычислений."),
+                        "kind": "text",
+                    },
+                    {"text": f"{answer_prefix}: {display}", "kind": "result"},
+                ]
+
+        if verified_fallback_steps:
+            steps = verified_fallback_steps
+            text = "\n".join(
+                f"{index + 1}. {step['text']}"
+                for index, step in enumerate(steps)
+            )
+        else:
+            repaired_text, repaired_steps, repaired_actions = _repair_board_solution_response(
+                client,
+                raw=raw,
+                problem=problem,
+                response_locale=response_locale,
+                tool_trace=tool_trace,
+                include_actions=include_actions,
+            )
+            if repaired_steps:
+                text, steps = repaired_text, repaired_steps
+                if include_actions and not actions:
+                    actions = repaired_actions
+
+    if include_actions and _is_visual_board_request(problem) and not actions:
+        actions = _fallback_visual_board_actions(problem, board_state)
+
     text, steps = _sanitize_board_language(text, steps, response_locale)
     steps = _strip_repeated_problem_steps(steps, problem)
     steps = _normalize_board_result_tail(steps, response_locale)

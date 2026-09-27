@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .school_store import (
     InvalidLesson,
@@ -35,6 +35,16 @@ class LessonCreate(BaseModel):
 
 class BoardOperationInput(BaseModel):
     client_operation_id: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_client_operation_id(cls, value):
+        if isinstance(value, dict):
+            legacy = value.get("clientOperationId")
+            if not value.get("client_operation_id") and legacy:
+                value = dict(value)
+                value["client_operation_id"] = legacy
+        return value
     op: Literal["add", "stroke_batch_add", "stroke_move", "stroke_delete", "graph_add", "graph_update", "graph_delete", "solution_add", "solution_update", "solution_delete", "undo", "redo", "clear"]
     stroke: dict[str, Any] | None = None
     strokes: list[dict[str, Any]] | None = None

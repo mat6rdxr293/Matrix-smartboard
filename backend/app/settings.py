@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ocr_base_url: str | None = Field(default=None, validation_alias="OCR_BASE_URL")
     ai_model: str = Field(default="gpt-5.2", validation_alias="AI_MODEL")
     ocr_model: str = Field(default="gpt-5.2", validation_alias="OCR_MODEL")
-    ai_timeout_seconds: float = Field(default=30.0, validation_alias="AI_TIMEOUT_SECONDS")
+    ai_timeout_seconds: float = Field(default=90.0, validation_alias="AI_TIMEOUT_SECONDS")
     ai_reasoning_effort: str = Field(default="medium", validation_alias="AI_REASONING_EFFORT")
     ai_tools_enabled: bool = Field(default=True, validation_alias="AI_TOOLS_ENABLED")
 

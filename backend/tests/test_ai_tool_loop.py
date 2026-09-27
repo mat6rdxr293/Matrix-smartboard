@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import app.ai as ai_module
@@ -1138,7 +1139,7 @@ def test_full_board_solution_prompt_requires_visible_work(monkeypatch):
 
     assert len(steps) == 5
     prompt = calls[0]["sys"]
-    assert "5-12" in prompt
+    assert "7-14" in prompt
     assert "НЕ пропускай существенные преобразования" in prompt
     assert "область определения интегранда" in prompt
     assert "первообразную" in prompt
@@ -1201,6 +1202,205 @@ def test_visual_board_request_does_not_capture_ordinary_equation_solution():
     assert ai_module._is_visual_board_request("Реши уравнение x^2-5x+6=0") is False
 
 
+def test_solve_and_plot_request_requires_full_solution_path():
+    problem = "Реши уравнение 5x^2 + 4x - 9 = 0 и построй график."
+    assert ai_module._is_visual_board_request(problem) is True
+    assert ai_module._visual_request_requires_solution(problem) is True
+
+
+def test_zero_form_equation_graph_fallback_uses_left_side_as_function():
+    problem = "5x^2 + 4x - 9 = 0\nПострой график"
+    actions = ai_module._fallback_visual_board_actions(problem)
+    assert actions[0]["type"] == "add_graph"
+    assert actions[0]["expressions"] == ["5*x^2 + 4*x - 9"]
+
+
+def test_solve_and_plot_quadratic_uses_fast_deterministic_path(monkeypatch):
+    def fail_visual_plan(*args, **kwargs):
+        raise AssertionError("visual planner must not be used for solve+plot quadratic")
+
+    monkeypatch.setattr(ai_module, "_generate_visual_board_plan", fail_visual_plan)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "5x^2 + 4x - 9 = 0 реши и построй график",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert len(steps) >= 9
+    assert steps[-1]["kind"] == "result"
+    assert any("16+180=196" in step["text"] for step in steps)
+    assert any("\\sqrt{196}=14" in step["text"] for step in steps)
+    assert any("x_1" in step["text"] and "=1" in step["text"] for step in steps)
+    assert any("x_2" in step["text"] and "9}{5" in step["text"] for step in steps)
+    assert actions == [{
+        "type": "add_graph",
+        "expressions": ["5*x^2 + 4*x - 9"],
+        "x_min": -10.0,
+        "x_max": 10.0,
+        "y_min": -10.0,
+        "y_max": 10.0,
+        "x": 8.0,
+        "y": 8.0,
+        "width": 58.0,
+        "height": 58.0,
+    }]
+    assert "16+180=196" in text
+
+
+def test_verified_quadratic_steps_recover_when_structured_response_is_broken():
+    trace = [{
+        "tool": "math_quadratic",
+        "payload": {
+            "ok": True,
+            "result": {
+                "variable": "x",
+                "a": {"text": "5", "latex": "5"},
+                "b": {"text": "4", "latex": "4"},
+                "c": {"text": "-9", "latex": "-9"},
+                "discriminant": {"text": "196", "latex": "196"},
+                "has_real_roots": True,
+                "real_roots": [
+                    {"text": "-9/5", "latex": "- \\frac{9}{5}"},
+                    {"text": "1", "latex": "1"},
+                ],
+            },
+        },
+    }]
+    steps = ai_module._verified_quadratic_board_steps(trace, "ru")
+    assert steps is not None
+    assert len(steps) >= 9
+    assert any("196" in step["text"] for step in steps)
+    assert any("16+180=196" in step["text"] for step in steps)
+    assert any("\\sqrt{196}=14" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "- \\frac{9}{5}" in steps[-1]["text"]
+    assert "1" in steps[-1]["text"]
+
+
+def test_multi_task_full_solution_solves_every_labeled_problem(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("standard quadratic batch should not need the LLM")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        """Задание 1:
+x^2 - 5x + 6 = 0
+
+Задание 2:
+9x^2 + 11x + 3 = 3""",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    headings = [step["text"] for step in steps if step["text"].startswith("Задание ")]
+    results = [step["text"] for step in steps if step["kind"] == "result"]
+
+    assert headings == ["Задание 1", "Задание 2"]
+    assert len(results) == 2
+    assert any("x_1=3" in result and "x_2=2" in result for result in results)
+    assert any(
+        "x_1=0" in result
+        and "11}{9" in result
+        and "\\approx-1.222" in result
+        for result in results
+    )
+    assert actions == []
+    assert "Задание 1" in text
+    assert "Задание 2" in text
+
+
+def test_plain_quadratic_full_solution_uses_detailed_deterministic_path(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not be needed for a standard quadratic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "5x^2 + 4x - 9 = 0",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert len(steps) >= 9
+    assert steps[0]["text"] == "Коэффициенты квадратного уравнения:"
+    assert any("D=b^2-4ac" in step["text"] for step in steps)
+    assert any("x_1" in step["text"] for step in steps)
+    assert any("x_2" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "Ответ" in steps[-1]["text"]
+    assert "196" in text
+
+
+def test_quadratic_check_accepts_correct_work_without_llm(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not judge verified quadratic arithmetic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+    problem = """5x^2 + 4x - 9 = 0
+D = 16 + 4 * 5 * 9 = 196
+x1 = (-4 + 14) / 10 = 1
+x₂ = (-4 - 14) / 10 = -1,8"""
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        problem,
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 3
+    assert all(step["kind"] != "warning" for step in steps)
+    assert "D = 196" in steps[0]["text"]
+    assert "x_1 = 1" in steps[1]["text"]
+    assert "x_2 = -1.8" in steps[1]["text"]
+    assert steps[-1]["text"] == "Решение выполнено правильно."
+    assert "правильно" in text
+
+
+def test_formatting_only_check_feedback_is_rejected_for_retry():
+    steps = [{"text": "Нет финального ответа.", "kind": "warning"}]
+
+    assert ai_module._board_check_is_formatting_only(steps) is True
+    assert ai_module._board_check_needs_retry(
+        "Нет финального ответа.",
+        steps,
+        "ru",
+    ) is True
+
+
+def test_quadratic_check_catches_wrong_root_arithmetic_without_llm(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not judge verified quadratic arithmetic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+    problem = """5x^2 + 4x - 9 = 0
+D = 16 + 4 * 5 * 9 = 196
+x_1 = (-4 + 14) / 30 = 1
+x_2 = (-4 - 14) / 10 = -1.8"""
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        problem,
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "warning"
+    assert "(-4 + 14) / 30" in steps[0]["text"]
+    assert "не равно 1" in steps[0]["text"]
+    assert "Проверь арифметику" in text
+
+
 def test_board_actions_parser_supports_stroke_move_and_delete():
     raw = (
         '{"board_actions":['
@@ -1213,6 +1413,170 @@ def test_board_actions_parser_supports_stroke_move_and_delete():
         {"type": "move_strokes", "indexes": [1, 3], "dx": 100.0, "dy": -100.0},
         {"type": "delete_strokes", "indexes": [2, 4]},
     ]
+
+
+def test_structured_ocr_notation_preserves_math_task_type():
+    assert ai_module._check_task_kind("int_[0]^[1](cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("∫_0^1 (cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("\\int_{0}^{1}(cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("lim_(x->0) sin(x)/x", "алгебра") == "limit"
+    assert ai_module._check_task_kind("\\lim_{x->0} sin(x)/x", "алгебра") == "limit"
+    assert ai_module._check_task_kind("d/dx (x^2 + sin(x))", "алгебра") == "derivative"
+    assert ai_module._check_task_kind("f'(x) = 3x^2", "алгебра") == "derivative"
+    assert ai_module._check_task_kind("{ x+y=3\n  x-y=1", "алгебра") == "system"
+    assert ai_module._check_task_kind("2x+1 >= 7", "алгебра") == "inequality"
+
+
+def test_board_solution_direct_integral_uses_ai_only_for_explanations(monkeypatch):
+    def fail_tool_loop(*args, **kwargs):
+        raise AssertionError("structured definite integral should bypass the tool loop")
+
+    explanations = [
+        "Находим первообразную подынтегральной функции.",
+        "Применяем формулу Ньютона Лейбница.",
+        "Подставляем верхний предел.",
+        "Подставляем нижний предел.",
+        "Вычитаем полученные значения.",
+        "Записываем окончательный ответ.",
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {"explanations": explanations},
+                                ensure_ascii=False,
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_tool_loop)
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+
+    text, steps, actions = ai_module.generate_board_solution(
+        r"\int_{0}^{rac{1}{2}} x dx",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert steps[0] == {"text": explanations[0], "kind": "text"}
+    assert len(steps) == 12
+    assert steps[-1]["kind"] == "result"
+    assert "\\frac{1}{8}" in text
+
+
+def test_board_solution_falls_back_to_verified_integral_when_model_finalization_is_empty(monkeypatch):
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+    def fake_local_chat(*args, **kwargs):
+        kwargs["tool_trace"].append({
+            "tool": "math_integrate",
+            "arguments": {
+                "expression": "x",
+                "variable": "x",
+                "lower": "0",
+                "upper": "1",
+            },
+            "payload": {
+                "ok": True,
+                "tool": "math_integrate",
+                "result": {
+                    "input": {"text": "x", "latex": "x"},
+                    "variable": "x",
+                    "bounds": [
+                        {"text": "0", "latex": "0"},
+                        {"text": "1", "latex": "1"},
+                    ],
+                    "domain_valid": True,
+                    "antiderivative": {"text": "x**2/2", "latex": "\\frac{x^2}{2}"},
+                    "upper_value": {"text": "1/2", "latex": "\\frac{1}{2}"},
+                    "lower_value": {"text": "0", "latex": "0"},
+                    "result": {"text": "1/2", "latex": "\\frac{1}{2}"},
+                },
+            },
+        })
+        return ""
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "int_[0]^[1](x) dx",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert any("F(x)" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "\\frac{1}{2}" in text
+
+
+def test_solution_retries_when_model_uses_wrong_tool_for_detected_task(monkeypatch):
+    calls = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+    def fake_local_chat(*args, **kwargs):
+        calls.append(kwargs["sys"])
+        trace = kwargs["tool_trace"]
+        if len(calls) == 1:
+            trace.append({
+                "tool": "math_evaluate",
+                "payload": {"ok": True, "result": {"text": "2*x"}},
+            })
+        else:
+            trace.append({
+                "tool": "math_simplify",
+                "payload": {"ok": True, "result": {"text": "2*x", "latex": "2x"}},
+            })
+        return (
+            '{"summary":"ok","steps":['
+            '{"text":"Упростим выражение.","kind":"text"},'
+            '{"text":"$$x+x=2x$$","kind":"math"},'
+            '{"text":"Ответ: $$2x$$","kind":"result"}]}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "Упрости x+x",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert len(calls) == 2
+    assert "тип исходной задачи уже определён" in calls[1]
+    assert "math_simplify" in calls[1]
+    assert steps[-1]["kind"] == "result"
+    assert "2x" in text
 
 
 def test_visual_fallback_updates_single_known_graph_instead_of_adding_duplicate():

@@ -44,6 +44,28 @@ describe("findFreeBoardSpaceNearTarget", () => {
     expect(result?.insideViewport).toBe(true);
   });
 
+  it("uses a lower-right diagonal slot instead of pushing a tall block far down", () => {
+    const largeViewport = { left: 0, top: 0, right: 1600, bottom: 1200 };
+    const target = { left: 80, top: 80, right: 600, bottom: 400 };
+    const graph = { left: 650, top: 30, right: 1220, bottom: 400 };
+    const nextTask = { left: 80, top: 430, right: 620, bottom: 650 };
+
+    const result = findFreeBoardSpaceNearTarget(
+      largeViewport,
+      [target, graph, nextTask],
+      target,
+      500,
+      480,
+      40,
+      18,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.insideViewport).toBe(true);
+    expect(result?.x).toBe(640);
+    expect(result?.y).toBe(440);
+  });
+
   it("falls below when the right side is occupied", () => {
     const target = { left: 100, top: 120, right: 360, bottom: 250 };
     const blocker = { left: 380, top: 80, right: 900, bottom: 420 };

@@ -150,6 +150,81 @@ export function extractSafeHandwritingSteps(
   return extracted;
 }
 
+function readBalancedLatexGroup(
+  source: string,
+  start: number,
+  opening: string,
+  closing: string,
+) {
+  if (source[start] !== opening) return null;
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === opening) depth += 1;
+    if (source[index] === closing) {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          body: source.slice(start + 1, index),
+          next: index + 1,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeBalancedLatexMath(source: string): string {
+  let output = "";
+  let index = 0;
+
+  while (index < source.length) {
+    const fractionCommand = ["\\dfrac", "\\tfrac", "\\frac"]
+      .find((command) => source.startsWith(command, index));
+    if (fractionCommand) {
+      let cursor = index + fractionCommand.length;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      const numerator = readBalancedLatexGroup(source, cursor, "{", "}");
+      if (numerator) {
+        cursor = numerator.next;
+        while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+        const denominator = readBalancedLatexGroup(source, cursor, "{", "}");
+        if (denominator) {
+          output += "(" + normalizeBalancedLatexMath(numerator.body) + ")/(" +
+            normalizeBalancedLatexMath(denominator.body) + ")";
+          index = denominator.next;
+          continue;
+        }
+      }
+    }
+
+    if (source.startsWith("\\sqrt", index)) {
+      let cursor = index + "\\sqrt".length;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      let rootIndex = "";
+      if (source[cursor] === "[") {
+        const parsedIndex = readBalancedLatexGroup(source, cursor, "[", "]");
+        if (parsedIndex) {
+          rootIndex = normalizeBalancedLatexMath(parsedIndex.body);
+          cursor = parsedIndex.next;
+          while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+        }
+      }
+      const body = readBalancedLatexGroup(source, cursor, "{", "}");
+      if (body) {
+        output += (rootIndex ? toSuperscript(rootIndex) : "") +
+          "√(" + normalizeBalancedLatexMath(body.body) + ")";
+        index = body.next;
+        continue;
+      }
+    }
+
+    output += source[index];
+    index += 1;
+  }
+
+  return output;
+}
+
 export function normalizeHandwritingText(source: string) {
   let text = (source || "").trim();
   text = text.replace(/\$\$/g, "").replace(/\$/g, "");
@@ -183,9 +258,7 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\not\s*\\supseteq\b/g, "⊉").replace(/\\not\s*\\supset\b/g, "⊅");
   text = text.replace(/\\not\s*\\parallel\b/g, "∦");
   text = text.replace(/\\not\s*=/g, "≠");
-  text = text.replace(/\\sqrt\[([^\]]+)\]\{([^{}]+)\}/g, (_, index: string, body: string) =>
-    `${toSuperscript(index)}√(${body})`
-  );
+  text = normalizeBalancedLatexMath(text);
   text = text.replace(/\\pmod\{([^{}]+)\}/g, "(mod $1)");
   text = text.replace(/\\(?:bmod|mod)\b/g, "mod");
   for (const [command, symbol] of [...LATEX_SYMBOLS].sort((a, b) => b[0].length - a[0].length)) {
@@ -244,6 +317,36 @@ export function normalizeHandwritingText(source: string) {
   return text;
 }
 
+export function splitMathAwareWrapUnits(source: string): string[] {
+  const units: string[] = [];
+  let current = "";
+  let roundDepth = 0;
+  let squareDepth = 0;
+
+  const flush = () => {
+    const value = current.trim();
+    if (value) units.push(value);
+    current = "";
+  };
+
+  for (const char of source) {
+    if (char === "(") roundDepth += 1;
+    if (char === "[") squareDepth += 1;
+
+    if (/\s/.test(char) && roundDepth === 0 && squareDepth === 0) {
+      flush();
+      continue;
+    }
+
+    current += char;
+
+    if (char === ")") roundDepth = Math.max(0, roundDepth - 1);
+    if (char === "]") squareDepth = Math.max(0, squareDepth - 1);
+  }
+  flush();
+  return units;
+}
+
 function wrapLine(
   ctx: CanvasRenderingContext2D,
   source: string,
@@ -253,7 +356,7 @@ function wrapLine(
   if (!clean) return [];
   if (ctx.measureText(clean).width <= maxWidth) return [clean];
 
-  const words = clean.split(/\s+/);
+  const words = splitMathAwareWrapUnits(clean);
   const lines: string[] = [];
   let current = "";
 
@@ -419,7 +522,7 @@ function simplify(points: Point[], epsilon = 0.8): Point[] {
   return [...left.slice(0, -1), ...right];
 }
 
-function renderTextLine(
+function renderRasterTextLine(
   text: string,
   x: number,
   y: number,
@@ -485,6 +588,99 @@ function renderTextLine(
     if (Math.abs(aa.left - bb.left) > 3) return aa.left - bb.left;
     return aa.top - bb.top;
   });
+}
+
+export function buildDistinctSixPoints(
+  x: number,
+  y: number,
+  fontSize: number,
+  advance: number,
+): Point[] {
+  const width = Math.max(fontSize * 0.44, Math.min(advance, fontSize * 0.62));
+  const points: Point[] = [];
+
+  // Long descending entry stroke makes the glyph unmistakably a 6 rather
+  // than a closed 0/o. It starts high on the right and sweeps into the loop.
+  for (let index = 0; index <= 10; index += 1) {
+    const t = index / 10;
+    points.push({
+      x: x + width * (0.84 - 0.64 * t + 0.04 * Math.sin(t * Math.PI)),
+      y: y + fontSize * (0.06 + 0.62 * t),
+    });
+  }
+
+  const cx = x + width * 0.50;
+  const cy = y + fontSize * 0.72;
+  const rx = width * 0.31;
+  const ry = fontSize * 0.235;
+  for (let index = 1; index <= 28; index += 1) {
+    const angle = Math.PI + (index / 28) * Math.PI * 2;
+    points.push({
+      x: cx + Math.cos(angle) * rx,
+      y: cy + Math.sin(angle) * ry,
+    });
+  }
+
+  return points;
+}
+
+function renderTextLine(
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  color: string,
+  strokeWidth: number,
+  fontSize: number,
+) {
+  if (!text.includes("6")) {
+    return renderRasterTextLine(text, x, y, maxWidth, color, strokeWidth, fontSize);
+  }
+
+  const measureCanvas = document.createElement("canvas");
+  const measure = measureCanvas.getContext("2d");
+  if (!measure) {
+    return renderRasterTextLine(text, x, y, maxWidth, color, strokeWidth, fontSize);
+  }
+  measure.font = `${fontSize}px "Comic Sans MS", "Marker Felt", "Bradley Hand", cursive`;
+
+  const strokes: Stroke[] = [];
+  let cursorX = x;
+  let runStart = 0;
+
+  const renderRun = (value: string) => {
+    if (!value) return;
+    const width = measure.measureText(value).width;
+    strokes.push(
+      ...renderRasterTextLine(
+        value,
+        cursorX,
+        y,
+        Math.max(36, width + fontSize * 0.4),
+        color,
+        strokeWidth,
+        fontSize,
+      ),
+    );
+    cursorX += width;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "6") continue;
+    renderRun(text.slice(runStart, index));
+    const advance = Math.max(fontSize * 0.48, measure.measureText("6").width);
+    strokes.push({
+      points: buildDistinctSixPoints(cursorX, y, fontSize, advance),
+      color,
+      width: strokeWidth,
+      mode: "draw",
+      source: "ai",
+    });
+    cursorX += advance;
+    runStart = index + 1;
+  }
+  renderRun(text.slice(runStart));
+  return strokes;
 }
 
 export function solutionStepsToHandwritingStrokes(

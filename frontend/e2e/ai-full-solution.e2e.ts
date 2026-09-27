@@ -102,6 +102,8 @@ async function seedLesson(
       steps: Array<{ text: string; kind: "text" | "math" | "warning" | "result" }>;
       board_actions?: Array<Record<string, unknown>>;
     };
+    ocrResponses?: string[];
+    captureAiProblems?: string[];
   },
 ) {
   await page.addInitScript(({ schoolId, roomId, lessonId }) => {
@@ -109,6 +111,7 @@ async function seedLesson(
     localStorage.setItem("practice.lesson." + lessonId + ".boardProfile", "universal");
   }, { schoolId: school.id, roomId: room.id, lessonId: lesson.id });
 
+  let ocrResponseIndex = 0;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -150,10 +153,21 @@ async function seedLesson(
     if (path === "/api/status") return json(route, { ok: true, ai: true, ocr: true });
     if (path === "/api/storage" && method === "GET") return json(route, { tasks: [], slides: [] });
     if (path === "/api/storage" && method === "POST") return json(route, { ok: true });
-    if (path === "/api/ocr" && method === "POST") return json(route, { text: "Решить: x^2 - 4 = 0" });
+    if (path === "/api/ocr" && method === "POST") {
+      const responses = options?.ocrResponses;
+      const text = responses?.[ocrResponseIndex] ?? responses?.[responses.length - 1] ?? "Решить: x^2 - 4 = 0";
+      ocrResponseIndex += 1;
+      return json(route, { text });
+    }
 
     if (path === "/api/ai" && method === "POST") {
-      const payload = request.postDataJSON() as { mode?: string; board_output?: boolean; response_locale?: string };
+      const payload = request.postDataJSON() as {
+        mode?: string;
+        board_output?: boolean;
+        response_locale?: string;
+        problem?: string;
+      };
+      if (payload.problem) options?.captureAiProblems?.push(payload.problem);
       expect(payload.mode).toBe(options?.aiMode ?? "solution");
       expect(payload.board_output).toBe(true);
       expect(payload.response_locale).toBe("ru");
@@ -253,8 +267,9 @@ test("one undo removes the whole AI handwriting batch and redo restores it", asy
 });
 
 
-test("with two equations the latest user block is OCR target and solution stays close to it", async ({ page }) => {
+test("with two equations full solution OCR sends both tasks to AI", async ({ page }) => {
   const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
   const first = [
     taskStroke(60, 100, 120, 165),
     taskStroke(125, 130, 180, 130),
@@ -268,6 +283,8 @@ test("with two equations the latest user block is OCR target and solution stays 
   await seedLesson(page, {
     captureOps: operations,
     initialStrokes: [...first, ...second],
+    ocrResponses: ["x^2 - 4 = 0", "x^2 - 9 = 0"],
+    captureAiProblems: aiProblems,
   });
   await generateSolution(page, operations);
 
@@ -296,17 +313,130 @@ test("with two equations the latest user block is OCR target and solution stays 
   expect(overlaps(solution, firstBounds)).toBe(false);
   expect(overlaps(solution, secondBounds)).toBe(false);
 
-  const dx = Math.max(
-    0,
-    secondBounds.left - solution.right,
-    solution.left - secondBounds.right,
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0]).toContain("Задание 1:\nx^2 - 4 = 0");
+  expect(aiProblems[0]).toContain("Задание 2:\nx^2 - 9 = 0");
+});
+
+
+test("full solution scans only new student work after the latest AI answer", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const oldTask = [
+    taskStroke(60, 80, 120, 145),
+    taskStroke(125, 110, 185, 110),
+    taskStroke(195, 80, 195, 150),
+  ];
+  const oldAiAnswer = [
+    { ...taskStroke(60, 190, 130, 240), source: "ai" as const, color: "#4DA3FF" },
+    { ...taskStroke(140, 215, 210, 215), source: "ai" as const, color: "#4DA3FF" },
+  ];
+  const newTask = [
+    taskStroke(520, 420, 590, 500),
+    taskStroke(600, 455, 690, 455),
+    taskStroke(700, 420, 780, 500),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: [...oldTask, ...oldAiAnswer, ...newTask],
+    ocrResponses: [
+      "int_[0]^[5*pi](cos(x)+x^2) dx",
+      "x^2 - 4 = 0",
+    ],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0].trim()).toBe("int_[0]^[5*pi](cos(x)+x^2) dx");
+  expect(aiProblems[0]).not.toContain("x^2 - 4 = 0");
+});
+
+
+test("full solution splits two close tasks returned by one OCR crop", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const closeBlock = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: closeBlock,
+    ocrResponses: ["x^2 - 4 = 0\n9x^2 + 11x + 3 = 3"],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0]).toContain("Задание 1:\nx^2 - 4 = 0");
+  expect(aiProblems[0]).toContain("Задание 2:\n9x^2 + 11x + 3 = 3");
+});
+
+
+test("full solution keeps the first task statement when its worked solution is already on board", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const closeBlock = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: closeBlock,
+    ocrResponses: [
+      "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8\n9x^2 + 11x + 3 = 35",
+    ],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0]).toContain(
+    "Задание 1:\n5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
   );
-  const dy = Math.max(
-    0,
-    secondBounds.top - solution.bottom,
-    solution.top - secondBounds.bottom,
-  );
-  expect(Math.hypot(dx, dy)).toBeLessThan(90);
+  expect(aiProblems[0]).toContain("Задание 2:\n9x^2 + 11x + 3 = 35");
+});
+
+
+test("full solution drops stale worked rows and OCR junk before sending task", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const first = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+  const second = [
+    taskStroke(390, 110, 450, 175),
+    taskStroke(455, 140, 510, 140),
+    taskStroke(520, 110, 520, 180),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: [...first, ...second],
+    ocrResponses: [
+      "x2 = (-4 - 14) / 10 = -1.8\n9x^2 + 11x + 3 = 3",
+      "OK",
+    ],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0].trim()).toBe("9x^2 + 11x + 3 = 3");
+  expect(aiProblems[0]).not.toContain("x2 =");
+  expect(aiProblems[0]).not.toContain("OK");
 });
 
 

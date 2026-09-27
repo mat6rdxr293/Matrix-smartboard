@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -101,6 +103,103 @@ def test_solution_payload_limits_are_validated(tmp_path):
     )
 
     assert response.status_code == 422
+
+def test_legacy_camel_case_client_operation_id_is_accepted(tmp_path):
+    client, lesson = registered_client(tmp_path)
+    stroke = {
+        "points": [{"x": 10, "y": 20}, {"x": 20, "y": 25}],
+        "color": "#ffffff",
+        "width": 2.2,
+        "mode": "draw",
+        "source": "ai",
+    }
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/board/operations",
+        json={
+            "operations": [
+                {
+                    "clientOperationId": "legacy-handwriting-1",
+                    "op": "add",
+                    "stroke": stroke,
+                    "ts": 140,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["inserted"] == 1
+
+
+def test_large_ai_handwriting_batch_above_old_512kb_limit_is_accepted(tmp_path):
+    client, lesson = registered_client(tmp_path)
+    strokes = [
+        {
+            "points": [
+                {"x": index + point / 10, "y": 20 + point / 5}
+                for point in range(16)
+            ],
+            "color": "#4DA3FF",
+            "width": 2.2,
+            "mode": "draw",
+            "source": "ai",
+        }
+        for index in range(1600)
+    ]
+    operation = {
+        "client_operation_id": "large-handwriting-1",
+        "op": "stroke_batch_add",
+        "strokes": strokes,
+        "ts": 145,
+    }
+    assert len(
+        json.dumps(
+            {"strokes": strokes},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ) > 512_000
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/board/operations",
+        json={"operations": [operation]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["inserted"] == 1
+
+
+def test_large_ai_handwriting_batch_above_old_4000_stroke_limit_is_accepted(tmp_path):
+    client, lesson = registered_client(tmp_path)
+    strokes = [
+        {
+            "points": [{"x": index % 900, "y": index // 900}],
+            "color": "#4DA3FF",
+            "width": 2.2,
+            "mode": "draw",
+            "source": "ai",
+        }
+        for index in range(4500)
+    ]
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/board/operations",
+        json={
+            "operations": [
+                {
+                    "client_operation_id": "many-handwriting-strokes",
+                    "op": "stroke_batch_add",
+                    "strokes": strokes,
+                    "ts": 147,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["inserted"] == 1
+
 
 def test_handwriting_stroke_batch_roundtrip(tmp_path):
     client, lesson = registered_client(tmp_path)

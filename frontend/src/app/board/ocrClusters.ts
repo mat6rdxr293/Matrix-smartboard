@@ -7,6 +7,122 @@ export type OcrStrokeCluster = {
   bounds: BoardRect;
 };
 
+export function recentUserOcrStrokes(strokes: Stroke[]): Stroke[] {
+  let lastAiIndex = -1;
+  for (let index = strokes.length - 1; index >= 0; index -= 1) {
+    if (strokes[index]?.source === "ai") {
+      lastAiIndex = index;
+      break;
+    }
+  }
+
+  const userDrawStrokes = strokes.filter(
+    (stroke) => stroke.mode === "draw" && stroke.source !== "ai",
+  );
+  if (lastAiIndex < 0) return userDrawStrokes;
+
+  const recent = strokes.slice(lastAiIndex + 1).filter(
+    (stroke) => stroke.mode === "draw" && stroke.source !== "ai",
+  );
+  return recent.length ? recent : userDrawStrokes;
+}
+
+const isWorkedSolutionLine = (line: string) =>
+  /^\s*(?:D|Δ|Д|д)\s*=/.test(line) ||
+  /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line);
+
+const isStandaloneTaskEquation = (line: string) =>
+  /[xх]/i.test(line) &&
+  /=/.test(line) &&
+  !isWorkedSolutionLine(line) &&
+  !/^\s*y\s*=/i.test(line);
+
+const splitLogicalTasksFromOcr = (value: string): string[] => {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+
+  const equationIndexes = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => isStandaloneTaskEquation(line))
+    .map(({ index }) => index);
+
+  if (!equationIndexes.length) return [lines.join("\n")];
+
+  if (equationIndexes.length === 1) {
+    const start = equationIndexes[0];
+    if (start > 0 && lines.slice(0, start).every(isWorkedSolutionLine)) {
+      return [lines.slice(start).join("\n")];
+    }
+    return [lines.join("\n")];
+  }
+
+  const prefix = lines.slice(0, equationIndexes[0]);
+  const keepPrefix = prefix.length > 0 && !prefix.every(isWorkedSolutionLine);
+  const tasks: string[] = [];
+
+  for (let index = 0; index < equationIndexes.length; index += 1) {
+    const start = equationIndexes[index];
+    const end = equationIndexes[index + 1] ?? lines.length;
+    const segment = lines.slice(start, end);
+    if (index === 0 && keepPrefix) segment.unshift(...prefix);
+    if (segment.length) tasks.push(segment.join("\n"));
+  }
+
+  return tasks;
+};
+
+const isLikelyCompletedWork = (value: string) => {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const rootRows = lines.filter((line) =>
+    /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line)
+  ).length;
+  const hasDiscriminant = lines.some((line) =>
+    /^\s*(?:D|Δ|Д|д)\s*=/.test(line)
+  );
+  const hasAnswer = lines.some((line) =>
+    /^\s*(?:ответ|жауап|answer)\s*:/i.test(line)
+  );
+  return rootRows >= 2 || (hasDiscriminant && rootRows >= 1) || hasAnswer;
+};
+
+const isLikelyTaskText = (value: string) => {
+  const compact = value.replace(/\s+/g, "");
+  if (compact.length < 3) return false;
+  const hasMathSignal = /[=<>≤≥+\-*/^²³√∫Σ∑π\d]/.test(value);
+  const hasEnoughText = value.replace(
+    /[^A-Za-zА-Яа-яӘәҒғҚқҢңӨөҰұҮүҺһІі]/g,
+    "",
+  ).length >= 8;
+  return hasMathSignal || hasEnoughText;
+};
+
+export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
+  const tasks = values
+    .flatMap(splitLogicalTasksFromOcr)
+    .filter(isLikelyTaskText);
+
+  return [...new Set(tasks.map((value) => value.trim()).filter(Boolean))];
+}
+
+export function composeOcrText(
+  recognized: string,
+  graphLines: string[],
+  hasHandwritingTarget: boolean,
+): string {
+  const primary = recognized.trim();
+  if (hasHandwritingTarget) return primary;
+  return [primary, ...graphLines.map((line) => line.trim())]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -129,7 +245,7 @@ export function clusterOcrStrokes(
     groups.set(root, group);
   });
 
-  return [...groups.values()]
+  const rawClusters = [...groups.values()]
     .map((group) => ({
       strokes: group.map((entry) => entry.stroke),
       indices: group.map((entry) => entry.index),
@@ -140,18 +256,278 @@ export function clusterOcrStrokes(
       const height = cluster.bounds.bottom - cluster.bounds.top;
       return cluster.strokes.length >= 2 || width >= 24 || height >= 24;
     })
+    .sort((a, b) => a.bounds.left - b.bounds.left);
+
+  // A trailing handwritten digit can sit farther from the previous glyph than
+  // the normal same-line threshold (for example the final 5 in "... = 35").
+  // Attach only small right-hand satellites to a much larger row, so a whole
+  // side-by-side equation still remains a separate OCR task.
+  const consumed = new Set<number>();
+  const merged: OcrStrokeCluster[] = [];
+
+  for (let i = 0; i < rawClusters.length; i += 1) {
+    if (consumed.has(i)) continue;
+    let current = rawClusters[i];
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      for (let j = 0; j < rawClusters.length; j += 1) {
+        if (i === j || consumed.has(j)) continue;
+        const candidate = rawClusters[j];
+        const currentWidth = current.bounds.right - current.bounds.left;
+        const currentHeight = Math.max(1, current.bounds.bottom - current.bounds.top);
+        const candidateWidth = candidate.bounds.right - candidate.bounds.left;
+        const candidateHeight = candidate.bounds.bottom - candidate.bounds.top;
+        const xGap = candidate.bounds.left - current.bounds.right;
+        const yOverlap = overlapLength(
+          current.bounds.top,
+          current.bounds.bottom,
+          candidate.bounds.top,
+          candidate.bounds.bottom,
+        );
+        const overlapRatio =
+          yOverlap /
+          Math.max(
+            1,
+            Math.min(
+              current.bounds.bottom - current.bounds.top,
+              candidateHeight,
+            ),
+          );
+
+        const smallTrailingFragment =
+          currentWidth >= currentHeight * 2.4 &&
+          candidate.bounds.left >= current.bounds.right &&
+          candidateWidth <= Math.max(currentHeight * 1.8, 150) &&
+          candidateHeight <= Math.max(currentHeight * 1.9, 180) &&
+          candidate.strokes.length <= 8 &&
+          xGap >= 0 &&
+          xGap <= Math.max(currentHeight * 3.2, 240) &&
+          overlapRatio >= 0.3;
+
+        if (!smallTrailingFragment) continue;
+        current = {
+          strokes: [...current.strokes, ...candidate.strokes],
+          indices: [...current.indices, ...candidate.indices].sort((a, b) => a - b),
+          bounds: unionRects([current.bounds, candidate.bounds]),
+        };
+        consumed.add(j);
+        changed = true;
+      }
+    }
+
+    merged.push(current);
+  }
+
+  return merged.sort((a, b) => {
+    const aLast = Math.max(...a.indices);
+    const bLast = Math.max(...b.indices);
+    return aLast - bLast;
+  });
+}
+
+const clusterInkLength = (cluster: OcrStrokeCluster) => {
+  let total = 0;
+  for (const stroke of cluster.strokes) {
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const previous = stroke.points[index - 1];
+      const current = stroke.points[index];
+      total += Math.hypot(current.x - previous.x, current.y - previous.y);
+    }
+  }
+  return total;
+};
+
+const clusterContentScore = (cluster: OcrStrokeCluster) => {
+  const width = Math.max(0, cluster.bounds.right - cluster.bounds.left);
+  const height = Math.max(0, cluster.bounds.bottom - cluster.bounds.top);
+  return (
+    clusterInkLength(cluster) +
+    cluster.strokes.length * 18 +
+    Math.min(360, width) * 0.45 +
+    Math.min(180, height) * 0.2
+  );
+};
+
+const clusterWidth = (cluster: OcrStrokeCluster) =>
+  Math.max(1, cluster.bounds.right - cluster.bounds.left);
+
+const clusterHeight = (cluster: OcrStrokeCluster) =>
+  Math.max(1, cluster.bounds.bottom - cluster.bounds.top);
+
+const likelySameVerticalWork = (
+  block: OcrStrokeCluster,
+  candidate: OcrStrokeCluster,
+) => {
+  const verticalGap = axisGap(
+    block.bounds.top,
+    block.bounds.bottom,
+    candidate.bounds.top,
+    candidate.bounds.bottom,
+  );
+  // Only join stacked rows here. Side-by-side equations can have overlapping
+  // y ranges and must stay separate OCR targets.
+  if (verticalGap <= 0) return false;
+
+  const maxRowHeight = Math.max(clusterHeight(block), clusterHeight(candidate));
+  const allowedGap = clamp(maxRowHeight * 1.9, 72, 220);
+  if (verticalGap > allowedGap) return false;
+
+  const overlap = overlapLength(
+    block.bounds.left,
+    block.bounds.right,
+    candidate.bounds.left,
+    candidate.bounds.right,
+  );
+  const overlapRatio = overlap / Math.min(clusterWidth(block), clusterWidth(candidate));
+  const leftDelta = Math.abs(block.bounds.left - candidate.bounds.left);
+  const leftAligned = leftDelta <= clamp(Math.min(clusterWidth(block), clusterWidth(candidate)) * 0.45, 58, 150);
+
+  const blockCenter = (block.bounds.left + block.bounds.right) / 2;
+  const candidateCenter = (candidate.bounds.left + candidate.bounds.right) / 2;
+  const centerDelta = Math.abs(blockCenter - candidateCenter);
+  const centerAligned = centerDelta <= Math.max(clusterWidth(block), clusterWidth(candidate)) * 0.48;
+
+  return overlapRatio >= 0.16 || leftAligned || centerAligned;
+};
+
+const mergeClusters = (clusters: OcrStrokeCluster[]): OcrStrokeCluster => ({
+  strokes: clusters.flatMap((cluster) => cluster.strokes),
+  indices: clusters.flatMap((cluster) => cluster.indices).sort((a, b) => a - b),
+  bounds: unionRects(clusters.map((cluster) => cluster.bounds)),
+});
+
+const expandOcrWorkBlock = (
+  clusters: OcrStrokeCluster[],
+  anchor: OcrStrokeCluster,
+  maxScore: number,
+): OcrStrokeCluster => {
+  const selected = new Set<OcrStrokeCluster>([anchor]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const candidate of clusters) {
+      if (selected.has(candidate)) continue;
+      const score = clusterContentScore(candidate);
+      const candidateWidth = clusterWidth(candidate);
+      const candidateHeight = clusterHeight(candidate);
+      const substantial =
+        score >= maxScore * 0.12 ||
+        candidate.strokes.length >= 3 ||
+        candidateWidth >= 54 ||
+        candidateHeight >= 38;
+      const touchesSelectedRow = [...selected].some((row) =>
+        likelySameVerticalWork(row, candidate)
+      );
+      if (!substantial || !touchesSelectedRow) continue;
+      selected.add(candidate);
+      changed = true;
+    }
+  }
+
+  return mergeClusters([...selected]);
+};
+
+export function chooseOcrTaskClusters(
+  clusters: OcrStrokeCluster[],
+  maxTasks = 8,
+): OcrStrokeCluster[] {
+  if (!clusters.length) return [];
+  if (clusters.length === 1) return [clusters[0]];
+
+  const scored = clusters.map((cluster) => ({
+    cluster,
+    score: clusterContentScore(cluster),
+  }));
+  const maxScore = Math.max(...scored.map((item) => item.score));
+
+  const candidateAnchors = scored
+    .filter((item) => {
+      const width = clusterWidth(item.cluster);
+      const height = clusterHeight(item.cluster);
+      return (
+        item.score >= maxScore * 0.22 ||
+        item.cluster.strokes.length >= 4 ||
+        width >= 72 ||
+        height >= 42
+      );
+    })
+    .map((item) => item.cluster);
+
+  const unique = new Map<string, OcrStrokeCluster>();
+  for (const anchor of candidateAnchors) {
+    const block = expandOcrWorkBlock(clusters, anchor, maxScore);
+    const signature = [...block.indices].sort((a, b) => a - b).join(",");
+    unique.set(signature, block);
+  }
+
+  return [...unique.values()]
     .sort((a, b) => {
-      const aLast = Math.max(...a.indices);
-      const bLast = Math.max(...b.indices);
-      return aLast - bLast;
-    });
+      const aCenterY = (a.bounds.top + a.bounds.bottom) / 2;
+      const bCenterY = (b.bounds.top + b.bounds.bottom) / 2;
+      const rowTolerance = Math.max(
+        48,
+        Math.min(clusterHeight(a), clusterHeight(b)) * 0.55,
+      );
+      if (Math.abs(aCenterY - bCenterY) <= rowTolerance) {
+        return a.bounds.left - b.bounds.left;
+      }
+      return a.bounds.top - b.bounds.top;
+    })
+    .slice(0, Math.max(1, maxTasks));
 }
 
 export function chooseActiveOcrCluster(
   clusters: OcrStrokeCluster[],
 ): OcrStrokeCluster | null {
   if (!clusters.length) return null;
-  return clusters.reduce((latest, cluster) =>
-    Math.max(...cluster.indices) > Math.max(...latest.indices) ? cluster : latest
+  if (clusters.length === 1) return clusters[0];
+
+  const scored = clusters.map((cluster) => ({
+    cluster,
+    score: clusterContentScore(cluster),
+    lastIndex: Math.max(...cluster.indices),
+  }));
+  const maxScore = Math.max(...scored.map((item) => item.score));
+
+  // Prefer the newest meaningful handwritten block, but do not let a tiny
+  // accidental scribble/dot drawn later replace a substantially larger
+  // equation as the OCR target.
+  const meaningful = scored.filter((item) => item.score >= maxScore * 0.34);
+  const anchor = meaningful.reduce((latest, item) =>
+    item.lastIndex > latest.lastIndex ? item : latest
   );
+
+  const selected = new Set<OcrStrokeCluster>([anchor.cluster]);
+  let changed = true;
+
+  // A worked solution is usually several vertically stacked rows. Expand from
+  // the anchor through nearby aligned rows while keeping unrelated side-by-side
+  // tasks and distant scribbles out of the OCR crop. Compare against individual
+  // selected rows rather than the union bounds: a missing middle row may sit
+  // inside the union of an upper and lower row and would otherwise look like
+  // zero vertical gap.
+  while (changed) {
+    changed = false;
+    for (const item of scored) {
+      if (selected.has(item.cluster)) continue;
+      const candidateWidth = clusterWidth(item.cluster);
+      const candidateHeight = clusterHeight(item.cluster);
+      const substantial =
+        item.score >= maxScore * 0.12 ||
+        item.cluster.strokes.length >= 3 ||
+        candidateWidth >= 54 ||
+        candidateHeight >= 38;
+      const touchesSelectedRow = [...selected].some((row) =>
+        likelySameVerticalWork(row, item.cluster)
+      );
+      if (!substantial || !touchesSelectedRow) continue;
+      selected.add(item.cluster);
+      changed = true;
+    }
+  }
+
+  return mergeClusters([...selected]);
 }
