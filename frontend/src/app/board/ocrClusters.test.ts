@@ -178,6 +178,25 @@ it("drops stale worked solution and OCR junk when a new task is present", () => 
   ).toEqual(["9x^2 + 11x + 3 = 3"]);
 });
 
+it("splits two fresh equations even when OCR returns them in one close block", () => {
+  expect(
+    sanitizeMultiTaskOcrTexts([
+      "x^2 - 4 = 0\n9x^2 + 11x + 3 = 3",
+    ]),
+  ).toEqual([
+    "x^2 - 4 = 0",
+    "9x^2 + 11x + 3 = 3",
+  ]);
+});
+
+it("splits a new close task out of a completed first solution in one OCR block", () => {
+  expect(
+    sanitizeMultiTaskOcrTexts([
+      "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8\n9x^2 + 11x + 3 = 3",
+    ]),
+  ).toEqual(["9x^2 + 11x + 3 = 3"]);
+});
+
 it("cuts a stale root row accidentally attached before a new equation", () => {
   expect(
     sanitizeMultiTaskOcrTexts([

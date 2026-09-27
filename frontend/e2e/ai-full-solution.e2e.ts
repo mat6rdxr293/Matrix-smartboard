@@ -319,6 +319,30 @@ test("with two equations full solution OCR sends both tasks to AI", async ({ pag
 });
 
 
+test("full solution splits two close tasks returned by one OCR crop", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const closeBlock = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: closeBlock,
+    ocrResponses: ["x^2 - 4 = 0\n9x^2 + 11x + 3 = 3"],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0]).toContain("Задание 1:\nx^2 - 4 = 0");
+  expect(aiProblems[0]).toContain("Задание 2:\n9x^2 + 11x + 3 = 3");
+});
+
+
 test("full solution drops stale worked rows and OCR junk before sending task", async ({ page }) => {
   const operations: CapturedOp[] = [];
   const aiProblems: string[] = [];

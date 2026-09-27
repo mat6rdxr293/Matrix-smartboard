@@ -17,26 +17,41 @@ const isStandaloneTaskEquation = (line: string) =>
   !isWorkedSolutionLine(line) &&
   !/^\s*y\s*=/i.test(line);
 
-const trimOldWorkedPrefix = (value: string) => {
+const splitLogicalTasksFromOcr = (value: string): string[] => {
   const lines = value
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  if (lines.length < 2) return value.trim();
+  if (!lines.length) return [];
 
-  const lastEquation = [...lines]
+  const equationIndexes = lines
     .map((line, index) => ({ line, index }))
-    .reverse()
-    .find(({ line }) => isStandaloneTaskEquation(line));
+    .filter(({ line }) => isStandaloneTaskEquation(line))
+    .map(({ index }) => index);
 
-  if (
-    lastEquation &&
-    lastEquation.index > 0 &&
-    lines.slice(0, lastEquation.index).every(isWorkedSolutionLine)
-  ) {
-    return lines.slice(lastEquation.index).join("\n");
+  if (!equationIndexes.length) return [lines.join("\n")];
+
+  if (equationIndexes.length === 1) {
+    const start = equationIndexes[0];
+    if (start > 0 && lines.slice(0, start).every(isWorkedSolutionLine)) {
+      return [lines.slice(start).join("\n")];
+    }
+    return [lines.join("\n")];
   }
-  return lines.join("\n");
+
+  const prefix = lines.slice(0, equationIndexes[0]);
+  const keepPrefix = prefix.length > 0 && !prefix.every(isWorkedSolutionLine);
+  const tasks: string[] = [];
+
+  for (let index = 0; index < equationIndexes.length; index += 1) {
+    const start = equationIndexes[index];
+    const end = equationIndexes[index + 1] ?? lines.length;
+    const segment = lines.slice(start, end);
+    if (index === 0 && keepPrefix) segment.unshift(...prefix);
+    if (segment.length) tasks.push(segment.join("\n"));
+  }
+
+  return tasks;
 };
 
 const isLikelyCompletedWork = (value: string) => {
@@ -69,7 +84,7 @@ const isLikelyTaskText = (value: string) => {
 
 export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
   let tasks = values
-    .map(trimOldWorkedPrefix)
+    .flatMap(splitLogicalTasksFromOcr)
     .filter(isLikelyTaskText);
 
   const unfinished = tasks.filter((value) => !isLikelyCompletedWork(value));
