@@ -1414,6 +1414,12 @@ def test_board_actions_parser_supports_stroke_move_and_delete():
     ]
 
 
+def test_integral_ocr_notation_is_classified_before_trigonometry():
+    assert ai_module._check_task_kind("int_[0]^[1](cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("∫_0^1 (cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("\\int_{0}^{1}(cos(x)+x^2) dx", "алгебра") == "integral"
+
+
 def test_visual_fallback_updates_single_known_graph_instead_of_adding_duplicate():
     state = {"graphs": [{"id": "graph-1", "expressions": ["x^2"]}]}
     actions = ai_module._fallback_visual_board_actions(

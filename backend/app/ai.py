@@ -2392,7 +2392,12 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
         return "limit"
     if any(cue in lower for cue in ("производн", "derivative", "туынды")):
         return "derivative"
-    if any(cue in lower for cue in ("интеграл", "integral", "интегралын")):
+    if (
+        any(cue in lower for cue in ("интеграл", "integral", "интегралын"))
+        or "∫" in task
+        or "\\int" in task
+        or re.search(r"(?i)\bint\s*(?:_|\^|\[|\()", task)
+    ):
         return "integral"
     if any(cue in lower for cue in ("раскры", "expand", "жақшаны аш")):
         return "expand"
@@ -3651,6 +3656,39 @@ def generate_board_solution(
         require_tool=_requires_tool_use(subject, "solution"),
         tool_trace=tool_trace,
     )
+
+    task_kind = _check_task_kind(problem, subject)
+    if task_kind == "integral" and not _check_trace_covers_task(
+        problem,
+        subject,
+        tool_trace,
+    ):
+        retry_trace: list[dict] = []
+        raw = _local_chat_with_tools(
+            client,
+            sys=(
+                sys
+                + "\nКРИТИЧНО: исходная запись является ИНТЕГРАЛОМ. "
+                "Обязательно вызови math_integrate по исходному интегралу, сохрани пределы, "
+                "интегранд и переменную интегрирования. Не заменяй интеграл отдельным "
+                "арифметическим или тригонометрическим выражением."
+            ),
+            user=user,
+            max_tokens=max(max_tokens, 2000),
+            subject=subject,
+            task_text=problem,
+            postprocess=False,
+            require_tool=True,
+            tool_trace=retry_trace,
+        )
+        tool_trace = retry_trace
+
+        if not _check_trace_covers_task(problem, subject, tool_trace):
+            raise RuntimeError(
+                "Не удалось надежно разобрать интеграл: вычислительный модуль "
+                "не подтвердил исходную запись. Попробуйте распознать интеграл ещё раз."
+            )
+
     actions = _parse_board_actions(raw) if include_actions else []
     text, steps = _parse_board_solution(raw)
 
