@@ -213,6 +213,31 @@ test("full solution is handwriting strokes placed away from an existing graph", 
   expect(overlapsGraph).toBe(false);
 });
 
+test("expanding and collapsing panels keeps the same board instance mounted", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, { captureOps: operations });
+
+  await page.getByTestId("board-canvas-root").evaluate((node) => {
+    (node as HTMLElement & { __matrixMountMarker?: string }).__matrixMountMarker = "same-instance";
+  });
+
+  await page.getByRole("button", { name: "Панели" }).click();
+  await expect(page.getByTestId("board-canvas-root")).toBeVisible();
+  expect(
+    await page.getByTestId("board-canvas-root").evaluate(
+      (node) => (node as HTMLElement & { __matrixMountMarker?: string }).__matrixMountMarker,
+    ),
+  ).toBe("same-instance");
+
+  await page.getByRole("button", { name: "Панели" }).click();
+  await expect(page.getByTestId("board-canvas-root")).toBeVisible();
+  expect(
+    await page.getByTestId("board-canvas-root").evaluate(
+      (node) => (node as HTMLElement & { __matrixMountMarker?: string }).__matrixMountMarker,
+    ),
+  ).toBe("same-instance");
+});
+
 test("one undo removes the whole AI handwriting batch and redo restores it", async ({ page }) => {
   const operations: CapturedOp[] = [];
   await seedLesson(page, { captureOps: operations });

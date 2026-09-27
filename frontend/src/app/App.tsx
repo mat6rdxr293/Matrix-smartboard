@@ -1524,178 +1524,141 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           {tab === "tasks" && (
             <div className="relative flex h-full min-h-0 flex-col gap-2">
               <div className="relative min-h-0 flex-1">
-              <AnimatePresence mode="wait">
-                {boardExpanded ? (
+              <div className="flex h-full min-h-0 overflow-hidden">
+                <motion.div
+                  className="h-full shrink-0 overflow-hidden"
+                  initial={false}
+                  animate={{
+                    width: boardExpanded ? 0 : tasksSidebarWidth,
+                    opacity: boardExpanded ? 0 : 1,
+                  }}
+                  transition={{
+                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                    opacity: { duration: boardExpanded ? 0.14 : 0.2, ease: "easeOut" },
+                  }}
+                  aria-hidden={boardExpanded}
+                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
+                >
                   <motion.div
-                    key="board-expanded"
-                    className="h-full"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.25 }}
+                    className="glass h-full rounded-2xl p-4 shadow-soft"
+                    style={{ width: tasksSidebarWidth }}
+                    initial={false}
+                    animate={{ x: boardExpanded ? -14 : 0 }}
+                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                   >
-                    <BoardCanvas
-                      ref={boardCanvasRef}
-                      ocrEnabled={!!apiStatus?.ocr}
-                      expanded={boardExpanded}
-                      onTogglePanels={() => setBoardExpanded((v) => !v)}
-                      onStartTimer={() => setTimerRunning(true)}
-                      initialStrokes={boardHistory.document.strokes}
-                      onChangeStrokes={syncBoardStrokes}
-                      initialGraphs={boardHistory.document.graphs}
-                      onChangeGraphs={syncBoardGraphs}
-                      initialSolutions={boardHistory.document.solutions}
-                      onChangeSolutions={syncBoardSolutions}
-                      onCancelAiSolution={cancelAiSolution}
-                      canUndo={boardHistory.undoStack.length > 0}
-                      canRedo={boardHistory.redoStack.length > 0}
-                      initialPenColor={boardPenColor}
-                      onChangePenColor={setBoardPenColor}
-                      initialBgColor={boardBgColor}
-                      onChangeBgColor={setBoardBgColor}
-                      onReplayOp={onBoardReplayOp}
-                      lowPowerOverride={ultraLite}
-                      renderQualityMode={performanceMode}
-                      taskOpen={taskOpen}
-                      assistantOpen={assistantOpen}
-                      onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
-                      onToggleAssistant={toggleAssistantPanel}
-                      boardProfile={boardProfile}
-                    />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="board-split"
-                    className="grid h-full gap-2"
-                    style={{ gridTemplateColumns: `${tasksSidebarWidth}px 8px 1fr` }}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.25 }}
-                  >
-                    <motion.div
-                      className="glass rounded-2xl p-4 shadow-soft"
-                      initial={{ x: -12, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      exit={{ x: -12, opacity: 0 }}
-                      transition={{ duration: 0.25 }}
-                    >
-                      <div className="mb-3">
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">
-                          {tl("cards_count_tasks", { count: taskData.length })}
-                        </h3>
+                    <div className="mb-3">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">
+                        {tl("cards_count_tasks", { count: taskData.length })}
+                      </h3>
+                    </div>
+                    <div ref={listRef} className="scrollbar-hide max-h-[60vh] overflow-auto pr-1">
+                      <div className="grid grid-cols-1 gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={freeBoardMode}
+                          disabled={freeBoardForced}
+                          title={freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
+                          onClick={toggleFreeBoardMode}
+                          className={
+                            freeBoardMode
+                              ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2.5 text-left"
+                              : "w-full rounded-xl border border-white/10 px-3 py-2.5 text-left transition hover:border-white/30"
+                          }
+                        >
+                          <div className="text-[12px] font-semibold text-frost">{tl("free_board_mode")}</div>
+                          <div className="mt-1 text-[11px] leading-4 text-frost/45">
+                            {freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
+                          </div>
+                        </button>
+
+                        {taskData.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-[12px] leading-5 text-frost/45">
+                            {tl("teacher_tasks_empty")}
+                          </div>
+                        ) : (
+                          taskData.map((task) => (
+                            <button
+                              key={task.id}
+                              type="button"
+                              className={
+                                !freeBoardMode && task.id === selectedTaskId
+                                  ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2 text-left text-sm"
+                                  : "w-full rounded-xl border border-white/10 px-3 py-2 text-left text-sm hover:border-white/30"
+                              }
+                              onClick={() => {
+                                setSelectedTaskId(task.id);
+                                setFreeBoardRequested(false);
+                              }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold">#{task.id}</span>
+                                <span className="text-xs text-frost/60">{task.tags[0] ?? tl("task")}</span>
+                              </div>
+                              <div className="text-xs text-frost/70">
+                                {task.id === selectedTaskId ? (
+                                  <div className="inline-block align-middle">
+                                    <MathText text={task.title} />
+                                  </div>
+                                ) : (
+                                  task.title.replace(/\$/g, "")
+                                )}
+                              </div>
+                            </button>
+                          ))
+                        )}
                       </div>
-                      <div ref={listRef} className="scrollbar-hide max-h-[60vh] overflow-auto pr-1">
-                        <div className="grid grid-cols-1 gap-2">
-                          <button
-                            type="button"
-                            aria-pressed={freeBoardMode}
-                            disabled={freeBoardForced}
-                            title={freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
-                            onClick={toggleFreeBoardMode}
-                            className={
-                              freeBoardMode
-                                ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2.5 text-left"
-                                : "w-full rounded-xl border border-white/10 px-3 py-2.5 text-left transition hover:border-white/30"
-                            }
-                          >
-                            <div className="text-[12px] font-semibold text-frost">{tl("free_board_mode")}</div>
-                            <div className="mt-1 text-[11px] leading-4 text-frost/45">
-                              {freeBoardForced ? tl("free_board_auto") : tl("free_board_description")}
-                            </div>
-                          </button>
-
-                          {taskData.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-[12px] leading-5 text-frost/45">
-                              {tl("teacher_tasks_empty")}
-                            </div>
-                          ) : (
-                            taskData.map((task) => (
-                              <button
-                                key={task.id}
-                                type="button"
-                                className={
-                                  !freeBoardMode && task.id === selectedTaskId
-                                    ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2 text-left text-sm"
-                                    : "w-full rounded-xl border border-white/10 px-3 py-2 text-left text-sm hover:border-white/30"
-                                }
-                                onClick={() => {
-                                  setSelectedTaskId(task.id);
-                                  setFreeBoardRequested(false);
-                                }}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="font-semibold">#{task.id}</span>
-                                  <span className="text-xs text-frost/60">{task.tags[0] ?? tl("task")}</span>
-                                </div>
-                                <div className="text-xs text-frost/70">
-                                  {task.id === selectedTaskId ? (
-                                    <div className="inline-block align-middle">
-                                      <MathText text={task.title} />
-                                    </div>
-                                  ) : (
-                                    task.title.replace(/\$/g, "")
-                                  )}
-                                </div>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-
-                    <motion.div
-                      className="relative flex h-full items-stretch"
-                      onPointerDown={startSidebarResize("tasks")}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.25 }}
-                    >
-                      <div
-                        className="h-full w-2 cursor-col-resize rounded-full bg-white/5 hover:bg-white/10"
-                        style={{ touchAction: "none" }}
-                      />
-                    </motion.div>
-
-                    <motion.div
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 12 }}
-                      transition={{ duration: 0.25 }}
-                    >
-                      <BoardCanvas
-                        ref={boardCanvasRef}
-                        ocrEnabled={!!apiStatus?.ocr}
-                        expanded={boardExpanded}
-                        onTogglePanels={() => setBoardExpanded((v) => !v)}
-                        onStartTimer={() => setTimerRunning(true)}
-                        initialStrokes={boardHistory.document.strokes}
-                        onChangeStrokes={syncBoardStrokes}
-                        initialGraphs={boardHistory.document.graphs}
-                        onChangeGraphs={syncBoardGraphs}
-                        initialSolutions={boardHistory.document.solutions}
-                        onChangeSolutions={syncBoardSolutions}
-                        onCancelAiSolution={cancelAiSolution}
-                        canUndo={boardHistory.undoStack.length > 0}
-                        canRedo={boardHistory.redoStack.length > 0}
-                        initialPenColor={boardPenColor}
-                        onChangePenColor={setBoardPenColor}
-                        initialBgColor={boardBgColor}
-                        onChangeBgColor={setBoardBgColor}
-                        onReplayOp={onBoardReplayOp}
-                        lowPowerOverride={ultraLite}
-                        renderQualityMode={performanceMode}
-                        taskOpen={taskOpen}
-                        assistantOpen={assistantOpen}
-                        onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
-                        onToggleAssistant={toggleAssistantPanel}
-                        boardProfile={boardProfile}
-                      />
-                    </motion.div>
+                    </div>
                   </motion.div>
-                )}
-              </AnimatePresence>
+                </motion.div>
+
+                <motion.div
+                  className="relative flex h-full shrink-0 items-stretch justify-center overflow-hidden"
+                  initial={false}
+                  animate={{ width: boardExpanded ? 0 : 24, opacity: boardExpanded ? 0 : 1 }}
+                  transition={{
+                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                    opacity: { duration: 0.16, ease: "easeOut" },
+                  }}
+                  onPointerDown={boardExpanded ? undefined : startSidebarResize("tasks")}
+                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
+                >
+                  <div
+                    className="h-full w-2 cursor-col-resize rounded-full bg-white/5 hover:bg-white/10"
+                    style={{ touchAction: "none" }}
+                  />
+                </motion.div>
+
+                <div className="h-full min-w-0 flex-1">
+                  <BoardCanvas
+                    ref={boardCanvasRef}
+                    ocrEnabled={!!apiStatus?.ocr}
+                    expanded={boardExpanded}
+                    onTogglePanels={() => setBoardExpanded((v) => !v)}
+                    onStartTimer={() => setTimerRunning(true)}
+                    initialStrokes={boardHistory.document.strokes}
+                    onChangeStrokes={syncBoardStrokes}
+                    initialGraphs={boardHistory.document.graphs}
+                    onChangeGraphs={syncBoardGraphs}
+                    initialSolutions={boardHistory.document.solutions}
+                    onChangeSolutions={syncBoardSolutions}
+                    onCancelAiSolution={cancelAiSolution}
+                    canUndo={boardHistory.undoStack.length > 0}
+                    canRedo={boardHistory.redoStack.length > 0}
+                    initialPenColor={boardPenColor}
+                    onChangePenColor={setBoardPenColor}
+                    initialBgColor={boardBgColor}
+                    onChangeBgColor={setBoardBgColor}
+                    onReplayOp={onBoardReplayOp}
+                    lowPowerOverride={ultraLite}
+                    renderQualityMode={performanceMode}
+                    taskOpen={taskOpen}
+                    assistantOpen={assistantOpen}
+                    onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
+                    onToggleAssistant={toggleAssistantPanel}
+                    boardProfile={boardProfile}
+                  />
+                </div>
+              </div>
               </div>
 
               <AnimatePresence>
