@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { extractSafeHandwritingSteps, normalizeHandwritingText } from "./aiHandwriting";
+import {
+  buildDistinctSixPoints,
+  extractSafeHandwritingSteps,
+  normalizeHandwritingText,
+} from "./aiHandwriting";
 
 describe("normalizeHandwritingText", () => {
   it("converts common school LaTeX into board-friendly unicode", () => {
@@ -110,6 +114,20 @@ describe("normalizeHandwritingText", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");
   });
+});
+
+it("draws 6 with a high entry stroke instead of a closed zero-like loop", () => {
+  const points = buildDistinctSixPoints(10, 20, 30, 17);
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  expect(points.length).toBeGreaterThan(30);
+  expect(Math.min(...ys)).toBeLessThan(23);
+  expect(Math.max(...ys)).toBeGreaterThan(47);
+  expect(first.x).toBeGreaterThan(Math.min(...xs) + 6);
+  expect(Math.hypot(first.x - last.x, first.y - last.y)).toBeGreaterThan(12);
 });
 
 it("extracts text fields from malformed JSON-like AI output instead of drawing metadata", () => {

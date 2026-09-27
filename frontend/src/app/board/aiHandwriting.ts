@@ -419,7 +419,7 @@ function simplify(points: Point[], epsilon = 0.8): Point[] {
   return [...left.slice(0, -1), ...right];
 }
 
-function renderTextLine(
+function renderRasterTextLine(
   text: string,
   x: number,
   y: number,
@@ -485,6 +485,99 @@ function renderTextLine(
     if (Math.abs(aa.left - bb.left) > 3) return aa.left - bb.left;
     return aa.top - bb.top;
   });
+}
+
+export function buildDistinctSixPoints(
+  x: number,
+  y: number,
+  fontSize: number,
+  advance: number,
+): Point[] {
+  const width = Math.max(fontSize * 0.44, Math.min(advance, fontSize * 0.62));
+  const points: Point[] = [];
+
+  // Long descending entry stroke makes the glyph unmistakably a 6 rather
+  // than a closed 0/o. It starts high on the right and sweeps into the loop.
+  for (let index = 0; index <= 10; index += 1) {
+    const t = index / 10;
+    points.push({
+      x: x + width * (0.84 - 0.64 * t + 0.04 * Math.sin(t * Math.PI)),
+      y: y + fontSize * (0.06 + 0.62 * t),
+    });
+  }
+
+  const cx = x + width * 0.50;
+  const cy = y + fontSize * 0.72;
+  const rx = width * 0.31;
+  const ry = fontSize * 0.235;
+  for (let index = 1; index <= 28; index += 1) {
+    const angle = Math.PI + (index / 28) * Math.PI * 2;
+    points.push({
+      x: cx + Math.cos(angle) * rx,
+      y: cy + Math.sin(angle) * ry,
+    });
+  }
+
+  return points;
+}
+
+function renderTextLine(
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  color: string,
+  strokeWidth: number,
+  fontSize: number,
+) {
+  if (!text.includes("6")) {
+    return renderRasterTextLine(text, x, y, maxWidth, color, strokeWidth, fontSize);
+  }
+
+  const measureCanvas = document.createElement("canvas");
+  const measure = measureCanvas.getContext("2d");
+  if (!measure) {
+    return renderRasterTextLine(text, x, y, maxWidth, color, strokeWidth, fontSize);
+  }
+  measure.font = `${fontSize}px "Comic Sans MS", "Marker Felt", "Bradley Hand", cursive`;
+
+  const strokes: Stroke[] = [];
+  let cursorX = x;
+  let runStart = 0;
+
+  const renderRun = (value: string) => {
+    if (!value) return;
+    const width = measure.measureText(value).width;
+    strokes.push(
+      ...renderRasterTextLine(
+        value,
+        cursorX,
+        y,
+        Math.max(36, width + fontSize * 0.4),
+        color,
+        strokeWidth,
+        fontSize,
+      ),
+    );
+    cursorX += width;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "6") continue;
+    renderRun(text.slice(runStart, index));
+    const advance = Math.max(fontSize * 0.48, measure.measureText("6").width);
+    strokes.push({
+      points: buildDistinctSixPoints(cursorX, y, fontSize, advance),
+      color,
+      width: strokeWidth,
+      mode: "draw",
+      source: "ai",
+    });
+    cursorX += advance;
+    runStart = index + 1;
+  }
+  renderRun(text.slice(runStart));
+  return strokes;
 }
 
 export function solutionStepsToHandwritingStrokes(
