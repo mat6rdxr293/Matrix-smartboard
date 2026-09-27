@@ -1138,7 +1138,7 @@ def test_full_board_solution_prompt_requires_visible_work(monkeypatch):
 
     assert len(steps) == 5
     prompt = calls[0]["sys"]
-    assert "5-12" in prompt
+    assert "7-14" in prompt
     assert "НЕ пропускай существенные преобразования" in prompt
     assert "область определения интегранда" in prompt
     assert "первообразную" in prompt
@@ -1228,10 +1228,12 @@ def test_solve_and_plot_quadratic_uses_fast_deterministic_path(monkeypatch):
         board_state={"stroke_count": 0, "strokes": [], "graphs": []},
     )
 
-    assert len(steps) == 5
+    assert len(steps) >= 9
     assert steps[-1]["kind"] == "result"
-    assert "9}{5" in steps[-1]["text"]
-    assert "1" in steps[-1]["text"]
+    assert any("16+180=196" in step["text"] for step in steps)
+    assert any("\\sqrt{196}=14" in step["text"] for step in steps)
+    assert any("x_1" in step["text"] and "=1" in step["text"] for step in steps)
+    assert any("x_2" in step["text"] and "9}{5" in step["text"] for step in steps)
     assert actions == [{
         "type": "add_graph",
         "expressions": ["5*x^2 + 4*x - 9"],
@@ -1244,7 +1246,7 @@ def test_solve_and_plot_quadratic_uses_fast_deterministic_path(monkeypatch):
         "width": 58.0,
         "height": 58.0,
     }]
-    assert "D=196" in text
+    assert "16+180=196" in text
 
 
 def test_verified_quadratic_steps_recover_when_structured_response_is_broken():
@@ -1268,11 +1270,88 @@ def test_verified_quadratic_steps_recover_when_structured_response_is_broken():
     }]
     steps = ai_module._verified_quadratic_board_steps(trace, "ru")
     assert steps is not None
-    assert len(steps) == 5
+    assert len(steps) >= 9
     assert any("196" in step["text"] for step in steps)
+    assert any("16+180=196" in step["text"] for step in steps)
+    assert any("\\sqrt{196}=14" in step["text"] for step in steps)
     assert steps[-1]["kind"] == "result"
     assert "- \\frac{9}{5}" in steps[-1]["text"]
     assert "1" in steps[-1]["text"]
+
+
+def test_plain_quadratic_full_solution_uses_detailed_deterministic_path(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not be needed for a standard quadratic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "5x^2 + 4x - 9 = 0",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert len(steps) >= 9
+    assert steps[0]["text"] == "Коэффициенты квадратного уравнения:"
+    assert any("D=b^2-4ac" in step["text"] for step in steps)
+    assert any("x_1" in step["text"] for step in steps)
+    assert any("x_2" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "Ответ" in steps[-1]["text"]
+    assert "196" in text
+
+
+def test_quadratic_check_accepts_correct_work_without_llm(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not judge verified quadratic arithmetic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+    problem = """5x^2 + 4x - 9 = 0
+D = 16 + 4 * 5 * 9 = 196
+x_1 = (-4 + 14) / 10 = 1
+x_2 = (-4 - 14) / 10 = -1.8"""
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        problem,
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 3
+    assert all(step["kind"] != "warning" for step in steps)
+    assert "D = 196" in steps[0]["text"]
+    assert "x_1 = 1" in steps[1]["text"]
+    assert "x_2 = -1.8" in steps[1]["text"]
+    assert steps[-1]["text"] == "Решение выполнено правильно."
+    assert "правильно" in text
+
+
+def test_quadratic_check_catches_wrong_root_arithmetic_without_llm(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("LLM must not judge verified quadratic arithmetic")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+    problem = """5x^2 + 4x - 9 = 0
+D = 16 + 4 * 5 * 9 = 196
+x_1 = (-4 + 14) / 30 = 1
+x_2 = (-4 - 14) / 10 = -1.8"""
+
+    text, steps = ai_module.generate_board_response(
+        "check",
+        problem,
+        subject="алгебра",
+        response_locale="ru",
+    )
+
+    assert len(steps) == 1
+    assert steps[0]["kind"] == "warning"
+    assert "(-4 + 14) / 30" in steps[0]["text"]
+    assert "не равно 1" in steps[0]["text"]
+    assert "Проверь арифметику" in text
 
 
 def test_board_actions_parser_supports_stroke_move_and_delete():
