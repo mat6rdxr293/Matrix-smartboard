@@ -98,6 +98,19 @@ describe("normalizeHandwritingText", () => {
       .toBe("(1)/(2)+√(2)");
   });
 
+  it("normalizes deeply nested SymPy fractions and radicals without leaking LaTeX", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`\frac{\sqrt{70}\sqrt{\pi}\left(\cos\left(\frac{32779}{140}\right)C\left(\frac{\sqrt{70}(70x+11)}{70\sqrt{\pi}}\right)\right)}{70}`,
+    );
+
+    expect(normalized).toContain("(32779)/(140)");
+    expect(normalized).toContain("C(");
+    expect(normalized).toContain("√(70)");
+    expect(normalized).toContain("√(π)");
+    expect(normalized).toMatch(/^\(.+\)\/\(70\)$/);
+    expect(normalized).not.toMatch(/\\(?:frac|sqrt|left|right)\b/);
+  });
+
   it("covers additional school symbols without leaking LaTeX command names", () => {
     const normalized = normalizeHandwritingText(
       String.raw`\measuredangle ABC=60\degree, \ell\perp m, \Re z+\Im z, \nexists x, A\subsetneq B, p\oplus q`,

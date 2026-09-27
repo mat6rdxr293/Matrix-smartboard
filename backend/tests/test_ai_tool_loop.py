@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import app.ai as ai_module
@@ -1426,11 +1427,41 @@ def test_structured_ocr_notation_preserves_math_task_type():
     assert ai_module._check_task_kind("2x+1 >= 7", "алгебра") == "inequality"
 
 
-def test_board_solution_directly_solves_structured_definite_integral_without_llm(monkeypatch):
-    def fail_model(*args, **kwargs):
-        raise AssertionError("structured definite integral should bypass the LLM")
+def test_board_solution_direct_integral_uses_ai_only_for_explanations(monkeypatch):
+    def fail_tool_loop(*args, **kwargs):
+        raise AssertionError("structured definite integral should bypass the tool loop")
 
-    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+    explanations = [
+        "Находим первообразную подынтегральной функции.",
+        "Применяем формулу Ньютона Лейбница.",
+        "Подставляем верхний предел.",
+        "Подставляем нижний предел.",
+        "Вычитаем полученные значения.",
+        "Записываем окончательный ответ.",
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {"explanations": explanations},
+                                ensure_ascii=False,
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_tool_loop)
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
 
     text, steps, actions = ai_module.generate_board_solution(
         r"\int_{0}^{rac{1}{2}} x dx",
@@ -1441,6 +1472,8 @@ def test_board_solution_directly_solves_structured_definite_integral_without_llm
     )
 
     assert actions == []
+    assert steps[0] == {"text": explanations[0], "kind": "text"}
+    assert len(steps) == 12
     assert steps[-1]["kind"] == "result"
     assert "\\frac{1}{8}" in text
 

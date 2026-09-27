@@ -2337,6 +2337,98 @@ def _verified_integral_board_steps(
     ]
 
 
+def _augment_verified_steps_with_explanations(
+    client,
+    *,
+    problem: str,
+    verified_steps: list[dict[str, str]],
+    response_locale: str,
+    explanation_hints: Optional[list[str]] = None,
+) -> list[dict[str, str]]:
+    if not verified_steps:
+        return verified_steps
+
+    language_rule = _response_language_rule(response_locale)
+    verified_payload = []
+    for index, step in enumerate(verified_steps):
+        item = {
+            "index": index + 1,
+            "kind": step.get("kind", "text"),
+            "verified_step": step.get("text", ""),
+        }
+        if explanation_hints and index < len(explanation_hints):
+            item["purpose"] = explanation_hints[index]
+        verified_payload.append(item)
+    system = (
+        f"{language_rule} "
+        "Ты объясняешь УЖЕ ПРОВЕРЕННОЕ математическое решение ученику. "
+        "Не пересчитывай и не изменяй ни одну формулу. "
+        "Для каждого verified_step дай одно короткое содержательное пояснение, "
+        "что именно делается на этом шаге и зачем. Если у шага есть purpose, "
+        "строго объясняй именно этот purpose и не сдвигай смысл на соседний шаг. "
+        "Пояснения должны быть только словами: без новых чисел, формул, знаков '=', "
+        "LaTeX и без упоминаний tools/API/backend. "
+        "Верни ТОЛЬКО JSON вида "
+        '{"explanations":["пояснение 1","пояснение 2",...]}. '
+        "Количество explanations должно ТОЧНО совпадать с количеством verified_step."
+    )
+    user = (
+        "УСЛОВИЕ:\n"
+        + problem
+        + "\n\nПРОВЕРЕННЫЕ ШАГИ:\n"
+        + json.dumps(verified_payload, ensure_ascii=False)
+    )
+
+    for attempt in range(2):
+        request = {
+            "model": settings.ai_model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": 700,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            response = client.chat.completions.create(**request)
+        except Exception:
+            try:
+                request.pop("response_format", None)
+                response = client.chat.completions.create(**request)
+            except Exception:
+                return verified_steps
+
+        content = getattr(response.choices[0].message, "content", None)
+        if not content:
+            continue
+        try:
+            payload = json.loads(content.strip())
+        except Exception:
+            continue
+        explanations = payload.get("explanations") if isinstance(payload, dict) else None
+        if not isinstance(explanations, list) or len(explanations) != len(verified_steps):
+            continue
+
+        expanded: list[dict[str, str]] = []
+        valid_count = 0
+        for explanation, step in zip(explanations, verified_steps):
+            clean = str(explanation or "").strip()
+            if (
+                clean
+                and len(clean) <= 180
+                and not re.search(r"[0-9=<>∫√^\\]", clean)
+            ):
+                expanded.append({"text": clean, "kind": "text"})
+                valid_count += 1
+            expanded.append(dict(step))
+
+        if valid_count >= max(2, len(verified_steps) // 2):
+            return expanded
+
+    return verified_steps
+
+
 def _board_solution_min_steps(problem: str, subject: Optional[str]) -> int:
     kind = _check_task_kind(problem, subject)
     if kind == "integral":
@@ -3777,11 +3869,57 @@ def generate_board_solution(
                     else _verified_integral_board_steps(trace, response_locale)
                 )
                 if deterministic_steps:
+                    explained_steps = deterministic_steps
+                    if base_url or api_key:
+                        client_options = {
+                            "api_key": api_key or "ollama",
+                            "timeout": min(settings.ai_timeout_seconds, 15),
+                        }
+                        if base_url:
+                            client_options["base_url"] = base_url
+                        try:
+                            explanation_client = OpenAI(**client_options)
+                            integral_hints = {
+                                "ru": [
+                                    "Нахождение первообразной подынтегральной функции.",
+                                    "Применение формулы Ньютона Лейбница.",
+                                    "Подстановка верхнего предела в первообразную.",
+                                    "Подстановка нижнего предела в первообразную.",
+                                    "Вычитание значений первообразной и упрощение результата.",
+                                    "Запись окончательного ответа.",
+                                ],
+                                "kk": [
+                                    "Интеграл астындағы функцияның алғашқы функциясын табу.",
+                                    "Ньютон Лейбниц формуласын қолдану.",
+                                    "Жоғарғы шекті алғашқы функцияға қою.",
+                                    "Төменгі шекті алғашқы функцияға қою.",
+                                    "Алғашқы функция мәндерін азайтып нәтижені ықшамдау.",
+                                    "Соңғы жауапты жазу.",
+                                ],
+                                "en": [
+                                    "Find an antiderivative of the integrand.",
+                                    "Apply the Newton Leibniz formula.",
+                                    "Substitute the upper bound into the antiderivative.",
+                                    "Substitute the lower bound into the antiderivative.",
+                                    "Subtract the endpoint values and simplify.",
+                                    "State the final answer.",
+                                ],
+                            }.get(response_locale)
+                            explained_steps = _augment_verified_steps_with_explanations(
+                                explanation_client,
+                                problem=problem,
+                                verified_steps=deterministic_steps,
+                                response_locale=response_locale,
+                                explanation_hints=integral_hints,
+                            )
+                        except Exception:
+                            explained_steps = deterministic_steps
+
                     deterministic_text = "\n".join(
                         f"{index + 1}. {step['text']}"
-                        for index, step in enumerate(deterministic_steps)
+                        for index, step in enumerate(explained_steps)
                     )
-                    return deterministic_text, deterministic_steps, []
+                    return deterministic_text, explained_steps, []
             except ToolError:
                 pass
 

@@ -150,6 +150,81 @@ export function extractSafeHandwritingSteps(
   return extracted;
 }
 
+function readBalancedLatexGroup(
+  source: string,
+  start: number,
+  opening: string,
+  closing: string,
+) {
+  if (source[start] !== opening) return null;
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === opening) depth += 1;
+    if (source[index] === closing) {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          body: source.slice(start + 1, index),
+          next: index + 1,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeBalancedLatexMath(source: string): string {
+  let output = "";
+  let index = 0;
+
+  while (index < source.length) {
+    const fractionCommand = ["\\dfrac", "\\tfrac", "\\frac"]
+      .find((command) => source.startsWith(command, index));
+    if (fractionCommand) {
+      let cursor = index + fractionCommand.length;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      const numerator = readBalancedLatexGroup(source, cursor, "{", "}");
+      if (numerator) {
+        cursor = numerator.next;
+        while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+        const denominator = readBalancedLatexGroup(source, cursor, "{", "}");
+        if (denominator) {
+          output += "(" + normalizeBalancedLatexMath(numerator.body) + ")/(" +
+            normalizeBalancedLatexMath(denominator.body) + ")";
+          index = denominator.next;
+          continue;
+        }
+      }
+    }
+
+    if (source.startsWith("\\sqrt", index)) {
+      let cursor = index + "\\sqrt".length;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      let rootIndex = "";
+      if (source[cursor] === "[") {
+        const parsedIndex = readBalancedLatexGroup(source, cursor, "[", "]");
+        if (parsedIndex) {
+          rootIndex = normalizeBalancedLatexMath(parsedIndex.body);
+          cursor = parsedIndex.next;
+          while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+        }
+      }
+      const body = readBalancedLatexGroup(source, cursor, "{", "}");
+      if (body) {
+        output += (rootIndex ? toSuperscript(rootIndex) : "") +
+          "√(" + normalizeBalancedLatexMath(body.body) + ")";
+        index = body.next;
+        continue;
+      }
+    }
+
+    output += source[index];
+    index += 1;
+  }
+
+  return output;
+}
+
 export function normalizeHandwritingText(source: string) {
   let text = (source || "").trim();
   text = text.replace(/\$\$/g, "").replace(/\$/g, "");
@@ -183,9 +258,7 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\not\s*\\supseteq\b/g, "⊉").replace(/\\not\s*\\supset\b/g, "⊅");
   text = text.replace(/\\not\s*\\parallel\b/g, "∦");
   text = text.replace(/\\not\s*=/g, "≠");
-  text = text.replace(/\\sqrt\[([^\]]+)\]\{([^{}]+)\}/g, (_, index: string, body: string) =>
-    `${toSuperscript(index)}√(${body})`
-  );
+  text = normalizeBalancedLatexMath(text);
   text = text.replace(/\\pmod\{([^{}]+)\}/g, "(mod $1)");
   text = text.replace(/\\(?:bmod|mod)\b/g, "mod");
   for (const [command, symbol] of [...LATEX_SYMBOLS].sort((a, b) => b[0].length - a[0].length)) {
