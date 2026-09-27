@@ -238,20 +238,20 @@ export default function TopBar({
                         size="sm"
                         onClick={onToggleRunning}
                         aria-label={running ? tl("pause") : tl("play")}
-                        className="h-10 justify-start rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
+                        className="inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
                       >
                         {running ? <Pause size={15} /> : <Play size={15} />}
-                        <span className="ml-2">{running ? tl("pause") : tl("play")}</span>
+                        <span>{running ? tl("pause") : tl("play")}</span>
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={onReset}
                         aria-label={tl("reset")}
-                        className="h-10 justify-start rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
+                        className="inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
                       >
                         <RefreshCw size={15} />
-                        <span className="ml-2">{tl("reset")}</span>
+                        <span>{tl("reset")}</span>
                       </Button>
                     </>
                   )}
@@ -260,20 +260,20 @@ export default function TopBar({
                     size="sm"
                     onClick={onOpenHistory}
                     aria-label={tl("history")}
-                    className="h-10 justify-start rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
+                    className="inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
                   >
                     <History size={15} />
-                    <span className="ml-2">{tl("history")}</span>
+                    <span>{tl("history")}</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={onChangeRoom}
                     aria-label={tl("change_room")}
-                    className="h-10 justify-start rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
+                    className="inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
                   >
                     <DoorOpen size={15} />
-                    <span className="ml-2">{tl("change_room")}</span>
+                    <span>{tl("change_room")}</span>
                   </Button>
                 </div>
               </div>

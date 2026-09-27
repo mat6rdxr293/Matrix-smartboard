@@ -62,7 +62,7 @@ export default function GradePicker({ school, room, onSelectGrade, onOpenHistory
               onClick={handleFullscreen}
               aria-label={tl("fullscreen")}
               title={tl("fullscreen")}
-              className="h-9 w-9 rounded-xl border border-white/10 bg-white/[0.025] p-0 text-frost/70 hover:bg-white/[0.06] hover:text-frost"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] !p-0 text-frost/70 hover:bg-white/[0.06] hover:text-frost"
             >
               <Expand size={16} />
             </Button>
@@ -89,7 +89,7 @@ export default function GradePicker({ school, room, onSelectGrade, onOpenHistory
               onClick={onLogout}
               aria-label={tl("home_logout")}
               title={tl("home_logout")}
-              className="h-9 w-9 rounded-xl border border-transparent p-0 text-frost/50 hover:border-white/10 hover:bg-white/[0.05] hover:text-frost"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-transparent !p-0 text-frost/50 hover:border-white/10 hover:bg-white/[0.05] hover:text-frost"
             >
               <LogOut size={16} />
             </Button>
