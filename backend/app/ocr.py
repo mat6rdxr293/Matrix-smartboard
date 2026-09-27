@@ -338,6 +338,94 @@ _SPATIAL_LINE_AUDIT_PROMPT = (
     "Верни только полную строку; степени через ^, индексы через _."
 )
 
+_RHS_TAIL_OCR_PROMPT = (
+    "Это увеличенный ПРАВЫЙ КРАЙ одной рукописной строки с уравнением. "
+    "Найди самый правый знак '=' и перепиши ТОЛЬКО всё число справа от него. "
+    "Проверь каждую цифру до самого правого края: нельзя терять последнюю цифру. "
+    "Не решай уравнение, не исправляй по смыслу и не пиши пояснений. "
+    "Ответ должен быть только числом, например 35, -1.8 или 0.0468."
+)
+
+
+def _right_equation_tail_crop(image_bytes: bytes) -> bytes | None:
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        white = Image.new("RGBA", image.size, (255, 255, 255, 255))
+        white.alpha_composite(image)
+        rgb = white.convert("RGB")
+        bbox = _ink_bbox(rgb)
+        if not bbox:
+            return None
+
+        left, top, right, bottom = bbox
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        # Keep enough of the left context to include the final '=' even when
+        # the lhs is long, but zoom the rightmost digits aggressively.
+        crop_left = max(0, left + round(width * 0.38) - max(12, round(width * 0.03)))
+        crop_top = max(0, top - max(10, round(height * 0.18)))
+        crop_right = min(rgb.width, right + max(16, round(width * 0.08)))
+        crop_bottom = min(rgb.height, bottom + max(10, round(height * 0.18)))
+        crop = rgb.crop((crop_left, crop_top, crop_right, crop_bottom))
+        crop = _fit_image(crop, max_longest=960, min_longest=640)
+        output = io.BytesIO()
+        crop.save(output, format="PNG", optimize=True)
+        return output.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OCR rhs-tail crop skipped: %s", exc)
+        return None
+
+
+def _extract_numeric_rhs_token(text: str | None) -> str:
+    value = _normalize_ocr_text(text)
+    value = re.sub(r"^(?:rhs|right\s*side|правая\s*часть)\s*:\s*", "", value, flags=re.I)
+    match = re.fullmatch(r"\s*=?\s*([+-]?\d+(?:[.,]\d+)?)\s*", value)
+    return match.group(1) if match else ""
+
+
+def _verify_trailing_numeric_rhs(
+    client,
+    line: str,
+    image_bytes: bytes,
+    base_url: str | None,
+) -> str:
+    match = re.search(r"=\s*([+-]?\d+(?:[.,]\d+)?)\s*$", line)
+    if not match:
+        return line
+
+    original = match.group(1)
+    crop = _right_equation_tail_crop(image_bytes)
+    if not crop:
+        return line
+
+    try:
+        checked = _request_ocr(
+            client,
+            prompt=_RHS_TAIL_OCR_PROMPT,
+            image_bytes=crop,
+            base_url=base_url,
+        )
+    except Exception:
+        return line
+
+    verified = _extract_numeric_rhs_token(checked)
+    if not verified:
+        return line
+
+    original_key = original.replace(",", ".")
+    verified_key = verified.replace(",", ".")
+    # This verifier only repairs a dropped suffix. It must never replace a
+    # complete rhs with a shorter/different guess from the extra pass.
+    if len(verified_key) <= len(original_key):
+        return line
+    if not verified_key.startswith(original_key):
+        return line
+    if len(verified_key) - len(original_key) > 4:
+        return line
+
+    logger.info("OCR restored trailing RHS digits: %s -> %s", original, verified)
+    return line[:match.start(1)] + verified + line[match.end(1):]
+
 
 def _horizontal_math_line_crops(image_bytes: bytes) -> list[tuple[bytes, int]]:
     """Find clearly separated handwritten rows inside one board OCR block."""
@@ -577,6 +665,7 @@ def _audit_math_lines(
                 pass
 
         candidate = _verify_zero_tends_to(client, candidate, crop, base_url)
+        candidate = _verify_trailing_numeric_rhs(client, candidate, crop, base_url)
         lines[index] = candidate
 
     return "\n".join(lines)
@@ -923,6 +1012,7 @@ def ocr_image(png_bytes: bytes) -> str:
         if best:
             if _ocr_line_count(best) == 1:
                 best = _verify_zero_tends_to(client, best, compact, base_url)
+                best = _verify_trailing_numeric_rhs(client, best, compact, base_url)
             else:
                 audited = _audit_math_lines(client, best, compact, base_url)
                 if _usable_ocr_text(audited):

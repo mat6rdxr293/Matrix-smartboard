@@ -418,6 +418,42 @@ def test_zero_tends_to_verifier_repairs_times_root_zero_misread(monkeypatch):
     assert result == "x → 0"
 
 
+def test_rhs_tail_verifier_restores_dropped_trailing_digit(monkeypatch):
+    monkeypatch.setattr(ocr_module, "_right_equation_tail_crop", lambda _data: b"rhs")
+    monkeypatch.setattr(
+        ocr_module,
+        "_request_ocr",
+        lambda *_args, **_kwargs: "35",
+    )
+
+    result = ocr_module._verify_trailing_numeric_rhs(
+        object(),
+        "9x^2 + 11x + 3 = 3",
+        b"line",
+        "http://localhost:11434/v1",
+    )
+
+    assert result == "9x^2 + 11x + 3 = 35"
+
+
+def test_rhs_tail_verifier_never_shortens_or_changes_existing_rhs(monkeypatch):
+    monkeypatch.setattr(ocr_module, "_right_equation_tail_crop", lambda _data: b"rhs")
+
+    for reread in ("3", "36"):
+        monkeypatch.setattr(
+            ocr_module,
+            "_request_ocr",
+            lambda *_args, _r=reread, **_kwargs: _r,
+        )
+        result = ocr_module._verify_trailing_numeric_rhs(
+            object(),
+            "9x^2 + 11x + 3 = 35",
+            b"line",
+            "http://localhost:11434/v1",
+        )
+        assert result == "9x^2 + 11x + 3 = 35"
+
+
 def test_zero_tends_to_verifier_repairs_latex_times_sqrt_zero_misread(monkeypatch):
     monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
     monkeypatch.setattr(
