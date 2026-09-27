@@ -92,8 +92,20 @@ describe("math handwriting parsing", () => {
   it("parses the tends-to arrow as a geometric math token", () => {
     expect(parseMathHandwritingTokens("x → 0")).toEqual([
       { type: "text", value: "x " },
-      { type: "arrow" },
+      { type: "arrow", value: "→" },
       { type: "text", value: " 0" },
+    ]);
+    expect(parseMathHandwritingTokens("A ⇔ B")).toEqual([
+      { type: "text", value: "A " },
+      { type: "arrow", value: "⇔" },
+      { type: "text", value: " B" },
+    ]);
+  });
+
+  it("accepts compact unicode lower integral limits", () => {
+    expect(parseMathHandwritingTokens("∫₀⁴ x² dx")).toEqual([
+      { type: "integral", lower: [{ type: "text", value: "0" }], upper: [{ type: "text", value: "4" }] },
+      { type: "text", value: " x² dx" },
     ]);
   });
 
@@ -170,6 +182,21 @@ describe("math handwriting geometry", () => {
 
     expect(shaft).toBeTruthy();
     expect(head).toBeTruthy();
+  });
+
+  it("draws bidirectional arrows and approximation relations geometrically", () => {
+    const result = render("A ⇔ B, x ≈ y, a ≠ b, p ≡ q");
+    const longHorizontal = result.strokes.filter((item) => {
+      if (item.points.length !== 2) return false;
+      const [a, b] = item.points;
+      return Math.abs(a.y - b.y) < 0.01 && Math.abs(b.x - a.x) > 12;
+    });
+    const waves = result.strokes.filter((item) => item.points.length >= 10);
+    const arrowHeads = result.strokes.filter((item) => item.points.length === 3);
+
+    expect(longHorizontal.length).toBeGreaterThanOrEqual(7);
+    expect(waves.length).toBeGreaterThanOrEqual(2);
+    expect(arrowHeads.length).toBeGreaterThanOrEqual(2);
   });
 
   it("draws less/greater relations geometrically", () => {

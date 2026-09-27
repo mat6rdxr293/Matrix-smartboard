@@ -910,6 +910,337 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
     return _postprocess_math(text), steps
 
 
+_BOARD_ACTION_TYPES = {
+    "add_graph",
+    "update_graph",
+    "delete_graph",
+    "add_shape",
+    "add_text",
+    "move_strokes",
+    "delete_strokes",
+    "clear",
+}
+
+
+def _parse_board_actions(raw: str) -> list[dict]:
+    cleaned = (raw or "").strip()
+    fence = chr(96) * 3
+    if cleaned.startswith(fence):
+        cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
+    try:
+        payload = json.loads(cleaned)
+    except Exception:
+        return []
+    if not isinstance(payload, dict) or not isinstance(payload.get("board_actions"), list):
+        return []
+
+    actions: list[dict] = []
+    for item in payload["board_actions"][:12]:
+        if not isinstance(item, dict):
+            continue
+        action_type = str(item.get("type") or "").strip().lower()
+        if action_type not in _BOARD_ACTION_TYPES:
+            continue
+        action: dict = {"type": action_type}
+
+        if action_type in {"update_graph", "delete_graph"}:
+            target_id = str(item.get("target_id") or "").strip()
+            if not target_id:
+                continue
+            action["target_id"] = target_id[:160]
+
+        if action_type in {"add_graph", "update_graph"}:
+            expressions = item.get("expressions")
+            if isinstance(expressions, list):
+                clean_expressions = []
+                for value in expressions[:8]:
+                    expression = str(value).strip()
+                    if not expression:
+                        continue
+                    expression = re.sub(r"^\s*y\s*=\s*", "", expression, flags=re.I)
+                    clean_expressions.append(_normalize_graph_expression(expression))
+                if clean_expressions:
+                    action["expressions"] = clean_expressions
+            for key in ("x_min", "x_max", "y_min", "y_max"):
+                value = item.get(key)
+                if isinstance(value, (int, float)) and -10000 <= float(value) <= 10000:
+                    action[key] = float(value)
+
+        if action_type == "add_shape":
+            shape = str(item.get("shape") or "").strip().lower()
+            if shape not in {"line", "arrow", "rect", "ellipse", "circle", "triangle", "polygon"}:
+                continue
+            action["shape"] = shape
+            points = item.get("points")
+            if isinstance(points, list):
+                clean_points = []
+                for point in points[:16]:
+                    if not isinstance(point, dict):
+                        continue
+                    x = point.get("x")
+                    y = point.get("y")
+                    if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                        clean_points.append({
+                            "x": max(0.0, min(100.0, float(x))),
+                            "y": max(0.0, min(100.0, float(y))),
+                        })
+                if clean_points:
+                    action["points"] = clean_points
+
+        if action_type == "add_text":
+            value = str(item.get("text") or "").strip()
+            if not value:
+                continue
+            action["text"] = value[:1000]
+
+        if action_type in {"move_strokes", "delete_strokes"}:
+            indexes = item.get("indexes")
+            if not isinstance(indexes, list):
+                continue
+            clean_indexes = sorted({
+                int(value)
+                for value in indexes[:80]
+                if isinstance(value, int) and 0 <= value < 100000
+            })
+            if not clean_indexes:
+                continue
+            action["indexes"] = clean_indexes
+            if action_type == "move_strokes":
+                dx = item.get("dx")
+                dy = item.get("dy")
+                if not isinstance(dx, (int, float)) or not isinstance(dy, (int, float)):
+                    continue
+                action["dx"] = max(-100.0, min(100.0, float(dx)))
+                action["dy"] = max(-100.0, min(100.0, float(dy)))
+
+        for key in ("x", "y", "width", "height"):
+            value = item.get(key)
+            if isinstance(value, (int, float)):
+                action[key] = max(0.0, min(100.0, float(value)))
+
+        color = item.get("color")
+        if isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", color.strip()):
+            action["color"] = color.strip().upper()
+        actions.append(action)
+    return actions
+
+
+_VISUAL_BOARD_REQUEST_RE = re.compile(
+    r"\b(?:построй|построить|нарисуй|нарисовать|изобрази|изобразить|"
+    r"покажи\s+(?:на\s+доске\s+)?|перемести|сдвинь|удали|измени|"
+    r"увеличь|уменьши|очисти|draw|plot|graph|sketch|move|delete|remove|resize|clear)\b",
+    re.I,
+)
+
+
+def _is_visual_board_request(problem: str) -> bool:
+    text = (problem or "").strip()
+    if not text:
+        return False
+    if not _VISUAL_BOARD_REQUEST_RE.search(text):
+        return False
+    visual_terms = (
+        "график", "graph", "plot", "figure", "фигур", "треуг", "triangle",
+        "окруж", "circle", "эллип", "ellipse", "прямоуг", "rectangle",
+        "стрел", "arrow", "отрез", "line", "многоуг", "polygon",
+        "штрих", "stroke", "запис", "элемент", "element", "доск", "board",
+    )
+    lower = text.lower()
+    return any(term in lower for term in visual_terms)
+
+
+def _normalize_graph_expression(value: str) -> str:
+    result = value.strip().replace("²", "^2").replace("³", "^3")
+    result = result.replace("π", "pi").replace("×", "*").replace("·", "*")
+    result = result.replace("−", "-")
+    result = re.split(
+        r"(?i)\s+(?:на|в)\s+(?:одн\w*|той|этой|систем\w*|координат\w*)\b",
+        result,
+        maxsplit=1,
+    )[0].strip()
+    result = re.sub(r"(?<=\d)(?=[A-Za-zπ])", "*", result)
+    result = re.sub(r"[.!?]+$", "", result).strip()
+    return result[:160]
+
+
+def _fallback_visual_board_actions(
+    problem: str,
+    board_state: Optional[dict] = None,
+) -> list[dict]:
+    text = (problem or "").strip()
+    actions: list[dict] = []
+    lower = text.lower()
+
+    if ("очист" in lower or "clear" in lower) and ("доск" in lower or "board" in lower):
+        return [{"type": "clear"}]
+
+    state_graphs = board_state.get("graphs") if isinstance(board_state, dict) else None
+    known_graphs = [item for item in (state_graphs or []) if isinstance(item, dict) and item.get("id")]
+    graph_delete = any(term in lower for term in ("удали граф", "удалить граф", "delete graph", "remove graph"))
+    graph_modify = any(term in lower for term in (
+        "измени", "замени", "перемести", "сдвинь", "увеличь", "уменьши",
+        "change", "replace", "move", "resize",
+    )) and ("граф" in lower or "graph" in lower)
+    graph_matches = re.findall(
+        r"(?i)\by\s*=\s*(.+?)(?=\s+(?:и|and)\s+(?:y\s*=|нарис|постро|изобраз|draw|plot)|[,;\n]|$)",
+        text,
+    )
+    expressions = [
+        _normalize_graph_expression(match)
+        for match in graph_matches
+        if _normalize_graph_expression(match)
+    ]
+    target_graph = known_graphs[0] if len(known_graphs) == 1 else None
+    if graph_delete and target_graph:
+        actions.append({
+            "type": "delete_graph",
+            "target_id": str(target_graph["id"]),
+        })
+    elif graph_modify and target_graph:
+        update: dict = {
+            "type": "update_graph",
+            "target_id": str(target_graph["id"]),
+        }
+        if expressions:
+            update["expressions"] = expressions[:8]
+        if "вправо" in lower or "right" in lower:
+            update["x"] = 70.0
+        elif "влево" in lower or "left" in lower:
+            update["x"] = 5.0
+        if "вверх" in lower or "up" in lower:
+            update["y"] = 5.0
+        elif "вниз" in lower or "down" in lower:
+            update["y"] = 65.0
+        if "увелич" in lower or "larger" in lower or "bigger" in lower:
+            update["width"] = 72.0
+            update["height"] = 72.0
+        elif "уменьш" in lower or "smaller" in lower:
+            update["width"] = 38.0
+            update["height"] = 38.0
+        if len(update) > 2:
+            actions.append(update)
+    elif expressions:
+        actions.append({
+            "type": "add_graph",
+            "expressions": expressions[:8],
+            "x_min": -10.0,
+            "x_max": 10.0,
+            "y_min": -10.0,
+            "y_max": 10.0,
+            "x": 8.0,
+            "y": 8.0,
+            "width": 58.0,
+            "height": 58.0,
+        })
+
+    shape_aliases = (
+        (("треуг", "triangle"), "triangle"),
+        (("прямоуг", "rectangle"), "rect"),
+        (("окруж", "круг", "circle"), "circle"),
+        (("эллип", "ellipse"), "ellipse"),
+        (("стрел", "arrow"), "arrow"),
+        (("многоуг", "polygon"), "polygon"),
+        (("отрез", "line"), "line"),
+    )
+    shape_create = any(term in lower for term in (
+        "построй", "нарис", "изобраз", "draw", "sketch",
+    ))
+    shape_index = 0
+    for aliases, shape in shape_aliases:
+        if not shape_create or not any(alias in lower for alias in aliases):
+            continue
+        actions.append({
+            "type": "add_shape",
+            "shape": shape,
+            "x": 68.0 + (shape_index % 2) * 16.0,
+            "y": 12.0 + (shape_index // 2) * 32.0,
+            "width": 22.0,
+            "height": 24.0,
+        })
+        shape_index += 1
+    return actions
+
+
+def _generate_visual_board_plan(
+    problem: str,
+    *,
+    api_key: Optional[str],
+    base_url: Optional[str],
+    board_state: Optional[dict],
+    response_locale: str,
+) -> tuple[str, list[dict[str, str]], list[dict]]:
+    client_options = {
+        "api_key": api_key or "ollama",
+        "timeout": settings.ai_timeout_seconds,
+    }
+    if base_url:
+        client_options["base_url"] = base_url
+    client = OpenAI(**client_options)
+
+    language_rule = _response_language_rule(response_locale)
+    sys = (
+        f"{language_rule} "
+        "Ты планировщик действий интерактивной школьной доски. "
+        "Не решай задачу через tools и не описывай внутренние вызовы. "
+        "Верни ТОЛЬКО валидный JSON без markdown: "
+        '{"summary":"кратко","steps":[{"text":"что построено","kind":"result"}],'
+        '"board_actions":[...]}. '
+        "Допустимые board_actions: "
+        "add_graph {type,expressions:[...],x_min,x_max,y_min,y_max,x,y,width,height}; "
+        "update_graph {type,target_id,expressions?,x_min?,x_max?,y_min?,y_max?,x?,y?,width?,height?}; "
+        "delete_graph {type,target_id}; "
+        "add_shape {type,shape:line|arrow|rect|ellipse|circle|triangle|polygon,"
+        "x,y,width,height,points?,color?}; "
+        "add_text {type,text,x,y,color?}; "
+        "move_strokes {type,indexes:[...],dx,dy}; delete_strokes {type,indexes:[...]}; clear {type}. "
+        "Координаты x,y,width,height и points задавай числами 0..100; dx,dy числами -100..100. "
+        "Для графиков expressions содержат только выражения правой части: x^2, sin(x), sqrt(x), без y=. "
+        "Не делай clear/delete без явной просьбы пользователя; clear должен быть единственным destructive action. "
+        "Для update/delete/move используй только target_id/indexes из CURRENT_BOARD_STATE. "
+        "Если нужен один график с несколькими функциями, используй один add_graph с несколькими expressions."
+    )
+    user = problem.strip()
+    if board_state:
+        user += (
+            "\n\nCURRENT_BOARD_STATE (для update/delete/move используй только эти target_id/indexes):\n"
+            + json.dumps(board_state, ensure_ascii=False)[:8000]
+        )
+
+    request = {
+        "model": settings.ai_model,
+        "messages": [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": 700,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        response = client.chat.completions.create(**request)
+    except Exception:
+        request.pop("response_format", None)
+        response = client.chat.completions.create(**request)
+
+    raw = (getattr(response.choices[0].message, "content", None) or "").strip()
+    text, steps = _parse_board_solution(raw)
+    text, steps = _sanitize_board_language(text, steps, response_locale)
+    actions = _parse_board_actions(raw)
+    if not actions:
+        actions = _fallback_visual_board_actions(problem, board_state)
+
+    if not steps:
+        fallback = {
+            "ru": "Построение добавлено на доску.",
+            "kk": "Құрылым тақтаға қосылды.",
+            "en": "The construction was added to the board.",
+        }.get(response_locale, "Построение добавлено на доску.")
+        steps = [{"text": fallback, "kind": "result"}]
+        text = fallback
+    return text, steps, actions
+
+
 _CJK_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+")
 
 
@@ -2131,16 +2462,23 @@ def generate_board_response(
     subject: Optional[str] = None,
     board_context: bool = True,
     response_locale: str = "ru",
-) -> tuple[str, list[dict[str, str]]]:
+    include_actions: bool = False,
+    board_state: Optional[dict] = None,
+):
     if mode == "solution":
         return generate_board_solution(
             problem,
             subject=subject,
             board_context=board_context,
             response_locale=response_locale,
+            include_actions=include_actions,
+            board_state=board_state,
         )
     if mode not in {"hint", "check"}:
         raise ValueError(f"Unsupported board AI mode: {mode}")
+
+    def finish(result_text: str, result_steps: list[dict[str, str]]):
+        return (result_text, result_steps, []) if include_actions else (result_text, result_steps)
 
     api_key = get_openai_key()
     base_url = settings.ai_base_url
@@ -2153,7 +2491,8 @@ def generate_board_response(
             response_locale=response_locale,
         )
         steps = [{"text": text, "kind": "text"}] if text else []
-        return _sanitize_board_language(text, steps, response_locale)
+        text, steps = _sanitize_board_language(text, steps, response_locale)
+        return finish(text, steps)
 
     sys, user, max_tokens = _build_prompt(
         mode,
@@ -2258,7 +2597,7 @@ def generate_board_response(
                     "en": "The answer is correct.",
                 }
                 result_text = messages.get(response_locale, messages["ru"])
-                return result_text, [{"text": result_text, "kind": "result"}]
+                return finish(result_text, [{"text": result_text, "kind": "result"}])
             messages = {
                 "ru": "Ответ неверный: у тебя {actual}, должно быть {expected}.",
                 "kk": "Жауап қате: сенде {actual}, дұрысы {expected}.",
@@ -2268,7 +2607,7 @@ def generate_board_response(
                 actual=fast_verdict["actual"],
                 expected=fast_verdict["expected"],
             )
-            return result_text, [{"text": result_text, "kind": "warning"}]
+            return finish(result_text, [{"text": result_text, "kind": "warning"}])
 
     text, steps = _parse_board_solution(raw)
     text, steps = _sanitize_board_language(text, steps, response_locale)
@@ -2467,7 +2806,7 @@ def generate_board_response(
         )
         text = "\n\n".join(part for part in (score_line, body) if part)
 
-    return text, steps
+    return finish(text, steps)
 
 
 def generate_board_solution(
@@ -2476,9 +2815,29 @@ def generate_board_solution(
     subject: Optional[str] = None,
     board_context: bool = True,
     response_locale: str = "ru",
-) -> tuple[str, list[dict[str, str]]]:
+    include_actions: bool = False,
+    board_state: Optional[dict] = None,
+):
     api_key = get_openai_key()
     base_url = settings.ai_base_url
+
+    if include_actions and _is_visual_board_request(problem):
+        if base_url or api_key:
+            return _generate_visual_board_plan(
+                problem,
+                api_key=api_key,
+                base_url=base_url,
+                board_state=board_state,
+                response_locale=response_locale,
+            )
+        actions = _fallback_visual_board_actions(problem, board_state)
+        if actions:
+            fallback = {
+                "ru": "Построение добавлено на доску.",
+                "kk": "Құрылым тақтаға қосылды.",
+                "en": "The construction was added to the board.",
+            }.get(response_locale, "Построение добавлено на доску.")
+            return fallback, [{"text": fallback, "kind": "result"}], actions
 
     if not base_url:
         text = generate_ai_response(
@@ -2489,7 +2848,8 @@ def generate_board_solution(
             response_locale=response_locale,
         )
         steps = [{"text": text, "kind": "text"}] if text else []
-        return _sanitize_board_language(text, steps, response_locale)
+        text, steps = _sanitize_board_language(text, steps, response_locale)
+        return (text, steps, []) if include_actions else (text, steps)
 
     sys, user, max_tokens = _build_prompt(
         "solution",
@@ -2529,6 +2889,30 @@ def generate_board_solution(
         "а не промежуточную формулу. "
         "Для формул внутри text используй LaTeX в $$...$$."
     )
+    if include_actions:
+        sys += (
+            "\nКроме steps можно вернуть board_actions для реальных действий на доске. "
+            "Поле board_actions должно быть массивом объектов и отсутствовать либо быть [] если визуальное действие не нужно. "
+            "Используй действия только когда пользователь/условие просит построить, нарисовать, показать графически "
+            "или когда рисунок/график действительно является частью решения. "
+            "Поддерживаются: "
+            "add_graph {type,expressions:[...],x_min,x_max,y_min,y_max,x,y,width,height}; "
+            "update_graph {type,target_id,expressions?,x_min?,x_max?,y_min?,y_max?,x?,y?,width?,height?}; "
+            "delete_graph {type,target_id}; "
+            "add_shape {type,shape:line|arrow|rect|ellipse|circle|triangle|polygon,x,y,width,height,points?,color?}; "
+            "add_text {type,text,x,y,color?}; "
+            "move_strokes {type,indexes:[...],dx,dy}; delete_strokes {type,indexes:[...]}; clear {type}. "
+            "x,y,width,height,dx,dy и координаты points задавай числами -100..100/0..100 относительно видимой области доски. "
+            "Для polygon/line/arrow points предпочтительнее x/y/width/height. "
+            "Не делай clear/delete без явной просьбы пользователя. clear должен быть единственным destructive action. "
+            "Для update/delete используй только target_id/indexes из CURRENT_BOARD_STATE. "
+            "Графические выражения пиши в синтаксисе парсера доски: x^2, sin(x), sqrt(x), abs(x), без y=."
+        )
+        if board_state:
+            user += (
+                "\n\nCURRENT_BOARD_STATE (используй ID только отсюда):\n"
+                + json.dumps(board_state, ensure_ascii=False)[:8000]
+            )
 
     client_options = {
         "api_key": api_key or "ollama",
@@ -2549,6 +2933,7 @@ def generate_board_solution(
         require_tool=_requires_tool_use(subject, "solution"),
         tool_trace=tool_trace,
     )
+    actions = _parse_board_actions(raw) if include_actions else []
     text, steps = _parse_board_solution(raw)
     text, steps = _sanitize_board_language(text, steps, response_locale)
     steps = _strip_repeated_problem_steps(steps, problem)
@@ -2674,6 +3059,8 @@ def generate_board_solution(
             task_text=problem,
             postprocess=False,
         )
+        if include_actions and not actions:
+            actions = _parse_board_actions(raw_continuation)
         continuation_text, continuation_steps = _parse_board_solution(raw_continuation)
         continuation_text, continuation_steps = _sanitize_board_language(
             continuation_text,
@@ -2690,4 +3077,4 @@ def generate_board_solution(
         elif continuation_text.strip():
             text = f"{text}\n{continuation_text}".strip()
 
-    return text, steps
+    return (text, steps, actions) if include_actions else (text, steps)

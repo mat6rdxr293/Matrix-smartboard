@@ -35,6 +35,43 @@ describe("normalizeHandwritingText", () => {
     expect(normalizeHandwritingText("x \\sim y")).toBe("x ∼ y");
   });
 
+  it("normalizes common relations, sets, arrows and Greek LaTeX", () => {
+    expect(normalizeHandwritingText(String.raw`\alpha \in A \subseteq B, x \neq y \Leftrightarrow y \notin \emptyset`))
+      .toBe("α ∈ A ⊆ B, x ≠ y ⇔ y ∉ ∅");
+    expect(normalizeHandwritingText(String.raw`\Gamma \perp \Delta, a \parallel b`))
+      .toBe("Γ ⟂ Δ, a ∥ b");
+  });
+
+  it("normalizes indexed roots, functions and numeric subscripts", () => {
+    expect(normalizeHandwritingText(String.raw`x_1=\sqrt[3]{8}, \sin(\pi/2)=1`))
+      .toBe("x₁=³√(8), sin(π/2)=1");
+  });
+
+  it("normalizes broader school LaTeX without leaking command names", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\forall x\in\mathbb{R}: x\neq0 \Rightarrow \frac{1}{x}\in\mathbb{R}`,
+      ),
+    ).toBe("∀ x∈ℝ: x≠0 ⇒ (1)/(x)∈ℝ");
+    expect(
+      normalizeHandwritingText(
+        String.raw`\triangle ABC \cong \triangle DEF, AB\perp CD, A\setminus B\subseteq A`,
+      ),
+    ).toBe("△ ABC ≅ △ DEF, AB⟂ CD, A∖ B⊆ A");
+  });
+
+  it("normalizes vectors, intervals, combinatorics and multiline wrappers", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\vec{AB}, \overline{CD}, \binom{5}{2}, \lfloor x\rfloor, \begin{cases}x=1\\y=2\end{cases}`,
+      ),
+    ).toBe("AB⃗, CD̅, C(5,2), ⌊x⌋, x=1; y=2");
+  });
+
+  it("does not silently turn unknown LaTeX commands into plain words", () => {
+    expect(normalizeHandwritingText(String.raw`x \mystery y`)).toContain("\\mystery");
+  });
+
   it("keeps Cyrillic explanations readable", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");

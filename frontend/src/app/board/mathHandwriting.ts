@@ -5,9 +5,9 @@ export type MathHandwritingToken =
   | { type: "sqrt"; body: MathHandwritingToken[] }
   | { type: "fraction"; numerator: MathHandwritingToken[]; denominator: MathHandwritingToken[] }
   | { type: "integral"; lower?: MathHandwritingToken[]; upper?: MathHandwritingToken[] }
-  | { type: "relation"; value: "<" | ">" | "≤" | "≥" }
+  | { type: "relation"; value: "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡" }
   | { type: "decimal"; value: "." | "," }
-  | { type: "arrow" }
+  | { type: "arrow"; value: "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦" }
   | { type: "pi" };
 
 type Point = { x: number; y: number };
@@ -44,6 +44,13 @@ const SUPER_TO_NORMAL: Record<string, string> = {
 };
 
 const superscriptChars = new Set(Object.keys(SUPER_TO_NORMAL));
+
+const SUB_TO_NORMAL: Record<string, string> = {
+  "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+  "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+  "₊": "+", "₋": "-",
+};
+const subscriptChars = new Set(Object.keys(SUB_TO_NORMAL));
 
 const stroke = (
   points: Point[],
@@ -109,6 +116,15 @@ function readIntegralLimits(source: string, start: number) {
         index = end + 1;
         return true;
       }
+    }
+    let compactSubscript = "";
+    while (index < source.length && subscriptChars.has(source[index])) {
+      compactSubscript += SUB_TO_NORMAL[source[index]];
+      index += 1;
+    }
+    if (compactSubscript) {
+      lower = compactSubscript;
+      return true;
     }
     if (source[index] !== "_") return false;
     index += 1;
@@ -286,23 +302,21 @@ export function parseMathHandwritingTokens(source: string): MathHandwritingToken
       continue;
     }
 
-    if (source[index] === "→") {
+    if ("→←↔⇒⇐⇔↦".includes(source[index])) {
       flushPlain();
-      tokens.push({ type: "arrow" });
+      tokens.push({
+        type: "arrow",
+        value: source[index] as "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦",
+      });
       index += 1;
       continue;
     }
 
-    if (
-      source[index] === "<" ||
-      source[index] === ">" ||
-      source[index] === "≤" ||
-      source[index] === "≥"
-    ) {
+    if ("<>≤≥≈≃∼≠≡".includes(source[index])) {
       flushPlain();
       tokens.push({
         type: "relation",
-        value: source[index] as "<" | ">" | "≤" | "≥",
+        value: source[index] as "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡",
       });
       index += 1;
       continue;
@@ -363,45 +377,51 @@ function renderDecimalSeparator(
 }
 
 function renderArrow(
+  value: "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦",
   x: number,
   y: number,
   fontSize: number,
   color: string,
   strokeWidth: number,
 ): RenderResult {
-  const width = fontSize * 1.05;
+  const width = fontSize * 1.08;
   const centerY = y + fontSize * 0.58;
   const leftX = x + fontSize * 0.08;
-  const tipX = x + width - fontSize * 0.08;
-  const head = fontSize * 0.25;
+  const rightX = x + width - fontSize * 0.08;
+  const head = fontSize * 0.24;
+  const isDouble = value === "⇒" || value === "⇐" || value === "⇔";
+  const pointsRight = value === "→" || value === "↔" || value === "⇒" || value === "⇔" || value === "↦";
+  const pointsLeft = value === "←" || value === "↔" || value === "⇐" || value === "⇔";
+  const offsets = isDouble ? [-fontSize * 0.09, fontSize * 0.09] : [0];
+  const strokes: Stroke[] = offsets.map((offset) =>
+    stroke([{ x: leftX, y: centerY + offset }, { x: rightX, y: centerY + offset }], color, strokeWidth),
+  );
 
-  return {
-    strokes: [
-      stroke(
-        [
-          { x: leftX, y: centerY },
-          { x: tipX, y: centerY },
-        ],
-        color,
-        strokeWidth,
-      ),
-      stroke(
-        [
-          { x: tipX - head, y: centerY - head * 0.70 },
-          { x: tipX, y: centerY },
-          { x: tipX - head, y: centerY + head * 0.70 },
-        ],
-        color,
-        strokeWidth,
-      ),
-    ],
-    width,
-    height: fontSize,
-  };
+  if (pointsRight) {
+    strokes.push(stroke([
+      { x: rightX - head, y: centerY - head * 0.68 },
+      { x: rightX, y: centerY },
+      { x: rightX - head, y: centerY + head * 0.68 },
+    ], color, strokeWidth));
+  }
+  if (pointsLeft) {
+    strokes.push(stroke([
+      { x: leftX + head, y: centerY - head * 0.68 },
+      { x: leftX, y: centerY },
+      { x: leftX + head, y: centerY + head * 0.68 },
+    ], color, strokeWidth));
+  }
+  if (value === "↦") {
+    strokes.push(stroke([
+      { x: leftX, y: centerY - fontSize * 0.22 },
+      { x: leftX, y: centerY + fontSize * 0.22 },
+    ], color, strokeWidth));
+  }
+  return { strokes, width, height: fontSize };
 }
 
 function renderRelation(
-  value: "<" | ">" | "≤" | "≥",
+  value: "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡",
   x: number,
   y: number,
   fontSize: number,
@@ -415,6 +435,46 @@ function renderRelation(
   const right = x + width - fontSize * 0.08;
   const top = centerY - height * 0.42;
   const bottom = centerY + height * 0.42;
+
+  if (value === "∼" || value === "≈" || value === "≃") {
+    const wave = (waveY: number) => {
+      const points: Point[] = [];
+      for (let index = 0; index <= 12; index += 1) {
+        const t = index / 12;
+        points.push({
+          x: left + (right - left) * t,
+          y: waveY + Math.sin(t * Math.PI * 2) * fontSize * 0.055,
+        });
+      }
+      return stroke(points, color, strokeWidth);
+    };
+    const strokes = [wave(value === "∼" ? centerY : centerY - fontSize * 0.12)];
+    if (value === "≈") strokes.push(wave(centerY + fontSize * 0.16));
+    if (value === "≃") {
+      strokes.push(stroke([
+        { x: left, y: centerY + fontSize * 0.18 },
+        { x: right, y: centerY + fontSize * 0.18 },
+      ], color, strokeWidth));
+    }
+    return { strokes, width, height: fontSize };
+  }
+
+  if (value === "≠" || value === "≡") {
+    const offsets = value === "≡" ? [-0.18, 0, 0.18] : [-0.11, 0.11];
+    const strokes = offsets.map((offset) =>
+      stroke([
+        { x: left, y: centerY + fontSize * offset },
+        { x: right, y: centerY + fontSize * offset },
+      ], color, strokeWidth),
+    );
+    if (value === "≠") {
+      strokes.push(stroke([
+        { x: left + fontSize * 0.08, y: centerY + fontSize * 0.28 },
+        { x: right - fontSize * 0.08, y: centerY - fontSize * 0.28 },
+      ], color, strokeWidth));
+    }
+    return { strokes, width, height: fontSize };
+  }
   const isLess = value === "<" || value === "≤";
   const apexX = isLess ? left : right;
   const outerX = isLess ? right : left;
@@ -688,6 +748,7 @@ function renderTokens(
 
     if (token.type === "arrow") {
       const rendered = renderArrow(
+        token.value,
         cursorX,
         options.y,
         options.fontSize,

@@ -13,6 +13,13 @@ import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
 import { pickAiInkColor } from "@/app/board/aiInkColor";
+import {
+  buildAiBoardState,
+  graphFromAiAction,
+  shapeActionToStrokes,
+  updateGraphFromAiAction,
+  type AiBoardAction,
+} from "@/app/board/aiBoardActions";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
@@ -823,6 +830,131 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setAssistantLoading(false);
   };
 
+  const executeAiBoardActions = async (
+    actions: AiBoardAction[] | null | undefined,
+    aiColor: string,
+    isCancelled: () => boolean,
+  ) => {
+    if (!actions?.length || !boardCanvasRef.current) return;
+
+    const placement = boardCanvasRef.current.allocateSolutionPlacement(720, 520);
+    const area = {
+      x: placement.x,
+      y: placement.y,
+      width: Math.max(560, placement.width),
+      height: Math.max(380, placement.minHeight),
+    };
+    let graphs = boardHistory.document.graphs.map((graph) => ({
+      ...graph,
+      expressions: graph.expressions.map((item) => ({ ...item })),
+    }));
+    let strokes = boardHistory.document.strokes.map((stroke) => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ ...point })),
+    }));
+    const pendingStrokes: BoardHistory["document"]["strokes"] = [];
+
+    for (const action of actions.slice(0, 12)) {
+      if (isCancelled()) return;
+
+      if (action.type === "clear") {
+        pendingStrokes.length = 0;
+        onBoardReplayOp({ op: "clear", ts: Date.now() });
+        graphs = [];
+        strokes = [];
+        continue;
+      }
+
+      if (action.type === "add_graph") {
+        const graph = graphFromAiAction(action, area);
+        onBoardReplayOp({ op: "graph_add", graph, ts: Date.now() });
+        graphs.push(graph);
+        continue;
+      }
+
+      if (action.type === "update_graph") {
+        const before = graphs.find((graph) => graph.id === action.target_id);
+        if (!before) continue;
+        const after = updateGraphFromAiAction(before, action, area);
+        onBoardReplayOp({ op: "graph_update", before, after, ts: Date.now() });
+        graphs = graphs.map((graph) => graph.id === after.id ? after : graph);
+        continue;
+      }
+
+      if (action.type === "delete_graph") {
+        const graph = graphs.find((item) => item.id === action.target_id);
+        if (!graph) continue;
+        onBoardReplayOp({ op: "graph_delete", graph, ts: Date.now() });
+        graphs = graphs.filter((item) => item.id !== graph.id);
+        continue;
+      }
+
+      if (action.type === "move_strokes") {
+        const indexes = [...new Set(action.indexes)]
+          .filter((index) => Number.isInteger(index) && index >= 0 && index < strokes.length);
+        if (!indexes.length) continue;
+        const dx = (clamp(action.dx, -100, 100) / 100) * area.width;
+        const dy = (clamp(action.dy, -100, 100) / 100) * area.height;
+        if (!dx && !dy) continue;
+        onBoardReplayOp({ op: "stroke_move", indexes, dx, dy, ts: Date.now() });
+        const selected = new Set(indexes);
+        strokes = strokes.map((stroke, index) => selected.has(index)
+          ? {
+              ...stroke,
+              points: stroke.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+            }
+          : stroke);
+        continue;
+      }
+
+      if (action.type === "delete_strokes") {
+        const indexes = [...new Set(action.indexes)]
+          .filter((index) => Number.isInteger(index) && index >= 0 && index < strokes.length)
+          .sort((a, b) => a - b);
+        if (!indexes.length) continue;
+        const deleted = indexes.map((index) => strokes[index]);
+        onBoardReplayOp({ op: "stroke_delete", indexes, strokes: deleted, ts: Date.now() });
+        const removed = new Set(indexes);
+        strokes = strokes.filter((_, index) => !removed.has(index));
+        continue;
+      }
+
+      if (action.type === "add_shape") {
+        pendingStrokes.push(...shapeActionToStrokes(action, area, aiColor));
+        continue;
+      }
+
+      if (action.type === "add_text") {
+        const x = area.x + (clamp(action.x ?? 10, 0, 100) / 100) * area.width;
+        const y = area.y + (clamp(action.y ?? 10, 0, 100) / 100) * area.height;
+        const rendered = solutionStepsToHandwritingStrokes(
+          [{ text: action.text, kind: "text" }],
+          {
+            x,
+            y,
+            maxWidth: Math.max(180, area.width * 0.55),
+            color: action.color ?? aiColor,
+            strokeWidth: ultraLite ? 2.3 : 2.05,
+            fontSize: ultraLite ? 24 : 27,
+            lineGap: 9,
+            stepGap: 10,
+          },
+        );
+        pendingStrokes.push(...rendered.strokes);
+      }
+    }
+
+    if (!pendingStrokes.length || isCancelled()) return;
+    const written = await boardCanvasRef.current.animateAiStrokes(
+      pendingStrokes,
+      isCancelled,
+      ultraLite,
+    );
+    if (written.length && !isCancelled()) {
+      onBoardReplayOp({ op: "stroke_batch_add", strokes: written, ts: Date.now() });
+    }
+  };
+
   const handleBoardAi = async (mode: AiMode, recognizedText: string) => {
     const boardText = recognizedText.trim();
     if (!boardText || assistantLoading) return;
@@ -853,6 +985,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         true,
         true,
         locale,
+        buildAiBoardState(
+          boardHistory.document.graphs,
+          boardHistory.document.strokes,
+        ),
       );
       if (isCancelled()) return;
 
@@ -963,6 +1099,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         strokes: written,
         ts: Date.now(),
       });
+
+      await executeAiBoardActions(res.board_actions, aiColor, isCancelled);
+      if (isCancelled()) return;
 
       if (mode === "check" && percent !== null) {
         showScoreOverlay(percent);

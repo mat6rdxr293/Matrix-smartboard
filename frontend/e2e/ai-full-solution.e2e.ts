@@ -51,10 +51,21 @@ type TestStroke = {
   source?: "user" | "ai";
 };
 
+type CapturedGraph = {
+  id: string;
+  expressions: Array<{ expression: string }>;
+};
+
 type CapturedOp = {
   op?: string;
   stroke?: TestStroke;
   strokes?: TestStroke[];
+  graph?: CapturedGraph;
+  before?: CapturedGraph;
+  after?: CapturedGraph;
+  indexes?: number[];
+  dx?: number;
+  dy?: number;
 };
 
 const taskStroke = (x1: number, y1: number, x2: number, y2: number): TestStroke => ({
@@ -89,6 +100,7 @@ async function seedLesson(
     aiResponse?: {
       text: string;
       steps: Array<{ text: string; kind: "text" | "math" | "warning" | "result" }>;
+      board_actions?: Array<Record<string, unknown>>;
     };
   },
 ) {
@@ -443,4 +455,107 @@ test("math handwriting keeps approximation, decimals and tends-to arrow visible"
 
   expect(arrowShaft).toBeTruthy();
   expect(arrowHead).toBeTruthy();
+});
+
+
+test("AI board actions add a graph and draw a geometric figure", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    captureOps: operations,
+    aiResponse: {
+      text: "Построение",
+      steps: [{ text: "$$y=x^2$$", kind: "result" }],
+      board_actions: [
+        {
+          type: "add_graph",
+          expressions: ["x^2", "sin(x)"],
+          x_min: -5,
+          x_max: 5,
+          y_min: -2,
+          y_max: 10,
+        },
+        {
+          type: "add_shape",
+          shape: "triangle",
+          x: 12,
+          y: 12,
+          width: 32,
+          height: 30,
+        },
+      ],
+    },
+  });
+  await generateSolution(page, operations);
+
+  await expect.poll(
+    () => operations.filter((operation) => operation.op === "graph_add").length,
+    { timeout: 20_000 },
+  ).toBe(1);
+  await expect.poll(
+    () => operations.filter((operation) => operation.op === "stroke_batch_add").length,
+    { timeout: 20_000 },
+  ).toBeGreaterThanOrEqual(2);
+
+  const graphAdd = operations.find((operation) => operation.op === "graph_add");
+  expect(graphAdd?.graph?.expressions.map((item) => item.expression))
+    .toEqual(["x^2", "sin(x)"]);
+
+  const batches = operations.filter((operation) => operation.op === "stroke_batch_add");
+  const shapeBatch = batches[batches.length - 1]?.strokes ?? [];
+  const closedTriangle = shapeBatch.find((stroke) => stroke.points.length === 4);
+  expect(closedTriangle).toBeTruthy();
+});
+
+test("AI board actions can update graphs and move or delete existing strokes", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    withGraph: true,
+    captureOps: operations,
+    aiResponse: {
+      text: "Изменения внесены",
+      steps: [{ text: "Готово", kind: "result" }],
+      board_actions: [
+        {
+          type: "update_graph",
+          target_id: graph.id,
+          expressions: ["x^3"],
+          x_min: -6,
+          x_max: 6,
+          y_min: -12,
+          y_max: 12,
+          x: 45,
+          y: 35,
+        },
+        { type: "move_strokes", indexes: [0], dx: 8, dy: 5 },
+        { type: "delete_strokes", indexes: [1] },
+      ],
+    },
+  });
+  await generateSolution(page, operations);
+
+  await expect.poll(
+    () => operations.filter((operation) => operation.op === "graph_update").length,
+    { timeout: 20_000 },
+  ).toBe(1);
+  await expect.poll(
+    () => operations.filter((operation) => operation.op === "stroke_move").length,
+    { timeout: 20_000 },
+  ).toBe(1);
+  await expect.poll(
+    () => operations.filter((operation) => operation.op === "stroke_delete").length,
+    { timeout: 20_000 },
+  ).toBe(1);
+
+  const graphUpdate = operations.find((operation) => operation.op === "graph_update");
+  expect(graphUpdate?.after?.id).toBe(graph.id);
+  expect(graphUpdate?.after?.expressions.map((item) => item.expression)).toEqual(["x^3"]);
+
+  const move = operations.find((operation) => operation.op === "stroke_move");
+  expect(move?.indexes).toEqual([0]);
+  expect(Math.abs(move?.dx ?? 0)).toBeGreaterThan(10);
+  expect(Math.abs(move?.dy ?? 0)).toBeGreaterThan(10);
+
+  const deletion = operations.find((operation) => operation.op === "stroke_delete");
+  expect(deletion?.indexes).toEqual([1]);
+  expect(deletion?.strokes).toHaveLength(1);
 });

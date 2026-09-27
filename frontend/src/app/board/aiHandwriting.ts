@@ -35,6 +35,52 @@ const SUPERSCRIPT: Record<string, string> = {
 const toSuperscript = (value: string) =>
   value.split("").map((char) => SUPERSCRIPT[char] ?? char).join("");
 
+const toSubscript = (value: string) =>
+  value.split("").map((char) => SUBSCRIPT[char] ?? char).join("");
+
+const SUBSCRIPT: Record<string, string> = {
+  "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+  "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+  "+": "₊", "-": "₋",
+};
+
+const LATEX_SYMBOLS: Array<[string, string]> = [
+  ["\\Longleftrightarrow", "⇔"], ["\\longleftrightarrow", "↔"],
+  ["\\Longrightarrow", "⇒"], ["\\Longleftarrow", "⇐"],
+  ["\\longrightarrow", "→"], ["\\longleftarrow", "←"],
+  ["\\Leftrightarrow", "⇔"], ["\\leftrightarrow", "↔"],
+  ["\\Rightarrow", "⇒"], ["\\Leftarrow", "⇐"],
+  ["\\rightarrow", "→"], ["\\leftarrow", "←"], ["\\mapsto", "↦"],
+  ["\\uparrow", "↑"], ["\\downarrow", "↓"], ["\\nearrow", "↗"],
+  ["\\searrow", "↘"], ["\\nwarrow", "↖"], ["\\swarrow", "↙"],
+  ["\\implies", "⇒"], ["\\iff", "⇔"], ["\\to", "→"],
+  ["\\leqslant", "≤"], ["\\geqslant", "≥"], ["\\approx", "≈"],
+  ["\\simeq", "≃"], ["\\cong", "≅"], ["\\equiv", "≡"], ["\\neq", "≠"], ["\\ne", "≠"],
+  ["\\propto", "∝"], ["\\sim", "∼"], ["\\ll", "≪"], ["\\gg", "≫"],
+  ["\\leq", "≤"], ["\\geq", "≥"], ["\\le", "≤"], ["\\ge", "≥"],
+  ["\\lt", "<"], ["\\gt", ">"], ["\\mid", "|"], ["\\nmid", "∤"],
+  ["\\notin", "∉"], ["\\subseteq", "⊆"], ["\\supseteq", "⊇"],
+  ["\\subset", "⊂"], ["\\supset", "⊃"], ["\\emptyset", "∅"],
+  ["\\varnothing", "∅"], ["\\in", "∈"], ["\\cup", "∪"], ["\\cap", "∩"],
+  ["\\setminus", "∖"], ["\\forall", "∀"], ["\\exists", "∃"], ["\\land", "∧"], ["\\wedge", "∧"],
+  ["\\lor", "∨"], ["\\vee", "∨"], ["\\neg", "¬"], ["\\therefore", "∴"], ["\\because", "∵"],
+  ["\\parallel", "∥"], ["\\perp", "⟂"], ["\\angle", "∠"], ["\\triangle", "△"], ["\\square", "□"],
+  ["\\partial", "∂"], ["\\nabla", "∇"], ["\\infty", "∞"],
+  ["\\iiint", "∭"], ["\\iint", "∬"], ["\\oint", "∮"], ["\\sum", "∑"], ["\\prod", "∏"], ["\\int", "∫"],
+  ["\\pm", "±"], ["\\mp", "∓"], ["\\times", "×"], ["\\cdot", "·"], ["\\div", "÷"],
+  ["\\ldots", "…"], ["\\dots", "…"], ["\\cdots", "⋯"], ["\\circ", "°"],
+  ["\\alpha", "α"], ["\\beta", "β"], ["\\gamma", "γ"], ["\\delta", "δ"],
+  ["\\epsilon", "ε"], ["\\varepsilon", "ε"], ["\\zeta", "ζ"], ["\\eta", "η"],
+  ["\\theta", "θ"], ["\\vartheta", "ϑ"], ["\\iota", "ι"], ["\\kappa", "κ"],
+  ["\\lambda", "λ"], ["\\mu", "μ"], ["\\nu", "ν"], ["\\xi", "ξ"],
+  ["\\rho", "ρ"], ["\\sigma", "σ"], ["\\tau", "τ"], ["\\upsilon", "υ"],
+  ["\\phi", "φ"], ["\\varphi", "ϕ"], ["\\chi", "χ"], ["\\psi", "ψ"], ["\\omega", "ω"],
+  ["\\Gamma", "Γ"], ["\\Delta", "Δ"], ["\\Theta", "Θ"], ["\\Lambda", "Λ"],
+  ["\\Xi", "Ξ"], ["\\Pi", "Π"], ["\\Sigma", "Σ"], ["\\Phi", "Φ"], ["\\Psi", "Ψ"], ["\\Omega", "Ω"],
+];
+
+const LATEX_FUNCTIONS = ["sin", "cos", "tan", "cot", "tg", "ctg", "ln", "log", "lg", "exp", "min", "max", "lim"];
+
 const CJK_SCRIPT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+/g;
 
 const sanitizeLanguageText = (value: string, locale: "ru" | "kk" | "en") => {
@@ -96,7 +142,35 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\$\$/g, "").replace(/\$/g, "");
   text = text.replace(/\\[()[\]]/g, "");
   text = text.replace(/\\left|\\right/g, "");
-  text = text.replace(/\\(?:,|;|!|quad|qquad)/g, " ");
+  text = text.replace(/\\(?:,|;|:|!)/g, " ");
+  text = text.replace(/\\(?:quad|qquad|enspace|thinspace)\b/g, " ");
+  text = text.replace(/\\\s/g, " ");
+  text = text.replace(/\\(?:displaystyle|textstyle|scriptstyle|limits|nolimits)\b/g, "");
+  text = text.replace(/\\(?:mathrm|mathbf|mathit|mathsf|mathtt|text|operatorname)\{([^{}]*)\}/g, "$1");
+  text = text.replace(/\\mathbb\{([RQNZC])\}/g, (_, value: string) => ({
+    R: "ℝ", Q: "ℚ", N: "ℕ", Z: "ℤ", C: "ℂ",
+  }[value.trim()] ?? value.trim()));
+  text = text.replace(/\\(?:mathcal|mathfrak)\{([^{}]*)\}/g, "$1");
+  text = text.replace(/\\(?:overrightarrow|vec)\{([^{}]+)\}/g, "$1⃗");
+  text = text.replace(/\\overline\{([^{}]+)\}/g, "$1̅");
+  text = text.replace(/\\binom\{([^{}]+)\}\{([^{}]+)\}/g, "C($1,$2)");
+  text = text.replace(/\\(?:lvert|rvert|vert)\b/g, "|");
+  text = text.replace(/\\lfloor\b/g, "⌊").replace(/\\rfloor\b/g, "⌋");
+  text = text.replace(/\\lceil\b/g, "⌈").replace(/\\rceil\b/g, "⌉");
+  text = text.replace(/\\langle\b/g, "⟨").replace(/\\rangle\b/g, "⟩");
+  text = text.replace(/\\\{/g, "{").replace(/\\\}/g, "}");
+  text = text.replace(/\\begin\{(?:cases|aligned|array|matrix|pmatrix|bmatrix)\}/g, "");
+  text = text.replace(/\\end\{(?:cases|aligned|array|matrix|pmatrix|bmatrix)\}/g, "");
+  text = text.replace(/\\\\/g, "; ");
+  text = text.replace(/\\sqrt\[([^\]]+)\]\{([^{}]+)\}/g, (_, index: string, body: string) =>
+    `${toSuperscript(index)}√(${body})`
+  );
+  for (const [command, symbol] of [...LATEX_SYMBOLS].sort((a, b) => b[0].length - a[0].length)) {
+    text = text.split(command).join(symbol);
+  }
+  for (const fn of LATEX_FUNCTIONS) {
+    text = text.replace(new RegExp(`\\\\${fn}\\b`, "g"), fn);
+  }
   text = text.replace(/\\int\b/g, "∫");
   text = text.replace(/\\pm/g, "±");
   text = text.replace(/\\times/g, "×");
@@ -118,7 +192,7 @@ export function normalizeHandwritingText(source: string) {
 
   for (let pass = 0; pass < 4; pass += 1) {
     const previous = text;
-    text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
+    text = text.replace(/\\(?:dfrac|tfrac|frac)\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
     text = text.replace(/\\sqrt\{([^{}]+)\}/g, "√($1)");
     if (text === previous) break;
   }
@@ -127,11 +201,13 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\^\{([^{}]+)\}/g, "⁽$1⁾");
   text = text.replace(/\^([0-9])/g, (_, value: string) => toSuperscript(value));
   text = text.replace(/_\{([^{}]+)\}/g, "₍$1₎");
-  text = text.replace(/\\([A-Za-z]+)/g, "$1");
+  text = text.replace(/_([0-9+-])/g, (_, value: string) => toSubscript(value));
   text = text.replace(/\bsqrt\s*\(/gi, "√(");
   text = text.replace(/\bint\b(?=\s*(?:₍|\(|\[|[A-Za-z0-9]))/gi, "∫");
   text = text.replace(/[{}]/g, "");
   text = text.replace(/\*\*/g, "");
+  text = text.replace(/([\[(⌊⌈⟨])\s+/g, "$1");
+  text = text.replace(/\s+([\])⌋⌉⟩])/g, "$1");
   text = text.replace(/\s+/g, " ").trim();
   return text;
 }

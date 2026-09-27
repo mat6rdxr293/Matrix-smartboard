@@ -1,4 +1,6 @@
-﻿export type AiMode = "hint" | "check" | "solution";
+﻿import type { AiBoardAction } from "@/app/board/aiBoardActions";
+
+export type AiMode = "hint" | "check" | "solution";
 
 export async function callAi(
   mode: AiMode,
@@ -12,6 +14,7 @@ export async function callAi(
   boardContext?: boolean,
   boardOutput?: boolean,
   responseLocale?: "ru" | "kk" | "en",
+  boardState?: Record<string, unknown>,
 ) {
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -27,6 +30,7 @@ export async function callAi(
       client_message_id: clientMessageId || null,
       board_context: !!boardContext,
       board_output: !!boardOutput,
+      board_state: boardState || null,
       response_locale: responseLocale || null,
     }),
   });
@@ -48,6 +52,7 @@ export async function callAi(
   return (await res.json()) as {
     text: string;
     steps?: Array<{ text: string; kind: "text" | "math" | "result" | "warning" }> | null;
+    board_actions?: AiBoardAction[] | null;
   };
 }
 
