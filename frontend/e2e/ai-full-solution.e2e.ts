@@ -364,11 +364,10 @@ test("full solution keeps the first task statement when its worked solution is a
   await generateSolution(page, operations);
 
   expect(aiProblems).toHaveLength(1);
-  expect(aiProblems[0]).toContain("Задание 1:\n5x^2 + 4x - 9 = 0");
+  expect(aiProblems[0]).toContain(
+    "Задание 1:\n5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
+  );
   expect(aiProblems[0]).toContain("Задание 2:\n9x^2 + 11x + 3 = 35");
-  expect(aiProblems[0]).not.toContain("D = 196");
-  expect(aiProblems[0]).not.toContain("x1 = 1");
-  expect(aiProblems[0]).not.toContain("x2 = -1.8");
 });
 
 

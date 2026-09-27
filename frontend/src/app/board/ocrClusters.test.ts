@@ -20,16 +20,20 @@ describe("clusterOcrStrokes", () => {
       stroke(265, 125, 335, 125),
       stroke(340, 95, 410, 165),
       stroke(415, 125, 485, 125),
-      // Final digit is visibly on the same row, but beyond the normal 84 px gap.
-      stroke(600, 100, 655, 165),
-      stroke(655, 100, 610, 135),
+      // Large final digit is visibly on the same row, but detached by a wide gap.
+      stroke(635, 95, 735, 165),
+      stroke(735, 95, 665, 120),
+      stroke(665, 120, 730, 135),
+      stroke(730, 135, 670, 165),
+      stroke(670, 165, 730, 165),
+      stroke(730, 165, 740, 150),
     ];
 
     const clusters = clusterOcrStrokes(strokes);
 
     expect(clusters).toHaveLength(1);
-    expect(clusters[0].indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    expect(clusters[0].bounds.right).toBeGreaterThan(650);
+    expect(clusters[0].indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(clusters[0].bounds.right).toBeGreaterThan(735);
   });
 
   it("keeps two nearby equations as separate blocks and picks the most recent one", () => {
@@ -189,7 +193,7 @@ it("ignores a tiny newer scribble when an older equation is much more substantia
   expect(chooseActiveOcrCluster(clusters)?.indices).toEqual([0, 1, 2, 3, 4]);
 });
 
-it("drops stale worked solution and OCR junk when a new task is present", () => {
+it("keeps completed work visible while still finding the next task", () => {
   expect(
     sanitizeMultiTaskOcrTexts([
       "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
@@ -197,7 +201,7 @@ it("drops stale worked solution and OCR junk when a new task is present", () => 
       "OK",
     ]),
   ).toEqual([
-    "5x^2 + 4x - 9 = 0",
+    "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
     "9x^2 + 11x + 3 = 3",
   ]);
 });
@@ -219,7 +223,7 @@ it("splits a new close task out of a completed first solution in one OCR block",
       "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8\n9x^2 + 11x + 3 = 3",
     ]),
   ).toEqual([
-    "5x^2 + 4x - 9 = 0",
+    "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
     "9x^2 + 11x + 3 = 3",
   ]);
 });

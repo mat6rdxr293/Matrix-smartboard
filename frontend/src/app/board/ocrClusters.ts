@@ -82,21 +82,9 @@ const isLikelyTaskText = (value: string) => {
   return hasMathSignal || hasEnoughText;
 };
 
-const taskStatementFromCompletedWork = (value: string) => {
-  if (!isLikelyCompletedWork(value)) return value.trim();
-
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const firstTaskLine = lines.find(isStandaloneTaskEquation);
-  return firstTaskLine ?? value.trim();
-};
-
 export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
   const tasks = values
     .flatMap(splitLogicalTasksFromOcr)
-    .map(taskStatementFromCompletedWork)
     .filter(isLikelyTaskText);
 
   return [...new Set(tasks.map((value) => value.trim()).filter(Boolean))];
@@ -268,6 +256,7 @@ export function clusterOcrStrokes(
         if (i === j || consumed.has(j)) continue;
         const candidate = rawClusters[j];
         const currentWidth = current.bounds.right - current.bounds.left;
+        const currentHeight = Math.max(1, current.bounds.bottom - current.bounds.top);
         const candidateWidth = candidate.bounds.right - candidate.bounds.left;
         const candidateHeight = candidate.bounds.bottom - candidate.bounds.top;
         const xGap = candidate.bounds.left - current.bounds.right;
@@ -288,14 +277,14 @@ export function clusterOcrStrokes(
           );
 
         const smallTrailingFragment =
-          currentWidth >= typicalHeight * 2.2 &&
+          currentWidth >= currentHeight * 2.4 &&
           candidate.bounds.left >= current.bounds.right &&
-          candidateWidth <= Math.max(typicalHeight * 0.95, 86) &&
-          candidateHeight <= Math.max(typicalHeight * 1.45, 138) &&
-          candidate.strokes.length <= 5 &&
+          candidateWidth <= Math.max(currentHeight * 1.8, 150) &&
+          candidateHeight <= Math.max(currentHeight * 1.9, 180) &&
+          candidate.strokes.length <= 8 &&
           xGap >= 0 &&
-          xGap <= clamp(typicalHeight * 2.6, 110, 230) &&
-          overlapRatio >= 0.34;
+          xGap <= Math.max(currentHeight * 3.2, 240) &&
+          overlapRatio >= 0.3;
 
         if (!smallTrailingFragment) continue;
         current = {
