@@ -38,7 +38,7 @@ BOARD_OPERATION_TYPES = {
     "undo", "redo", "clear",
 }
 BOARD_SCHEMA_VERSION = "6"
-MAX_BOARD_OPERATION_JSON_BYTES = 512_000
+MAX_BOARD_OPERATION_JSON_BYTES = 4_000_000
 
 
 def _is_number(value: object) -> bool:
@@ -631,7 +631,7 @@ class SchoolStore:
                     if (
                         not isinstance(strokes, list)
                         or not strokes
-                        or len(strokes) > 4000
+                        or len(strokes) > 20_000
                         or any(not _is_valid_board_stroke(stroke) for stroke in strokes)
                     ):
                         raise ValueError("stroke_batch_add operation requires valid strokes")
