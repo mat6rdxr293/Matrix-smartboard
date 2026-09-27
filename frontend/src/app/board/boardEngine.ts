@@ -43,12 +43,22 @@ export function drawStrokes(
 
   for (let s = 0; s < strokes.length; s += 1) {
     const stroke = strokes[s];
-    if (stroke.points.length < 2) continue;
+    if (!stroke.points.length) continue;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.lineWidth = stroke.width;
     ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
     ctx.globalCompositeOperation = stroke.mode === "erase" ? "destination-out" : "source-over";
+
+    if (stroke.points.length === 1) {
+      const point = stroke.points[0];
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, Math.max(0.5, stroke.width / 2), 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
     ctx.beginPath();
     ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
     for (let i = 1; i < stroke.points.length; i += 1) {

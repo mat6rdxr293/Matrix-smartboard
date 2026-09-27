@@ -262,7 +262,7 @@ def _is_valid_stroke(stroke: object) -> bool:
     if not isinstance(stroke, dict):
         return False
     points = stroke.get("points")
-    if not isinstance(points, list) or len(points) < 2 or len(points) > 5000:
+    if not isinstance(points, list) or len(points) < 1 or len(points) > 5000:
         return False
     for p in points:
         if not isinstance(p, dict):

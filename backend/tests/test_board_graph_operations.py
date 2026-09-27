@@ -169,3 +169,32 @@ def test_old_board_schema_is_migrated_without_losing_operations(tmp_path):
     )
     assert inserted == 1
     assert [item["op"] for item in store.board_state("s1", "l1")] == ["add", "graph_add"]
+
+
+def test_single_point_stroke_is_accepted_and_replayed(tmp_path):
+    client, _, lesson = registered_client(tmp_path)
+    stroke = {
+        "points": [{"x": 42.5, "y": 17.25}],
+        "color": "#ff0000",
+        "width": 4,
+        "mode": "draw",
+    }
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/board/operations",
+        json={
+            "operations": [
+                {
+                    "client_operation_id": "dot-1",
+                    "op": "add",
+                    "stroke": stroke,
+                    "ts": 123,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    saved = client.get(f"/api/lessons/{lesson['id']}/board").json()["operations"]
+    assert saved[-1]["op"] == "add"
+    assert saved[-1]["stroke"] == stroke

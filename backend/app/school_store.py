@@ -49,7 +49,7 @@ def _is_valid_board_stroke(stroke: object) -> bool:
     if not isinstance(stroke, dict):
         return False
     points = stroke.get("points")
-    if not isinstance(points, list) or len(points) < 2 or len(points) > 5000:
+    if not isinstance(points, list) or len(points) < 1 or len(points) > 5000:
         return False
     if any(not isinstance(point, dict) or not _is_number(point.get("x")) or not _is_number(point.get("y")) for point in points):
         return False
