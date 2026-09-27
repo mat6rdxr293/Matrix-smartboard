@@ -78,8 +78,25 @@ def _integral_count(text: str | None) -> int:
     return len(_INTEGRAL_RE.findall(_normalize_ocr_text(text)))
 
 
+_CORRUPTED_LATEX_CONTROL_SUFFIXES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "\x08": ("b", ("ar", "egin", "eta", "inom")),
+    "\x0c": ("f", ("orall", "rac")),
+    "\n": ("n", ("abla", "eg", "eq", "exists", "otin", "u")),
+    "\r": ("r", ("angle", "ho", "ight")),
+    "\t": ("t", ("an", "ext", "heta", "imes", "o")),
+}
+
+
+def _repair_corrupted_latex_controls(value: str) -> str:
+    repaired = value
+    for control, (prefix, suffixes) in _CORRUPTED_LATEX_CONTROL_SUFFIXES.items():
+        for suffix in suffixes:
+            repaired = repaired.replace(control + suffix, "\\" + prefix + suffix)
+    return repaired
+
+
 def _normalize_ocr_text(text: str | None) -> str:
-    value = (text or "").strip()
+    value = _repair_corrupted_latex_controls(text or "").strip()
     value = value.replace("−", "-").replace("–", "-")
     value = re.sub(r"\\begin\{aligned\*?\}", "", value, flags=re.I)
     value = re.sub(r"\\end\{aligned\*?\}", "", value, flags=re.I)
@@ -770,8 +787,9 @@ def _request_ocr(
     image_bytes: bytes,
     base_url: str | None,
     extra_images: list[tuple[str, bytes]] | None = None,
+    primary_label: str = "Полное изображение",
 ) -> str:
-    images = [("Полное изображение", image_bytes), *(extra_images or [])]
+    images = [(primary_label, image_bytes), *(extra_images or [])]
 
     if base_url:
         content = [{"type": "text", "text": prompt}]
@@ -833,13 +851,102 @@ def _integral_spatial_prompt(candidates: list[str]) -> str:
     )
 
 
-def _extract_json_object(text: str) -> dict[str, str] | None:
+_INTEGRAL_LIMITS_ONLY_PROMPT = (
+    "Это повторная OCR-проверка ТОЛЬКО пределов одного рукописного определённого интеграла. "
+    "На изображениях отдельно показаны верхняя и нижняя зоны возле знака интеграла. "
+    "Не читай интегранд и НЕ решай, НЕ сокращай и НЕ упрощай пределы. "
+    "Перепиши буквально все видимые символы каждого предела: коэффициенты, pi, дробную черту, "
+    "числитель, знаменатель, минус и корни. Например, если написано 3*pi/9, верни именно "
+    "3*pi/9, а не pi/3 и не pi/2. "
+    "Верни СТРОГО JSON без markdown: "
+    '{"upper_limit":"...","lower_limit":"..."}. '
+    "Используй pi для π, sqrt(...) для корней и / для дробной черты. "
+    "Если один конкретный символ действительно неразборчив, поставь ? только на его месте."
+)
+
+
+def _usable_integral_limit(value: str | None) -> bool:
+    text = _normalize_ocr_text(value)
+    if not text or len(text) > 96:
+        return False
+    if any(token in text.lower() for token in ("dx", "dy", "integr", "upper", "lower")):
+        return False
+    return bool(re.search(r"[A-Za-z0-9π?]", text))
+
+
+def _integral_from_fields(parsed: dict[str, str] | None) -> str:
+    if not parsed:
+        return ""
+    lower = _normalize_ocr_text(parsed.get("lower_limit", ""))
+    upper = _normalize_ocr_text(parsed.get("upper_limit", ""))
+    integrand = _normalize_ocr_text(parsed.get("integrand", ""))
+    differential = _normalize_ocr_text(parsed.get("differential", ""))
+    if not integrand or not re.fullmatch(r"d[A-Za-z]", differential):
+        return ""
+    if not lower:
+        lower = "?"
+    if not upper:
+        upper = "?"
+    return rf"\int_{{{lower}}}^{{{upper}}} ({integrand}) {differential}"
+
+
+_JSON_ESCAPE_COLLIDING_LATEX_COMMANDS = (
+    "bar",
+    "begin",
+    "beta",
+    "binom",
+    "boxed",
+    "frac",
+    "forall",
+    "nabla",
+    "neg",
+    "neq",
+    "notin",
+    "nu",
+    "rangle",
+    "rho",
+    "right",
+    "tan",
+    "text",
+    "theta",
+    "times",
+    "to",
+    "tfrac",
+    "underbrace",
+    "underline",
+)
+
+
+def _escape_latex_json_collisions(payload: str) -> str:
+    commands = "|".join(
+        sorted(
+            (re.escape(command) for command in _JSON_ESCAPE_COLLIDING_LATEX_COMMANDS),
+            key=len,
+            reverse=True,
+        )
+    )
+    return re.sub(
+        rf"(?<!\\)\\(?=(?:{commands})\b)",
+        r"\\\\",
+        payload,
+    )
+
+
+def _extract_json_object(
+    text: str,
+    keys: tuple[str, ...] = (
+        "lower_limit",
+        "upper_limit",
+        "integrand",
+        "differential",
+    ),
+) -> dict[str, str] | None:
     value = (text or "").strip()
     match = re.search(r"\{.*\}", value, flags=re.S)
     if not match:
         return None
     import json
-    payload = match.group(0)
+    payload = _escape_latex_json_collisions(match.group(0))
     try:
         parsed = json.loads(payload)
     except Exception:
@@ -854,29 +961,16 @@ def _extract_json_object(text: str) -> dict[str, str] | None:
     if not isinstance(parsed, dict):
         return None
     result: dict[str, str] = {}
-    for key in ("lower_limit", "upper_limit", "integrand", "differential"):
+    for key in keys:
         raw = parsed.get(key)
         if raw is None:
             continue
-        result[key] = str(raw).strip()
+        result[key] = _normalize_ocr_text(str(raw))
     return result
 
 
 def _integral_from_spatial_response(text: str) -> str:
-    parsed = _extract_json_object(text)
-    if not parsed:
-        return ""
-    lower = parsed.get("lower_limit", "").strip()
-    upper = parsed.get("upper_limit", "").strip()
-    integrand = parsed.get("integrand", "").strip()
-    differential = parsed.get("differential", "").strip()
-    if not integrand or not re.fullmatch(r"d[A-Za-z]", differential):
-        return ""
-    if not lower:
-        lower = "?"
-    if not upper:
-        upper = "?"
-    return rf"\int_{{{lower}}}^{{{upper}}} ({integrand}) {differential}"
+    return _integral_from_fields(_extract_json_object(text))
 
 def _reconcile_math_prompt(candidates: list[str]) -> str:
     rendered = "\n".join(
@@ -997,10 +1091,35 @@ def ocr_image(png_bytes: bytes) -> str:
             try:
                 if integral_count == 1:
                     zones = _math_zone_crops(compact)
+                    upper_zone = None
+                    lower_zone = None
                     if zones:
                         main = next(
-                            (item for item in zones if "основной" in item[0].lower()),
+                            (
+                                item
+                                for item in zones
+                                if "основной" in item[0].lower()
+                                or "main" in item[0].lower()
+                            ),
                             zones[-1],
+                        )
+                        upper_zone = next(
+                            (
+                                item
+                                for item in zones
+                                if "верх" in item[0].lower()
+                                or "upper" in item[0].lower()
+                            ),
+                            None,
+                        )
+                        lower_zone = next(
+                            (
+                                item
+                                for item in zones
+                                if "ниж" in item[0].lower()
+                                or "lower" in item[0].lower()
+                            ),
+                            None,
                         )
                         extras = [item for item in zones if item is not main]
                         spatial_raw = _request_ocr(
@@ -1009,6 +1128,7 @@ def ocr_image(png_bytes: bytes) -> str:
                             image_bytes=main[1],
                             base_url=base_url,
                             extra_images=extras,
+                            primary_label=main[0],
                         )
                     else:
                         spatial_raw = _request_ocr(
@@ -1017,7 +1137,37 @@ def ocr_image(png_bytes: bytes) -> str:
                             image_bytes=compact,
                             base_url=base_url,
                         )
-                    spatial = _integral_from_spatial_response(spatial_raw)
+
+                    spatial_fields = _extract_json_object(spatial_raw)
+                    if spatial_fields and upper_zone and lower_zone:
+                        limits_raw = _request_ocr(
+                            client,
+                            prompt=_INTEGRAL_LIMITS_ONLY_PROMPT,
+                            image_bytes=upper_zone[1],
+                            base_url=base_url,
+                            extra_images=[lower_zone],
+                            primary_label=upper_zone[0],
+                        )
+                        limit_fields = _extract_json_object(
+                            limits_raw,
+                            ("upper_limit", "lower_limit"),
+                        )
+                        if limit_fields:
+                            for key in ("upper_limit", "lower_limit"):
+                                verified = limit_fields.get(key)
+                                if not _usable_integral_limit(verified):
+                                    continue
+                                previous = spatial_fields.get(key)
+                                if previous and _candidate_key(previous) != _candidate_key(verified):
+                                    logger.info(
+                                        "Integral %s corrected by limits-only OCR: %r -> %r",
+                                        key,
+                                        previous,
+                                        verified,
+                                    )
+                                spatial_fields[key] = verified
+
+                    spatial = _integral_from_fields(spatial_fields)
                     if _usable_ocr_text(spatial):
                         candidates.append(spatial)
                         logger.info("Integral OCR accepted spatially reconstructed result")

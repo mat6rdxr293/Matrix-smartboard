@@ -588,6 +588,7 @@ def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeyp
         r"\int_{-\pi}^{\pi} \sqrt{x+1} - x^2 \, dx",
         '{"lower_limit":"-pi","upper_limit":"(4*sqrt(pi))/(11)",'
         '"integrand":"cos(sqrt(x+1)) - 2*x^2","differential":"dx"}',
+        '{"upper_limit":"(4*sqrt(pi))/(11)","lower_limit":"-pi"}',
     ]
 
     class FakeCompletions:
@@ -626,17 +627,107 @@ def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeyp
         r"\int_{-pi}^{(4*sqrt(pi))/(11)} "
         r"(cos(sqrt(x+1)) - 2*x^2) dx"
     )
-    assert len(calls) == 2
+    assert len(calls) == 3
 
-    final_content = calls[-1]["messages"][0]["content"]
-    image_parts = [item for item in final_content if item["type"] == "image_url"]
+    spatial_content = calls[-2]["messages"][0]["content"]
+    image_parts = [item for item in spatial_content if item["type"] == "image_url"]
     assert len(image_parts) == 3
+    assert spatial_content[1]["text"] == "main"
 
-    final_prompt = final_content[0]["text"]
-    assert "lower_limit" in final_prompt
-    assert "upper_limit" in final_prompt
-    assert "integrand" in final_prompt
-    assert "коэффициент" in final_prompt
+    spatial_prompt = spatial_content[0]["text"]
+    assert "lower_limit" in spatial_prompt
+    assert "upper_limit" in spatial_prompt
+    assert "integrand" in spatial_prompt
+    assert "коэффициент" in spatial_prompt
+
+    limits_content = calls[-1]["messages"][0]["content"]
+    assert limits_content[1]["text"] == "upper"
+    assert "НЕ сокращай" in limits_content[0]["text"]
+
+
+def test_ocr_normalizer_repairs_json_control_char_corruption_from_latex():
+    corrupted = (
+        "\x0crac{\\pi}{2}"
+        + "\r"
+        + "ight(x)"
+        + "\t"
+        + "heta"
+        + "\n"
+        + "eq"
+    )
+
+    normalized = ocr_module._normalize_ocr_text(corrupted)
+
+    assert normalized == r"\frac{\pi}{2}\right(x)\theta\neq"
+    assert "\x0c" not in normalized
+    assert "\r" not in normalized
+    assert "\t" not in normalized
+    assert "\n" not in normalized.replace(r"\neq", "")
+
+
+def test_spatial_json_parser_repairs_valid_json_escapes_inside_latex_commands():
+    raw = (
+        r'{"lower_limit":"-\frac{\pi}{2}","upper_limit":"\frac{3\pi}{9}",'
+        r'"integrand":"\left(\cos(x)+1\right)","differential":"dx"}'
+    )
+
+    parsed = ocr_module._integral_from_spatial_response(raw)
+
+    assert parsed == (
+        r"\int_{-\frac{\pi}{2}}^{\frac{3\pi}{9}} "
+        r"(\left(\cos(x)+1\right)) dx"
+    )
+    assert "\x0c" not in parsed
+    assert "\r" not in parsed
+
+
+def test_limits_only_pass_overrides_wrong_spatial_integral_limit(monkeypatch):
+    calls = []
+    responses = [
+        r"\int_{-\frac{\pi}{2}}^{\frac{\pi}{2}} cos(x) dx",
+        (
+            '{"lower_limit":"-pi/2","upper_limit":"pi/2",'
+            '"integrand":"cos(x)","differential":"dx"}'
+        ),
+        '{"upper_limit":"3*pi/9","lower_limit":"-pi/2"}',
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=responses[len(calls) - 1])
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+    monkeypatch.setattr(
+        ocr_module,
+        "_math_zone_crops",
+        lambda _data: [
+            ("upper", b"upper"),
+            ("lower", b"lower"),
+            ("main", b"main"),
+        ],
+    )
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == r"\int_{-pi/2}^{3*pi/9} (cos(x)) dx"
+    assert len(calls) == 3
+    assert "3*pi/9" in result
+    assert "pi/2" not in result.split("}^{", 1)[1].split("}", 1)[0]
 
 
 def test_spatial_json_parser_repairs_unescaped_latex_backslashes():
