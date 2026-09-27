@@ -7,6 +7,19 @@ export type OcrStrokeCluster = {
   bounds: BoardRect;
 };
 
+export function composeOcrText(
+  recognized: string,
+  graphLines: string[],
+  hasHandwritingTarget: boolean,
+): string {
+  const primary = recognized.trim();
+  if (hasHandwritingTarget) return primary;
+  return [primary, ...graphLines.map((line) => line.trim())]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -147,11 +160,47 @@ export function clusterOcrStrokes(
     });
 }
 
+const clusterInkLength = (cluster: OcrStrokeCluster) => {
+  let total = 0;
+  for (const stroke of cluster.strokes) {
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const previous = stroke.points[index - 1];
+      const current = stroke.points[index];
+      total += Math.hypot(current.x - previous.x, current.y - previous.y);
+    }
+  }
+  return total;
+};
+
+const clusterContentScore = (cluster: OcrStrokeCluster) => {
+  const width = Math.max(0, cluster.bounds.right - cluster.bounds.left);
+  const height = Math.max(0, cluster.bounds.bottom - cluster.bounds.top);
+  return (
+    clusterInkLength(cluster) +
+    cluster.strokes.length * 18 +
+    Math.min(360, width) * 0.45 +
+    Math.min(180, height) * 0.2
+  );
+};
+
 export function chooseActiveOcrCluster(
   clusters: OcrStrokeCluster[],
 ): OcrStrokeCluster | null {
   if (!clusters.length) return null;
-  return clusters.reduce((latest, cluster) =>
-    Math.max(...cluster.indices) > Math.max(...latest.indices) ? cluster : latest
-  );
+  if (clusters.length === 1) return clusters[0];
+
+  const scored = clusters.map((cluster) => ({
+    cluster,
+    score: clusterContentScore(cluster),
+    lastIndex: Math.max(...cluster.indices),
+  }));
+  const maxScore = Math.max(...scored.map((item) => item.score));
+
+  // Prefer the newest meaningful handwritten block, but do not let a tiny
+  // accidental scribble/dot drawn later replace a substantially larger
+  // equation as the OCR target.
+  const meaningful = scored.filter((item) => item.score >= maxScore * 0.34);
+  return meaningful.reduce((latest, item) =>
+    item.lastIndex > latest.lastIndex ? item : latest
+  ).cluster;
 }

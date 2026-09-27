@@ -10,7 +10,7 @@ import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
 import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { chooseActiveOcrCluster, clusterOcrStrokes } from "@/app/board/ocrClusters";
+import { chooseActiveOcrCluster, clusterOcrStrokes, composeOcrText } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -1710,7 +1710,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
 
     if (!activeCluster && graphLines.length > 0) {
-      const text = graphLines.join("\n");
+      const text = composeOcrText("", graphLines, false);
       onOcrText?.(text);
       return text;
     }
@@ -1722,7 +1722,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       const blob = await renderOcrBlob(activeCluster.strokes);
       if (!blob) throw new Error(tl("ocr_not_available"));
       const res = await callOcr(blob);
-      const text = [res.text.trim(), ...graphLines].filter(Boolean).join("\n").trim();
+      const text = composeOcrText(res.text, graphLines, true);
       if (!text) throw new Error(tl("ocr_not_available"));
       onOcrText?.(text);
       return text;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Stroke } from "./boardEngine";
-import { chooseActiveOcrCluster, clusterOcrStrokes } from "./ocrClusters";
+import { chooseActiveOcrCluster, clusterOcrStrokes, composeOcrText } from "./ocrClusters";
 
 const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): Stroke => ({
   points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
@@ -61,6 +61,35 @@ describe("clusterOcrStrokes", () => {
   });
 });
 
+
+it("ignores a tiny newer scribble when an older equation is much more substantial", () => {
+  const strokes = [
+    stroke(40, 90, 120, 150),
+    stroke(125, 115, 200, 115),
+    stroke(205, 80, 260, 155),
+    stroke(265, 110, 340, 110),
+    stroke(345, 80, 420, 150),
+    // Newer accidental scribble far away.
+    stroke(760, 520, 778, 535),
+    stroke(780, 532, 795, 540),
+  ];
+
+  const clusters = clusterOcrStrokes(strokes);
+  expect(clusters).toHaveLength(2);
+  expect(chooseActiveOcrCluster(clusters)?.indices).toEqual([0, 1, 2, 3, 4]);
+});
+
+it("keeps graph text out of OCR when handwriting was actually recognized", () => {
+  expect(
+    composeOcrText("5x^2 + 4x - 9 = 0", ["График: y = 5x^2+4x-9"], true),
+  ).toBe("5x^2 + 4x - 9 = 0");
+});
+
+it("still exposes graph text when the board has no handwritten OCR target", () => {
+  expect(
+    composeOcrText("", ["График: y = 5x^2+4x-9"], false),
+  ).toBe("График: y = 5x^2+4x-9");
+});
 
 it("keeps one handwritten formula together across a moderate operator gap", () => {
   const strokes = [
