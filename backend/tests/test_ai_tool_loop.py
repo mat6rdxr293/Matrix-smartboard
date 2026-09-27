@@ -1311,8 +1311,8 @@ def test_quadratic_check_accepts_correct_work_without_llm(monkeypatch):
     monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
     problem = """5x^2 + 4x - 9 = 0
 D = 16 + 4 * 5 * 9 = 196
-x_1 = (-4 + 14) / 10 = 1
-x_2 = (-4 - 14) / 10 = -1.8"""
+x1 = (-4 + 14) / 10 = 1
+x₂ = (-4 - 14) / 10 = -1,8"""
 
     text, steps = ai_module.generate_board_response(
         "check",
@@ -1328,6 +1328,17 @@ x_2 = (-4 - 14) / 10 = -1.8"""
     assert "x_2 = -1.8" in steps[1]["text"]
     assert steps[-1]["text"] == "Решение выполнено правильно."
     assert "правильно" in text
+
+
+def test_formatting_only_check_feedback_is_rejected_for_retry():
+    steps = [{"text": "Нет финального ответа.", "kind": "warning"}]
+
+    assert ai_module._board_check_is_formatting_only(steps) is True
+    assert ai_module._board_check_needs_retry(
+        "Нет финального ответа.",
+        steps,
+        "ru",
+    ) is True
 
 
 def test_quadratic_check_catches_wrong_root_arithmetic_without_llm(monkeypatch):
