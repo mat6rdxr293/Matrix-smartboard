@@ -32,7 +32,9 @@ MAX_BAD_RATIO = 0.1     # доля «мусорных» символов выш�
 OCR_LANGS = "kaz+rus+eng"
 OCR_DPI = 300
 
-KK_LETTERS = set("әғқңөұүһіӘҒҚҢӨҰҮҺІ")
+# буквы, которые есть в казахском, но нет в русском/узбекском (қ, ғ есть и в узбекском — их не берём)
+KK_LETTERS = set("әңөұүһіӘҢӨҰҮҺІ")
+UZ_LETTERS = set("ўҳЎҲ")  # узбекская кириллица: в Казахстане есть учебники для узбекских школ
 # В учебниках на kk/ru/en не бывает Latin-1/Latin Extended букв (Í, þ, µ...), U+FFFD и
 # private use — это признак шрифта без ToUnicode (кириллица, сохранённая как «кракозябры»).
 BAD_CHAR = re.compile(r"[\u0080-\u024f\ufffd\ue000-\uf8ff]")
@@ -51,8 +53,10 @@ def normalize(text):
 def lang_guess(text):
     if not text:
         return None
-    if any(c in KK_LETTERS for c in text):
-        return "kk"
+    kk = sum(c in KK_LETTERS for c in text)
+    uz = sum(c in UZ_LETTERS for c in text)
+    if kk or uz:
+        return "kk" if kk >= uz else "uz"
     cyr, lat = len(CYR.findall(text)), len(LAT.findall(text))
     if cyr == lat == 0:
         return None
