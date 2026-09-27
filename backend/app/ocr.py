@@ -58,6 +58,12 @@ _OCR_PROMPTS = (
     ),
 )
 
+_OCR_EMERGENCY_PROMPT = (
+    "Точное OCR одной рукописной математической записи. Только перепиши видимые символы. "
+    "Не решай и не объясняй. Для интеграла обязательно сохрани нижний и верхний пределы, "
+    "весь интегранд и dx/dy. Степени через ^, pi как pi. Верни только транскрипцию."
+)
+
 _MATH_OCR_RE = re.compile(
     r"(?:\\?int(?=\b|_|\[)|∫|\\?frac\b|\\?sqrt\b|√|\^|"
     r"\\?(?:sin|cos|tan|log|ln)\b|\b(?:sin|cos|tan|log|ln)\b|"
@@ -957,6 +963,25 @@ def ocr_image(png_bytes: bytes) -> str:
         except Exception as exc:  # noqa: BLE001
             errors.append(str(exc))
             logger.warning("OCR attempt %s failed: %s", attempt + 1, exc)
+
+    if not candidates:
+        try:
+            emergency = _compact_ocr_image(png_bytes, max_longest=896) or compact
+            candidate = _request_ocr(
+                client,
+                prompt=_OCR_EMERGENCY_PROMPT,
+                image_bytes=emergency,
+                base_url=base_url,
+            )
+            if _usable_ocr_text(candidate):
+                candidates.append(candidate)
+                math_mode = _looks_math_heavy(candidate)
+                logger.info("OCR recovered with low-context emergency pass")
+            else:
+                errors.append(candidate or "empty emergency response")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+            logger.warning("OCR emergency pass failed: %s", exc)
 
     if candidates and math_mode:
         best = _choose_math_candidate(candidates)

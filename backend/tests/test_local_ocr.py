@@ -212,7 +212,50 @@ def test_local_ocr_raises_only_after_all_retries(monkeypatch):
     with pytest.raises(RuntimeError, match="нескольких попыток"):
         ocr_module.ocr_image(b"raw")
 
-    assert len(calls) == 3
+    assert len(calls) == 4
+
+
+def test_local_ocr_recovers_with_low_context_emergency_pass(monkeypatch):
+    calls = []
+    compact_sizes = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) <= 3:
+                raise RuntimeError("request exceeds context size")
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="int_[0]^[5*pi](cos(x)+x^2) dx"
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    def fake_compact(_data, *, max_longest=1280):
+        compact_sizes.append(max_longest)
+        return f"compact-{max_longest}".encode()
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_compact_ocr_image", fake_compact)
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda data: data)
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
+    monkeypatch.setattr(ocr_module, "_math_zone_crops", lambda _data: [])
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert result == "int_[0]^[5*pi](cos(x)+x^2) dx"
+    assert len(calls) >= 4
+    assert 896 in compact_sizes
 
 
 def test_math_ocr_reconciles_integral_instead_of_accepting_first_plausible_read(monkeypatch):

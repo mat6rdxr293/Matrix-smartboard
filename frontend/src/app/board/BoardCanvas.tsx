@@ -10,7 +10,7 @@ import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
 import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -1698,7 +1698,11 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const selectedIndices = lassoSelection.strokeIndices.length
       ? lassoSelection.strokeIndices
       : undefined;
-    const clusters = clusterOcrStrokes(strokesRef.current, selectedIndices);
+    const ocrSourceStrokes =
+      !selectedIndices && options?.multipleTasks
+        ? recentUserOcrStrokes(strokesRef.current)
+        : strokesRef.current;
+    const clusters = clusterOcrStrokes(ocrSourceStrokes, selectedIndices);
     const targetClusters = selectedIndices
       ? (clusters[0] ? [clusters[0]] : [])
       : options?.multipleTasks

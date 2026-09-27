@@ -319,6 +319,42 @@ test("with two equations full solution OCR sends both tasks to AI", async ({ pag
 });
 
 
+test("full solution scans only new student work after the latest AI answer", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const oldTask = [
+    taskStroke(60, 80, 120, 145),
+    taskStroke(125, 110, 185, 110),
+    taskStroke(195, 80, 195, 150),
+  ];
+  const oldAiAnswer = [
+    { ...taskStroke(60, 190, 130, 240), source: "ai" as const, color: "#4DA3FF" },
+    { ...taskStroke(140, 215, 210, 215), source: "ai" as const, color: "#4DA3FF" },
+  ];
+  const newTask = [
+    taskStroke(520, 420, 590, 500),
+    taskStroke(600, 455, 690, 455),
+    taskStroke(700, 420, 780, 500),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: [...oldTask, ...oldAiAnswer, ...newTask],
+    ocrResponses: [
+      "int_[0]^[5*pi](cos(x)+x^2) dx",
+      "x^2 - 4 = 0",
+    ],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0].trim()).toBe("int_[0]^[5*pi](cos(x)+x^2) dx");
+  expect(aiProblems[0]).not.toContain("x^2 - 4 = 0");
+});
+
+
 test("full solution splits two close tasks returned by one OCR crop", async ({ page }) => {
   const operations: CapturedOp[] = [];
   const aiProblems: string[] = [];

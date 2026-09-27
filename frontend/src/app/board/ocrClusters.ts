@@ -7,6 +7,26 @@ export type OcrStrokeCluster = {
   bounds: BoardRect;
 };
 
+export function recentUserOcrStrokes(strokes: Stroke[]): Stroke[] {
+  let lastAiIndex = -1;
+  for (let index = strokes.length - 1; index >= 0; index -= 1) {
+    if (strokes[index]?.source === "ai") {
+      lastAiIndex = index;
+      break;
+    }
+  }
+
+  const userDrawStrokes = strokes.filter(
+    (stroke) => stroke.mode === "draw" && stroke.source !== "ai",
+  );
+  if (lastAiIndex < 0) return userDrawStrokes;
+
+  const recent = strokes.slice(lastAiIndex + 1).filter(
+    (stroke) => stroke.mode === "draw" && stroke.source !== "ai",
+  );
+  return recent.length ? recent : userDrawStrokes;
+}
+
 const isWorkedSolutionLine = (line: string) =>
   /^\s*(?:D|Δ|Д|д)\s*=/.test(line) ||
   /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line);

@@ -64,7 +64,24 @@ export async function callOcr(blob: Blob) {
     body: form,
   });
   if (!res.ok) {
-    throw new Error("OCR request failed");
+    const clone = res.clone();
+    let detail = `OCR request failed (${res.status})`;
+    try {
+      const payload = await clone.json() as { detail?: unknown; error?: { message?: unknown } };
+      if (payload?.detail) {
+        detail = String(payload.detail);
+      } else if (payload?.error?.message) {
+        detail = String(payload.error.message);
+      }
+    } catch {
+      try {
+        const text = await res.text();
+        if (text.trim()) detail = text.trim();
+      } catch {
+        // Keep the status-based fallback.
+      }
+    }
+    throw new Error(detail);
   }
   return (await res.json()) as { text: string };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Stroke } from "./boardEngine";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, sanitizeMultiTaskOcrTexts } from "./ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts } from "./ocrClusters";
 
 const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): Stroke => ({
   points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
@@ -8,6 +8,27 @@ const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): 
   width: 4,
   mode: "draw",
   source,
+});
+
+describe("recentUserOcrStrokes", () => {
+  it("only returns new student work written after the latest AI answer", () => {
+    const oldTask = stroke(20, 20, 80, 80);
+    const aiAnswer = stroke(100, 20, 180, 80, "ai");
+    const newTaskA = stroke(20, 220, 100, 280);
+    const newTaskB = stroke(120, 220, 200, 280);
+
+    expect(recentUserOcrStrokes([oldTask, aiAnswer, newTaskA, newTaskB])).toEqual([
+      newTaskA,
+      newTaskB,
+    ]);
+  });
+
+  it("falls back to student work when nothing new was written after AI", () => {
+    const task = stroke(20, 20, 80, 80);
+    const aiAnswer = stroke(100, 20, 180, 80, "ai");
+
+    expect(recentUserOcrStrokes([task, aiAnswer])).toEqual([task]);
+  });
 });
 
 describe("clusterOcrStrokes", () => {
