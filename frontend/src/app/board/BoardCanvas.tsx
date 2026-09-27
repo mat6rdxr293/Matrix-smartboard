@@ -4,10 +4,13 @@ import { cn } from "@/lib/utils";
 import { callOcr } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
-import type { GraphElement } from "@/app/board/boardDocument";
+import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
 import { getSelectionBounds, selectGraphIds, selectStrokeIndices, translateBounds, translateStroke, type LassoBounds } from "@/app/board/lasso";
 import GraphElementView from "@/app/board/GraphElementView";
+import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
+import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
+import { chooseActiveOcrCluster, clusterOcrStrokes } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -62,7 +65,19 @@ const BG_EXTRA = [
 ];
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
-export type BoardCanvasHandle = { recognize: () => Promise<string> };
+export type BoardCanvasHandle = {
+  recognize: () => Promise<string>;
+  getLastOcrTargetColor: () => string | null;
+  allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
+  animateAiStrokes: (
+    strokes: Stroke[],
+    shouldCancel?: () => boolean,
+    lowMotion?: boolean,
+  ) => Promise<Stroke[]>;
+};
+
+const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
+const NOOP_SOLUTION_CHANGE = (_next: AiSolutionBlock[]) => undefined;
 
 const BoardCanvas = forwardRef(function BoardCanvas({
   onOcrText,
@@ -74,6 +89,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   onChangeStrokes,
   initialGraphs,
   onChangeGraphs,
+  initialSolutions = EMPTY_SOLUTIONS,
+  onChangeSolutions = NOOP_SOLUTION_CHANGE,
+  onCancelAiSolution,
   canUndo,
   canRedo,
   initialPenColor,
@@ -98,6 +116,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   onChangeStrokes: (next: Stroke[]) => void;
   initialGraphs: GraphElement[];
   onChangeGraphs: (next: GraphElement[]) => void;
+  initialSolutions?: AiSolutionBlock[];
+  onChangeSolutions?: (next: AiSolutionBlock[]) => void;
+  onCancelAiSolution?: (id: string) => void;
   canUndo: boolean;
   canRedo: boolean;
   initialPenColor: string;
@@ -122,8 +143,11 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const drawFrameRef = useRef<() => void>(() => undefined);
   const workerEnabledRef = useRef(false);
   const strokesRef = useRef<Stroke[]>(initialStrokes);
+  const aiStrokeAnimationActiveRef = useRef(false);
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
   const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
+  const solutionsRef = useRef<AiSolutionBlock[]>(initialSolutions);
+  const [solutions, setSolutions] = useState<AiSolutionBlock[]>(initialSolutions);
   const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,6 +193,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const toolbarPinnedRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
+  const lastOcrTargetBoundsRef = useRef<BoardRect | null>(null);
+  const lastOcrTargetColorRef = useRef<string | null>(null);
   const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const lineToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const eraserToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1274,6 +1300,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, []);
 
   useEffect(() => {
+    if (aiStrokeAnimationActiveRef.current) return;
     strokesRef.current = [...initialStrokes];
     setShowClearConfirm(false);
     setClearSlideValue(0);
@@ -1289,12 +1316,254 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, [initialGraphs, selectedGraphId]);
 
   useEffect(() => {
+    solutionsRef.current = initialSolutions;
+    setSolutions(initialSolutions);
+  }, [initialSolutions]);
+
+  useEffect(() => {
     setColor(initialPenColor);
   }, [initialPenColor]);
 
   useEffect(() => {
     setBg(initialBgColor);
   }, [initialBgColor]);
+
+  const syncSolutionsToParent = (next: AiSolutionBlock[]) => {
+    solutionsRef.current = next;
+    setSolutions(next);
+    onChangeSolutions(next);
+  };
+
+  const commitSolutionUpdate = (before: AiSolutionBlock, after: AiSolutionBlock) => {
+    if (before.id !== after.id) return;
+    onReplayOp?.({ op: "solution_update", before, after, ts: Date.now() });
+    syncSolutionsToParent(
+      solutionsRef.current.map((solution) => solution.id === after.id ? after : solution)
+    );
+  };
+
+  const deleteSolution = (solution: AiSolutionBlock) => {
+    onReplayOp?.({ op: "solution_delete", solution, ts: Date.now() });
+    syncSolutionsToParent(solutionsRef.current.filter((item) => item.id !== solution.id));
+  };
+
+  const occupiedBoardRects = (): BoardRect[] => {
+    const rects: BoardRect[] = [];
+    for (const graph of graphsRef.current) {
+      rects.push({
+        left: graph.x,
+        top: graph.y,
+        right: graph.x + graph.width,
+        bottom: graph.y + graph.height,
+      });
+    }
+    for (const solution of solutionsRef.current) {
+      const estimatedHeight = Math.max(
+        solution.minHeight,
+        96 + solution.steps.reduce((sum, step) => sum + Math.max(34, Math.ceil(step.text.length / 46) * 24), 0),
+      );
+      rects.push({
+        left: solution.x,
+        top: solution.y,
+        right: solution.x + solution.width,
+        bottom: solution.y + estimatedHeight,
+      });
+    }
+    for (const stroke of strokesRef.current) {
+      if (!stroke.points.length) continue;
+      let left = Number.POSITIVE_INFINITY;
+      let top = Number.POSITIVE_INFINITY;
+      let right = Number.NEGATIVE_INFINITY;
+      let bottom = Number.NEGATIVE_INFINITY;
+      const half = Math.max(3, stroke.width / 2);
+      for (const point of stroke.points) {
+        left = Math.min(left, point.x - half);
+        top = Math.min(top, point.y - half);
+        right = Math.max(right, point.x + half);
+        bottom = Math.max(bottom, point.y + half);
+      }
+      if ([left, top, right, bottom].every(Number.isFinite)) rects.push({ left, top, right, bottom });
+    }
+    return rects;
+  };
+
+  const allocateSolutionPlacement = (requestedWidth = 500, requestedHeight = 320) => {
+    const scale = Math.max(zoomRef.current, 0.01);
+    const currentPan = panRef.current;
+    const viewport: BoardRect = {
+      left: -currentPan.x / scale,
+      top: -currentPan.y / scale,
+      right: (widthPx - currentPan.x) / scale,
+      bottom: (heightPx - currentPan.y) / scale,
+    };
+    const occupied = occupiedBoardRects();
+    const nearTarget = lastOcrTargetBoundsRef.current
+      ? findFreeBoardSpaceNearTarget(
+          viewport,
+          occupied,
+          lastOcrTargetBoundsRef.current,
+          requestedWidth,
+          requestedHeight,
+          38,
+          16,
+        )
+      : null;
+    const placement = nearTarget ?? findFreeBoardSpace(
+      viewport,
+      occupied,
+      requestedWidth,
+      requestedHeight,
+      24,
+    );
+    if (!placement.insideViewport) {
+      const targetScreenX = widthPx / 2 - (placement.x + placement.width / 2) * scale;
+      const targetScreenY = heightPx / 2 - (placement.y + placement.height / 2) * scale;
+      const nextPan = clampPan({ x: targetScreenX, y: targetScreenY });
+      panRef.current = nextPan;
+      setPan(nextPan);
+      scheduleRender();
+    }
+    return {
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      minHeight: placement.height,
+    };
+  };
+
+  const animateAiStrokes = async (
+    incoming: Stroke[],
+    shouldCancel?: () => boolean,
+    lowMotion = false,
+  ) => {
+    const sources = incoming.filter((stroke) => stroke.points.length >= 2);
+    if (!sources.length) return [] as Stroke[];
+
+    const cloneStroke = (stroke: Stroke): Stroke => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ ...point })),
+    });
+
+    if (lowMotion) {
+      const committed = sources.map(cloneStroke);
+      strokesRef.current.push(...committed.map(cloneStroke));
+      scheduleRender();
+      return committed;
+    }
+
+    const densify = (points: Stroke["points"], maxSegment = 4.5) => {
+      const result: Stroke["points"] = [{ ...points[0] }];
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const distance = Math.hypot(end.x - start.x, end.y - start.y);
+        const segments = Math.max(1, Math.ceil(distance / maxSegment));
+        for (let part = 1; part <= segments; part += 1) {
+          const ratio = part / segments;
+          result.push({
+            x: start.x + (end.x - start.x) * ratio,
+            y: start.y + (end.y - start.y) * ratio,
+          });
+        }
+      }
+      return result;
+    };
+
+    const paths = sources.map((source) => ({
+      source,
+      points: densify(source.points),
+    }));
+    const totalUnits = paths.reduce(
+      (sum, path) => sum + Math.max(1, path.points.length - 1),
+      0,
+    );
+    // Keep the visible writing gesture, but cap long solutions so they do not
+    // take tens of seconds. Typical school solutions finish in ~2-4.5 seconds.
+    const targetDurationMs = Math.min(3200, Math.max(1200, sources.length * 3.2));
+    const targetFrames = Math.max(1, Math.round(targetDurationMs / 16.67));
+    const unitsPerFrame = Math.max(1, Math.ceil(totalUnits / targetFrames));
+
+    const committed: Stroke[] = [];
+    let pathIndex = 0;
+    let pointIndex = 1;
+    let preview: Stroke | null = null;
+    aiStrokeAnimationActiveRef.current = true;
+
+    try {
+      await new Promise<void>((resolve) => {
+        const frame = () => {
+          if (shouldCancel?.()) {
+            resolve();
+            return;
+          }
+
+          // If the tab gets backgrounded, finish immediately instead of letting
+          // browser timer throttling leave a half-written solution.
+          let budget = document.hidden ? totalUnits : unitsPerFrame;
+
+          while (budget > 0 && pathIndex < paths.length) {
+            const current = paths[pathIndex];
+            if (!preview) {
+              preview = {
+                ...current.source,
+                points: [{ ...current.points[0] }],
+              };
+              strokesRef.current.push(preview);
+              pointIndex = 1;
+            }
+
+            const remaining = current.points.length - pointIndex;
+            const take = Math.max(0, Math.min(remaining, budget));
+            if (take > 0) {
+              preview.points.push(
+                ...current.points
+                  .slice(pointIndex, pointIndex + take)
+                  .map((point) => ({ ...point })),
+              );
+              pointIndex += take;
+              budget -= take;
+            }
+
+            if (pointIndex >= current.points.length) {
+              preview.points = current.source.points.map((point) => ({ ...point }));
+              committed.push(cloneStroke(current.source));
+              preview = null;
+              pathIndex += 1;
+              pointIndex = 1;
+              // A pen lift still exists visually because the next path begins
+              // in sequence, but we no longer wait a timer for every tiny glyph.
+            } else if (take === 0) {
+              break;
+            }
+          }
+
+          scheduleRender();
+
+          if (pathIndex >= paths.length || shouldCancel?.()) {
+            resolve();
+            return;
+          }
+          window.requestAnimationFrame(frame);
+        };
+
+        window.requestAnimationFrame(frame);
+      });
+
+      if (shouldCancel?.() && preview && preview.points.length >= 2) {
+        // Never leave a transient preview stroke in a shape that cannot be
+        // represented by the persisted command.
+        const current = paths[Math.min(pathIndex, paths.length - 1)];
+        if (current) {
+          preview.points = current.source.points.map((point) => ({ ...point }));
+          committed.push(cloneStroke(current.source));
+        }
+      }
+      scheduleRender();
+      return committed;
+    } finally {
+      aiStrokeAnimationActiveRef.current = false;
+    }
+  };
 
   const handleUndo = () => {
     if (!canUndo) return;
@@ -1307,34 +1576,44 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const handleClear = () => {
-    if (strokesRef.current.length === 0 && graphsRef.current.length === 0) return;
+    if (strokesRef.current.length === 0 && graphsRef.current.length === 0 && solutionsRef.current.length === 0) return;
     onReplayOp?.({ op: "clear", ts: Date.now() });
     strokesRef.current = [];
     syncGraphsToParent([]);
+    syncSolutionsToParent([]);
     setSelectedGraphId(null);
     scheduleRender();
     syncStrokesToParent([]);
   };
 
-  const handleSnapshot = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const url = canvas.toDataURL("image/png");
+  const handleSnapshot = async () => {
+    const board = areaRef.current;
+    if (!board) return;
+    const { default: html2canvas } = await import("html2canvas");
+    const snapshot = await html2canvas(board, {
+      backgroundColor: bg,
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      logging: false,
+    });
+    const url = snapshot.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
     a.download = "board.png";
     a.click();
   };
 
-  const renderOcrBlob = (): Promise<Blob | null> => {
+  const renderOcrBlob = (inputStrokes?: Stroke[]): Promise<Blob | null> => {
     const canvas = canvasRef.current;
     if (!canvas) return Promise.resolve(null);
-    const drawStrokesOnly = strokesRef.current.filter((s) => s.mode === "draw" && s.points.length > 0);
-    if (!drawStrokesOnly.length) {
-      return new Promise((resolve) => {
-        canvas.toBlob((blob) => resolve(blob), "image/png");
-      });
-    }
+    const source = inputStrokes ?? strokesRef.current;
+    const drawStrokesOnly = source.filter(
+      (stroke) =>
+        stroke.mode === "draw" &&
+        stroke.points.length > 0 &&
+        stroke.source !== "ai",
+    );
+    if (!drawStrokesOnly.length) return Promise.resolve(null);
 
     let minX = Number.POSITIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
@@ -1359,7 +1638,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const contentWidth = Math.max(1, Math.ceil(maxX - minX + padding * 2));
     const contentHeight = Math.max(1, Math.ceil(maxY - minY + padding * 2));
     const maxEdge = 4096;
-    const scale = Math.min(1, maxEdge / Math.max(contentWidth, contentHeight));
+    const scale = Math.min(2.2, maxEdge / Math.max(contentWidth, contentHeight));
     const outWidth = Math.max(1, Math.round(contentWidth * scale));
     const outHeight = Math.max(1, Math.round(contentHeight * scale));
 
@@ -1369,7 +1648,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const ctx = exportCanvas.getContext("2d");
     if (!ctx) return Promise.resolve(null);
 
-    drawStrokes(ctx, strokesRef.current, {
+    const normalizedStrokes = drawStrokesOnly.map((stroke) => ({
+      ...stroke,
+      color: "#111111",
+      width: Math.max(2.4, stroke.width * 1.2),
+    }));
+
+    drawStrokes(ctx, normalizedStrokes, {
       grid: false,
       width: outWidth,
       height: outHeight,
@@ -1380,6 +1665,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       },
       ratio: 1,
     });
+
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outWidth, outHeight);
+    ctx.restore();
 
     return new Promise((resolve) => {
       exportCanvas.toBlob((blob) => resolve(blob), "image/png");
@@ -1392,18 +1683,43 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         .filter((expression) => expression.visible && expression.expression.trim())
         .map((expression) => `График: y = ${expression.expression.trim()}`)
     );
-    const hasInk = strokesRef.current.some((stroke) => stroke.mode === "draw" && stroke.points.length > 0);
 
-    if (!hasInk && graphLines.length > 0) {
+    const selectedIndices = lassoSelection.strokeIndices.length
+      ? lassoSelection.strokeIndices
+      : undefined;
+    const clusters = clusterOcrStrokes(strokesRef.current, selectedIndices);
+    const activeCluster = selectedIndices
+      ? (clusters[0] ?? null)
+      : chooseActiveOcrCluster(clusters);
+    lastOcrTargetBoundsRef.current = activeCluster?.bounds ?? null;
+    if (activeCluster) {
+      const colorWeights = new Map<string, number>();
+      for (const stroke of activeCluster.strokes) {
+        let length = 0;
+        for (let index = 1; index < stroke.points.length; index += 1) {
+          const previous = stroke.points[index - 1];
+          const current = stroke.points[index];
+          length += Math.hypot(current.x - previous.x, current.y - previous.y);
+        }
+        colorWeights.set(stroke.color, (colorWeights.get(stroke.color) ?? 0) + Math.max(1, length));
+      }
+      lastOcrTargetColorRef.current =
+        [...colorWeights.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    } else {
+      lastOcrTargetColorRef.current = null;
+    }
+
+    if (!activeCluster && graphLines.length > 0) {
       const text = graphLines.join("\n");
       onOcrText?.(text);
       return text;
     }
+    if (!activeCluster) throw new Error(tl("ocr_not_available"));
     if (!ocrEnabled) throw new Error(tl("ocr_not_available"));
 
     setLoading(true);
     try {
-      const blob = await renderOcrBlob();
+      const blob = await renderOcrBlob(activeCluster.strokes);
       if (!blob) throw new Error(tl("ocr_not_available"));
       const res = await callOcr(blob);
       const text = [res.text.trim(), ...graphLines].filter(Boolean).join("\n").trim();
@@ -1419,7 +1735,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
   };
 
-  useImperativeHandle(ref, () => ({ recognize: handleOcr }));
+  useImperativeHandle(ref, () => ({
+    recognize: handleOcr,
+    getLastOcrTargetColor: () => lastOcrTargetColorRef.current,
+    allocateSolutionPlacement,
+    animateAiStrokes,
+  }));
 
   const schedulePenHide = () => {
     if (penTimerRef.current) window.clearTimeout(penTimerRef.current);
@@ -1494,6 +1815,16 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   onCommit={commitGraphUpdate}
                   onDelete={deleteGraph}
                   interactionDisabled={mode === "pan" || mode === "lasso"}
+                />
+              ))}
+              {solutions.map((solution) => (
+                <AiSolutionBlockView
+                  key={solution.id}
+                  solution={solution}
+                  zoom={zoom}
+                  onCommitChange={commitSolutionUpdate}
+                  onDelete={deleteSolution}
+                  onCancel={onCancelAiSolution}
                 />
               ))}
             </div>
@@ -2083,10 +2414,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           </button>
         </div>
 
-        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
+        <Button data-testid="board-undo" variant="ghost" size="sm" className="board-utility-button" onClick={handleUndo} disabled={!canUndo} aria-label={tl("undo")} title={tl("undo")}>
           <RotateCcw size={25} />
         </Button>
-        <Button variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
+        <Button data-testid="board-redo" variant="ghost" size="sm" className="board-utility-button" onClick={handleRedo} disabled={!canRedo} aria-label={tl("redo")} title={tl("redo")}>
           <RotateCw size={25} />
         </Button>
         <div ref={clearToolbarAnchorRef} className="relative flex items-center">
@@ -2143,7 +2474,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             </Button>
           )}
           {onToggleAssistant && (
-            <Button variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
+            <Button data-testid="open-ai-assistant" variant={assistantOpen ? "accent" : "outline"} size="sm" className="board-utility-button" onClick={onToggleAssistant} aria-label={tl("ai_assistant")} title={tl("ai_assistant")}>
               <MessageSquare size={26} />
             </Button>
           )}

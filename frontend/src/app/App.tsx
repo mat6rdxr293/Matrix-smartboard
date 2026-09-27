@@ -11,6 +11,8 @@ import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
+import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
+import { pickAiInkColor } from "@/app/board/aiInkColor";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
@@ -182,6 +184,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [lastLocalBackupAt, setLastLocalBackupAt] = useState<number | null>(null);
   const [siteBackground, setSiteBackground] = useState<SiteBackground>(DEFAULT_SITE_BACKGROUND);
   const continueTokenRef = useRef(0);
+  const solutionRunRef = useRef(0);
+  const activeSolutionTokenRef = useRef<{ id: string; token: number } | null>(null);
   const storageReadyRef = useRef(false);
   const autoSavingRef = useRef(false);
   const latestStorageRef = useRef<{
@@ -307,6 +311,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setBoardHistory((previous) => ({
       ...previous,
       document: { ...previous.document, graphs },
+    }));
+  };
+
+  const syncBoardSolutions = (solutions: BoardHistory["document"]["solutions"]) => {
+    setBoardHistory((previous) => ({
+      ...previous,
+      document: { ...previous.document, solutions },
     }));
   };
 
@@ -781,7 +792,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   const extractCheckPercent = (text: string): number | null => {
     const normalized = text.replace(",", ".");
-    const strict = /(?:^|\n)\s*\**\s*выполнено\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
+    const strict = /(?:^|\n)\s*\**\s*(?:выполнено|орындалды|completed)\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
     const strictMatch = normalized.match(strict);
     if (!strictMatch) return null;
     const value = Number(strictMatch[1]);
@@ -795,81 +806,188 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return boardCanvasRef.current.recognize();
   };
 
-  const handleRecognizedAi = (mode: AiMode, recognizedText: string) => {
-    void (async () => {
-      const boardText = recognizedText.trim();
-      if (!boardText || assistantLoading) return;
-      setAssistantLoading(true);
-      setAiBoardContext(boardText);
-      if (mode !== "hint") setTimerRunning(false);
-      appendStudentAttempt(boardText);
+  const cancelAiSolution = (solutionId: string) => {
+    const active = activeSolutionTokenRef.current;
+    if (!active || active.id !== solutionId) return;
+    solutionRunRef.current += 1;
+    activeSolutionTokenRef.current = null;
+    const current = boardHistory.document.solutions.find((solution) => solution.id === solutionId);
+    if (current && (current.status === "thinking" || current.status === "streaming")) {
+      onBoardReplayOp({
+        op: "solution_update",
+        before: current,
+        after: { ...current, status: "done" },
+        ts: Date.now(),
+      });
+    }
+    setAssistantLoading(false);
+  };
 
-      continueTokenRef.current += 1;
-      const token = continueTokenRef.current;
-      const id = `${Date.now()}-${Math.random()}`;
+  const handleBoardAi = async (mode: AiMode, recognizedText: string) => {
+    const boardText = recognizedText.trim();
+    if (!boardText || assistantLoading) return;
+
+    setAssistantLoading(true);
+    setAiBoardContext(boardText);
+    if (mode !== "hint") setTimerRunning(false);
+    setAssistantOpen(false);
+
+    const token = ++solutionRunRef.current;
+    const runId = crypto.randomUUID();
+    activeSolutionTokenRef.current = { id: runId, token };
+
+    const isCancelled = () =>
+      solutionRunRef.current !== token ||
+      activeSolutionTokenRef.current?.id !== runId;
+
+    try {
+      const res = await callAi(
+        mode,
+        boardText,
+        undefined,
+        undefined,
+        false,
+        subjectName,
+        lesson.id,
+        crypto.randomUUID(),
+        true,
+        true,
+        locale,
+      );
+      if (isCancelled()) return;
+
+      const rawSteps = extractSafeHandwritingSteps(res.steps, res.text, locale);
+      if (!rawSteps.length) {
+        throw new Error("AI вернул поврежденный structured response");
+      }
+
+      const percent = mode === "check" ? extractCheckPercent(res.text) : null;
+      const hasWarning = rawSteps.some((step) => step.kind === "warning");
+      const checkCorrect =
+        mode === "check"
+          ? !hasWarning && (percent === null || percent >= 95)
+          : undefined;
+
+      const studentColor =
+        boardCanvasRef.current?.getLastOcrTargetColor() ?? boardPenColor;
+      const aiColor = pickAiInkColor({
+        mode,
+        studentColor,
+        boardBgColor,
+        checkCorrect,
+      });
+
+      const title =
+        mode === "hint"
+          ? locale === "kk"
+            ? "Көмек:"
+            : locale === "en"
+              ? "Hint:"
+              : "Подсказка:"
+          : mode === "check"
+            ? locale === "kk"
+              ? "Тексеру:"
+              : locale === "en"
+                ? "Check:"
+                : "Проверка:"
+            : "";
+
+      const boardSteps = title
+        ? [{ text: title, kind: "text" as const }, ...rawSteps]
+        : rawSteps;
+
+      const width = mode === "hint" ? 430 : mode === "check" ? 500 : 560;
+      const fontSize =
+        mode === "solution"
+          ? ultraLite
+            ? 27
+            : 29
+          : ultraLite
+            ? 23
+            : 25;
+      const strokeWidth = mode === "solution"
+        ? ultraLite
+          ? 2.4
+          : 2.15
+        : ultraLite
+          ? 2.2
+          : 1.95;
+      const lineGap = mode === "solution" ? 11 : 9;
+      const stepGap = mode === "solution" ? 16 : mode === "check" ? 12 : 10;
+
+      const draft = solutionStepsToHandwritingStrokes(boardSteps, {
+        x: 12,
+        y: 10,
+        maxWidth: width - 24,
+        color: aiColor,
+        strokeWidth,
+        fontSize,
+        lineGap,
+        stepGap,
+      });
+      if (!draft.strokes.length) {
+        throw new Error("Не удалось построить рукописные штрихи");
+      }
+
+      const requiredHeight = Math.max(
+        mode === "hint" ? 130 : 160,
+        Math.ceil(draft.height + 24),
+      );
+      const placement = boardCanvasRef.current?.allocateSolutionPlacement(
+        width,
+        requiredHeight,
+      ) ?? {
+        x: 48,
+        y: 48,
+        width,
+        minHeight: requiredHeight,
+      };
+
+      const generatedStrokes = draft.strokes.map((stroke) => ({
+        ...stroke,
+        points: stroke.points.map((point) => ({
+          x: point.x + placement.x,
+          y: point.y + placement.y,
+        })),
+      }));
+
+      const written = await boardCanvasRef.current?.animateAiStrokes(
+        generatedStrokes,
+        isCancelled,
+        ultraLite,
+      );
+      if (!written?.length) return;
+
+      onBoardReplayOp({
+        op: "stroke_batch_add",
+        strokes: written,
+        ts: Date.now(),
+      });
+
+      if (mode === "check" && percent !== null) {
+        showScoreOverlay(percent);
+      }
+    } catch (err) {
+      if (isCancelled()) return;
+      const message = err instanceof Error ? err.message : tl("unknown_error");
       addMessage({
-        id,
+        id: `${Date.now()}-${mode}-error`,
         role: "assistant",
-        text: tl("thinking"),
+        text: `${tl("error")}: ${message}`,
         mode,
         timestamp: nowLabel(),
       });
-
-      try {
-        let fullText = "";
-        const res = await callAi(
-          mode,
-          boardText,
-          undefined,
-          undefined,
-          false,
-          subjectName,
-          lesson.id,
-          crypto.randomUUID(),
-          true,
-        );
-        fullText = res.text || "";
-        await typeText(
-          fullText,
-          (partial) => updateMessage(id, partial),
-          () => continueTokenRef.current !== token,
-        );
-
-        let guard = 0;
-        while (guard < 2 && shouldContinue(fullText) && continueTokenRef.current === token) {
-          guard += 1;
-          const continuation = await callAi(
-            mode,
-            boardText,
-            undefined,
-            fullText,
-            true,
-            subjectName,
-            lesson.id,
-            crypto.randomUUID(),
-            true,
-          );
-          const next = continuation.text || "";
-          if (!next.trim()) break;
-          await typeText(
-            next,
-            (partial) => updateMessage(id, `${fullText}\n${partial}`),
-            () => continueTokenRef.current !== token,
-          );
-          fullText = `${fullText}\n${next}`;
-        }
-
-        if (mode === "check") {
-          const percent = extractCheckPercent(fullText);
-          if (percent !== null) showScoreOverlay(percent);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : tl("unknown_error");
-        updateMessage(id, `${tl("error")}: ${message}`);
-      } finally {
-        setAssistantLoading(false);
+      setAssistantOpen(true);
+    } finally {
+      if (activeSolutionTokenRef.current?.id === runId) {
+        activeSolutionTokenRef.current = null;
       }
-    })();
+      if (solutionRunRef.current === token) setAssistantLoading(false);
+    }
+  };
+
+  const handleRecognizedAi = (mode: AiMode, recognizedText: string) => {
+    void handleBoardAi(mode, recognizedText);
   };
 
   const handleContinue = async () => {
@@ -900,6 +1018,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         lesson.id,
         crypto.randomUUID(),
         true,
+        undefined,
+        locale,
       );
       await typeText(res.text, (partial) => updateMessage(id, partial), () => continueTokenRef.current !== token);
     } catch (err) {
@@ -1285,6 +1405,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       onChangeStrokes={syncBoardStrokes}
                       initialGraphs={boardHistory.document.graphs}
                       onChangeGraphs={syncBoardGraphs}
+                      initialSolutions={boardHistory.document.solutions}
+                      onChangeSolutions={syncBoardSolutions}
+                      onCancelAiSolution={cancelAiSolution}
                       canUndo={boardHistory.undoStack.length > 0}
                       canRedo={boardHistory.redoStack.length > 0}
                       initialPenColor={boardPenColor}
@@ -1412,6 +1535,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         onChangeStrokes={syncBoardStrokes}
                         initialGraphs={boardHistory.document.graphs}
                         onChangeGraphs={syncBoardGraphs}
+                        initialSolutions={boardHistory.document.solutions}
+                        onChangeSolutions={syncBoardSolutions}
+                        onCancelAiSolution={cancelAiSolution}
                         canUndo={boardHistory.undoStack.length > 0}
                         canRedo={boardHistory.redoStack.length > 0}
                         initialPenColor={boardPenColor}

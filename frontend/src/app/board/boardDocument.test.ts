@@ -94,3 +94,74 @@ describe("boardDocument", () => {
     expect(state.document.graphs.map((item) => item.id)).toEqual(["g1", "g3"]);
   });
 });
+
+it("replays AI solution add/update and undo/redo", () => {
+  const before = {
+    id: "s1",
+    x: 600,
+    y: 80,
+    width: 500,
+    minHeight: 320,
+    steps: [],
+    status: "thinking" as const,
+    source: "ai" as const,
+    createdAt: 1,
+  };
+  const after = {
+    ...before,
+    steps: [{ id: "step-1", text: "$$x=2$$", kind: "result" as const }],
+    status: "done" as const,
+  };
+  const state = replayBoardOperations(createBoardHistory(), [
+    { op: "solution_add", solution: before },
+    { op: "solution_update", before, after },
+    { op: "undo" },
+    { op: "redo" },
+  ]);
+  expect(state.document.solutions).toEqual([after]);
+});
+
+it("removes a generated AI solution with one undo after streamed updates", () => {
+  const added = {
+    id: "s-stream",
+    x: 500,
+    y: 100,
+    width: 500,
+    minHeight: 320,
+    steps: [],
+    status: "thinking" as const,
+    source: "ai" as const,
+    createdAt: 1,
+  };
+  const streamed = {
+    ...added,
+    status: "streaming" as const,
+    steps: [{ id: "step-1", text: "Шаг", kind: "text" as const }],
+  };
+  const done = { ...streamed, status: "done" as const };
+  const state = replayBoardOperations(createBoardHistory(), [
+    { op: "solution_add", solution: added },
+    { op: "solution_update", before: added, after: streamed },
+    { op: "solution_update", before: streamed, after: done },
+    { op: "undo" },
+  ]);
+  expect(state.document.solutions).toEqual([]);
+});
+
+it("treats an AI handwriting batch as one undoable command", () => {
+  const strokes = [
+    { points: [{ x: 10, y: 10 }, { x: 20, y: 20 }], color: "#fff", width: 2, mode: "draw" as const },
+    { points: [{ x: 30, y: 10 }, { x: 40, y: 20 }], color: "#fff", width: 2, mode: "draw" as const },
+  ];
+  let state = replayBoardOperations(createBoardHistory(), [
+    { op: "stroke_batch_add", strokes },
+  ]);
+  expect(state.document.strokes).toHaveLength(2);
+  expect(state.document.strokes.every((stroke) => stroke.source === "ai")).toBe(true);
+
+  state = replayBoardOperations(state, [{ op: "undo" }]);
+  expect(state.document.strokes).toHaveLength(0);
+
+  state = replayBoardOperations(state, [{ op: "redo" }]);
+  expect(state.document.strokes).toHaveLength(2);
+});

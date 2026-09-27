@@ -10,6 +10,8 @@ export async function callAi(
   lessonId?: string,
   clientMessageId?: string,
   boardContext?: boolean,
+  boardOutput?: boolean,
+  responseLocale?: "ru" | "kk" | "en",
 ) {
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -24,6 +26,8 @@ export async function callAi(
       lesson_id: lessonId || null,
       client_message_id: clientMessageId || null,
       board_context: !!boardContext,
+      board_output: !!boardOutput,
+      response_locale: responseLocale || null,
     }),
   });
   if (!res.ok) {
@@ -41,7 +45,10 @@ export async function callAi(
     }
     throw new Error(detail);
   }
-  return (await res.json()) as { text: string };
+  return (await res.json()) as {
+    text: string;
+    steps?: Array<{ text: string; kind: "text" | "math" | "result" | "warning" }> | null;
+  };
 }
 
 export async function callOcr(blob: Blob) {

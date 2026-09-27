@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .ai import generate_ai_response
+from .ai import generate_ai_response, generate_board_response
 from .ocr import ocr_image
 from .polynomial import candidates, divide, eval_poly, horner, horner_table, normalize
 from .ratelimit import RateLimiter
@@ -126,10 +126,13 @@ class AiRequest(BaseModel):
     lesson_id: Optional[str] = None
     client_message_id: Optional[str] = None
     board_context: bool = False
+    board_output: bool = False
+    response_locale: Optional[str] = Field(default=None, pattern="^(ru|kk|en)$")
 
 
 class AiResponse(BaseModel):
     text: str
+    steps: Optional[list[dict[str, str]]] = None
 
 
 class PolyRequest(BaseModel):
@@ -259,7 +262,7 @@ def _is_valid_stroke(stroke: object) -> bool:
     if not isinstance(stroke, dict):
         return False
     points = stroke.get("points")
-    if not isinstance(points, list) or len(points) < 2 or len(points) > 5000:
+    if not isinstance(points, list) or len(points) < 1 or len(points) > 5000:
         return False
     for p in points:
         if not isinstance(p, dict):
@@ -565,15 +568,26 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
             mode=payload.mode,
         )
     try:
-        text = generate_ai_response(
-            payload.mode,
-            payload.problem,
-            payload.student_attempt,
-            payload.assistant_context,
-            payload.continue_from,
-            payload.subject,
-            payload.board_context,
-        )
+        steps = None
+        if payload.board_output and payload.mode in {"hint", "check", "solution"}:
+            text, steps = generate_board_response(
+                payload.mode,
+                payload.problem,
+                subject=payload.subject,
+                board_context=payload.board_context,
+                response_locale=payload.response_locale or "ru",
+            )
+        else:
+            text = generate_ai_response(
+                payload.mode,
+                payload.problem,
+                payload.student_attempt,
+                payload.assistant_context,
+                payload.continue_from,
+                payload.subject,
+                payload.board_context,
+                payload.response_locale or "ru",
+            )
         async with ai_history_lock:
             _append_ai_history(
                 {
@@ -599,7 +613,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 text=text,
                 mode=payload.mode,
             )
-        return AiResponse(text=text)
+        return AiResponse(text=text, steps=steps)
     except Exception as exc:  # noqa: BLE001
         async with ai_history_lock:
             _append_ai_history(

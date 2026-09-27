@@ -36,3 +36,5 @@ backend/app/data/subjects/*/board_replay.ndjson
 
 # Logs
 *.log
+frontend/test-results/
+frontend/playwright-report/
