@@ -21,6 +21,7 @@ import json
 import re
 import shutil
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pymupdf
@@ -93,18 +94,39 @@ def ocr_page(page):
     return pytesseract.image_to_string(img, lang=OCR_LANGS)
 
 
+def find_boilerplate(texts, min_share=0.5):
+    """Строки, повторяющиеся на большинстве страниц: водяные знаки сайтов, колонтитулы.
+
+    Пример: сканы с okulyk.kz, где единственный «текст» страницы — две строки водяного знака.
+    Без этой чистки такие страницы выглядят текстовыми и не попадают в OCR.
+    """
+    if len(texts) < 4:
+        return set()
+    counts = Counter(line.strip() for t in texts for line in set(t.splitlines()) if line.strip())
+    return {line for line, n in counts.items() if n >= min_share * len(texts)}
+
+
+def strip_lines(text, boilerplate):
+    return "\n".join(l for l in text.splitlines() if l.strip() not in boilerplate).strip()
+
+
 def process_pdf(pdf_path, src_root, subject, grade, out_path, do_ocr):
     doc = pymupdf.open(pdf_path)
     doc_id = f"{subject}_{grade}_{pdf_path.stem}"
     stats = {"pages": len(doc), "text": 0, "ocr": 0, "needs_ocr": 0}
+    raw = [normalize(page.get_text("text", sort=True)) for page in doc]
+    boilerplate = find_boilerplate(raw)
+    if boilerplate:
+        stats["boilerplate"] = sorted(boilerplate)
     tmp_path = out_path.with_suffix(".jsonl.part")  # недописанный файл не выглядит готовым
     with open(tmp_path, "w", encoding="utf-8") as f:
         for page in doc:
-            text = normalize(page.get_text("text", sort=True))
+            text = strip_lines(raw[page.number], boilerplate)
             reason = ocr_reason(text)
             method = "text" if reason is None else "none"
             if reason and do_ocr:
-                ocr_text = normalize(ocr_page(page))
+                # водяной знак нарисован и на картинке, поэтому OCR его тоже прочитает — чистим так же
+                ocr_text = strip_lines(normalize(ocr_page(page)), boilerplate)
                 if ocr_reason(ocr_text) is None:
                     text, method = ocr_text, "ocr"
             needs_ocr = reason is not None and method != "ocr"
@@ -167,6 +189,8 @@ def main():
             total[k] += st[k]
         print(f"{pdf.relative_to(src)}: {st['pages']} стр., текст {st['text']}, "
               f"OCR {st['ocr']}, требуют OCR {st['needs_ocr']} → {out_path.name}")
+        if st.get("boilerplate"):
+            print(f"  вырезаны повторяющиеся строки: {st['boilerplate']}")
 
     print(f"\nИтого: {total['pages']} стр., текст {total['text']}, OCR {total['ocr']}, "
           f"требуют OCR {total['needs_ocr']}")
