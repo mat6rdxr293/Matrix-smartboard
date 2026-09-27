@@ -103,11 +103,16 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\cdot/g, "·");
   text = text.replace(/\\div/g, "÷");
   text = text.replace(/\\neq/g, "≠");
+  text = text.replace(/\\approx/g, "≈");
+  text = text.replace(/\\simeq/g, "≃");
+  text = text.replace(/\\sim/g, "∼");
   text = text.replace(/\\leq?|\\le/g, "≤");
   text = text.replace(/\\geq?|\\ge/g, "≥");
   text = text.replace(/<=/g, "≤").replace(/>=/g, "≥");
   text = text.replace(/\\lt\b/g, "<").replace(/\\gt\b/g, ">");
   text = text.replace(/\\rightarrow|\\to/g, "→");
+  text = text.replace(/->/g, "→");
+  text = text.replace(/\b([A-Za-z])\s+arrow\s+([-+]?(?:\d+(?:[.,]\d+)?|[A-Za-z]))\b/gi, "$1 → $2");
   text = text.replace(/\\infty/g, "∞");
   text = text.replace(/\\pi/g, "π");
 
@@ -119,6 +124,7 @@ export function normalizeHandwritingText(source: string) {
   }
 
   text = text.replace(/\^\{([0-9+-]+)\}/g, (_, value: string) => toSuperscript(value));
+  text = text.replace(/\^\{([^{}]+)\}/g, "⁽$1⁾");
   text = text.replace(/\^([0-9])/g, (_, value: string) => toSuperscript(value));
   text = text.replace(/_\{([^{}]+)\}/g, "₍$1₎");
   text = text.replace(/\\([A-Za-z]+)/g, "$1");

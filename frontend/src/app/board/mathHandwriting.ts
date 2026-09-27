@@ -3,8 +3,12 @@ import type { Stroke } from "./boardEngine";
 export type MathHandwritingToken =
   | { type: "text"; value: string }
   | { type: "sqrt"; body: MathHandwritingToken[] }
-  | { type: "integral"; lower?: string; upper?: string }
-  | { type: "relation"; value: "<" | ">" | "≤" | "≥" };
+  | { type: "fraction"; numerator: MathHandwritingToken[]; denominator: MathHandwritingToken[] }
+  | { type: "integral"; lower?: MathHandwritingToken[]; upper?: MathHandwritingToken[] }
+  | { type: "relation"; value: "<" | ">" | "≤" | "≥" }
+  | { type: "decimal"; value: "." | "," }
+  | { type: "arrow" }
+  | { type: "pi" };
 
 type Point = { x: number; y: number };
 
@@ -138,6 +142,15 @@ function readIntegralLimits(source: string, start: number) {
   };
 
   const readUpper = () => {
+    if (source[index] === "⁽") {
+      const end = source.indexOf("⁾", index + 1);
+      if (end > index) {
+        upper = source.slice(index + 1, end);
+        index = end + 1;
+        return true;
+      }
+    }
+
     let superscript = "";
     while (index < source.length && superscriptChars.has(source[index])) {
       superscript += SUPER_TO_NORMAL[source[index]];
@@ -213,15 +226,70 @@ export function parseMathHandwritingTokens(source: string): MathHandwritingToken
       }
     }
 
+    if (source[index] === "(") {
+      const numeratorEnd = matchingParen(source, index);
+      if (
+        numeratorEnd > index &&
+        source.slice(numeratorEnd + 1, numeratorEnd + 3) === "/("
+      ) {
+        const denominatorStart = numeratorEnd + 2;
+        const denominatorEnd = matchingParen(source, denominatorStart);
+        if (denominatorEnd > denominatorStart) {
+          flushPlain();
+          tokens.push({
+            type: "fraction",
+            numerator: parseMathHandwritingTokens(source.slice(index + 1, numeratorEnd)),
+            denominator: parseMathHandwritingTokens(
+              source.slice(denominatorStart + 1, denominatorEnd),
+            ),
+          });
+          index = denominatorEnd + 1;
+          continue;
+        }
+      }
+    }
+
+    if (source[index] === "π") {
+      flushPlain();
+      tokens.push({ type: "pi" });
+      index += 1;
+      continue;
+    }
+
     if (source[index] === "∫") {
       flushPlain();
       const limits = readIntegralLimits(source, index + 1);
       tokens.push({
         type: "integral",
-        lower: limits.lower,
-        upper: limits.upper,
+        lower: limits.lower
+          ? parseMathHandwritingTokens(limits.lower)
+          : undefined,
+        upper: limits.upper
+          ? parseMathHandwritingTokens(limits.upper)
+          : undefined,
       });
       index = limits.next;
+      continue;
+    }
+
+    if (
+      (source[index] === "." || source[index] === ",") &&
+      /[0-9]/.test(source[index - 1] ?? "") &&
+      /[0-9]/.test(source[index + 1] ?? "")
+    ) {
+      flushPlain();
+      tokens.push({
+        type: "decimal",
+        value: source[index] as "." | ",",
+      });
+      index += 1;
+      continue;
+    }
+
+    if (source[index] === "→") {
+      flushPlain();
+      tokens.push({ type: "arrow" });
+      index += 1;
       continue;
     }
 
@@ -246,6 +314,90 @@ export function parseMathHandwritingTokens(source: string): MathHandwritingToken
 
   flushPlain();
   return tokens;
+}
+
+function renderDecimalSeparator(
+  value: "." | ",",
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  strokeWidth: number,
+): RenderResult {
+  const width = fontSize * 0.24;
+  const dotY = y + fontSize * 0.86;
+  const dotX = x + width * 0.46;
+  const radius = Math.max(1.6, strokeWidth * 0.9);
+
+  const strokes: Stroke[] = [
+    stroke(
+      [
+        { x: dotX - radius, y: dotY },
+        { x: dotX, y: dotY + radius * 0.25 },
+        { x: dotX + radius, y: dotY },
+      ],
+      color,
+      Math.max(strokeWidth, 2.2),
+    ),
+  ];
+
+  if (value === ",") {
+    strokes.push(
+      stroke(
+        [
+          { x: dotX + radius * 0.55, y: dotY + radius * 0.25 },
+          { x: dotX + radius * 0.15, y: dotY + fontSize * 0.16 },
+          { x: dotX - radius * 0.35, y: dotY + fontSize * 0.24 },
+        ],
+        color,
+        Math.max(strokeWidth, 2.0),
+      ),
+    );
+  }
+
+  return {
+    strokes,
+    width,
+    height: value === "," ? fontSize * 1.16 : fontSize,
+  };
+}
+
+function renderArrow(
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  strokeWidth: number,
+): RenderResult {
+  const width = fontSize * 1.05;
+  const centerY = y + fontSize * 0.58;
+  const leftX = x + fontSize * 0.08;
+  const tipX = x + width - fontSize * 0.08;
+  const head = fontSize * 0.25;
+
+  return {
+    strokes: [
+      stroke(
+        [
+          { x: leftX, y: centerY },
+          { x: tipX, y: centerY },
+        ],
+        color,
+        strokeWidth,
+      ),
+      stroke(
+        [
+          { x: tipX - head, y: centerY - head * 0.70 },
+          { x: tipX, y: centerY },
+          { x: tipX - head, y: centerY + head * 0.70 },
+        ],
+        color,
+        strokeWidth,
+      ),
+    ],
+    width,
+    height: fontSize,
+  };
 }
 
 function renderRelation(
@@ -307,6 +459,120 @@ function renderRelation(
   };
 }
 
+function renderPi(
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  strokeWidth: number,
+): RenderResult {
+  const width = fontSize * 0.82;
+  const topY = y + fontSize * 0.18;
+  const bottomY = y + fontSize * 0.92;
+  const leftX = x + fontSize * 0.16;
+  const rightX = x + width - fontSize * 0.10;
+
+  const strokes: Stroke[] = [
+    stroke(
+      [
+        { x: x + fontSize * 0.04, y: topY + fontSize * 0.04 },
+        { x: x + width * 0.48, y: topY },
+        { x: x + width, y: topY + fontSize * 0.03 },
+      ],
+      color,
+      strokeWidth,
+    ),
+    stroke(
+      [
+        { x: leftX, y: topY + fontSize * 0.05 },
+        { x: leftX - fontSize * 0.02, y: y + fontSize * 0.56 },
+        { x: leftX - fontSize * 0.10, y: bottomY },
+      ],
+      color,
+      strokeWidth,
+    ),
+    stroke(
+      [
+        { x: rightX, y: topY + fontSize * 0.05 },
+        { x: rightX - fontSize * 0.02, y: y + fontSize * 0.58 },
+        { x: rightX + fontSize * 0.08, y: bottomY },
+      ],
+      color,
+      strokeWidth,
+    ),
+  ];
+
+  return {
+    strokes,
+    width: width + fontSize * 0.08,
+    height: fontSize * 1.02,
+  };
+}
+
+function translateStrokes(strokes: Stroke[], dx: number, dy: number): Stroke[] {
+  if (!dx && !dy) return strokes;
+  return strokes.map((item) => ({
+    ...item,
+    points: item.points.map((point) => ({
+      x: point.x + dx,
+      y: point.y + dy,
+    })),
+  }));
+}
+
+function renderFraction(
+  token: Extract<MathHandwritingToken, { type: "fraction" }>,
+  options: RenderOptions,
+): RenderResult {
+  const childSize = options.fontSize * 0.68;
+  const paddingX = options.fontSize * 0.16;
+  const numeratorY = options.y - options.fontSize * 0.08;
+  const denominatorY = options.y + options.fontSize * 0.76;
+
+  const numerator = renderTokens(token.numerator, {
+    ...options,
+    x: options.x,
+    y: numeratorY,
+    fontSize: childSize,
+  });
+  const denominator = renderTokens(token.denominator, {
+    ...options,
+    x: options.x,
+    y: denominatorY,
+    fontSize: childSize,
+  });
+
+  const innerWidth = Math.max(
+    numerator.width,
+    denominator.width,
+    options.fontSize * 0.42,
+  );
+  const totalWidth = innerWidth + paddingX * 2;
+  const numeratorDx = paddingX + (innerWidth - numerator.width) / 2;
+  const denominatorDx = paddingX + (innerWidth - denominator.width) / 2;
+  const barY = options.y + options.fontSize * 0.68;
+
+  return {
+    strokes: [
+      ...translateStrokes(numerator.strokes, numeratorDx, 0),
+      stroke(
+        [
+          { x: options.x + paddingX * 0.35, y: barY },
+          { x: options.x + totalWidth - paddingX * 0.35, y: barY },
+        ],
+        options.color,
+        options.strokeWidth,
+      ),
+      ...translateStrokes(denominator.strokes, denominatorDx, 0),
+    ],
+    width: totalWidth + options.fontSize * 0.06,
+    height: Math.max(
+      options.fontSize * 1.58,
+      denominatorY - options.y + denominator.height,
+    ),
+  };
+}
+
 function renderIntegral(
   token: Extract<MathHandwritingToken, { type: "integral" }>,
   options: RenderOptions,
@@ -350,23 +616,29 @@ function renderIntegral(
 
   const limitSize = fontSize * 0.50;
   let occupied = glyphWidth + hook;
-  if (token.upper) {
+  if (token.upper?.length) {
     const upperX = x + glyphWidth * 0.72;
     const upperY = top - limitSize * 0.58;
-    strokes.push(...renderPlain(token.upper, upperX, upperY, limitSize));
-    occupied = Math.max(
-      occupied,
-      upperX - x + measurePlain(token.upper, limitSize),
-    );
+    const upper = renderTokens(token.upper, {
+      ...options,
+      x: upperX,
+      y: upperY,
+      fontSize: limitSize,
+    });
+    strokes.push(...upper.strokes);
+    occupied = Math.max(occupied, upperX - x + upper.width);
   }
-  if (token.lower) {
+  if (token.lower?.length) {
     const lowerX = x + glyphWidth * 0.48;
     const lowerY = mid + fontSize * 0.46;
-    strokes.push(...renderPlain(token.lower, lowerX, lowerY, limitSize));
-    occupied = Math.max(
-      occupied,
-      lowerX - x + measurePlain(token.lower, limitSize),
-    );
+    const lower = renderTokens(token.lower, {
+      ...options,
+      x: lowerX,
+      y: lowerY,
+      fontSize: limitSize,
+    });
+    strokes.push(...lower.strokes);
+    occupied = Math.max(occupied, lowerX - x + lower.width);
   }
 
   return {
@@ -399,6 +671,35 @@ function renderTokens(
       continue;
     }
 
+    if (token.type === "decimal") {
+      const rendered = renderDecimalSeparator(
+        token.value,
+        cursorX,
+        options.y,
+        options.fontSize,
+        options.color,
+        options.strokeWidth,
+      );
+      strokes.push(...rendered.strokes);
+      cursorX += rendered.width;
+      maxHeight = Math.max(maxHeight, rendered.height);
+      continue;
+    }
+
+    if (token.type === "arrow") {
+      const rendered = renderArrow(
+        cursorX,
+        options.y,
+        options.fontSize,
+        options.color,
+        options.strokeWidth,
+      );
+      strokes.push(...rendered.strokes);
+      cursorX += rendered.width + options.fontSize * 0.06;
+      maxHeight = Math.max(maxHeight, rendered.height);
+      continue;
+    }
+
     if (token.type === "relation") {
       const rendered = renderRelation(
         token.value,
@@ -410,6 +711,28 @@ function renderTokens(
       );
       strokes.push(...rendered.strokes);
       cursorX += rendered.width + options.fontSize * 0.08;
+      maxHeight = Math.max(maxHeight, rendered.height);
+      continue;
+    }
+
+    if (token.type === "pi") {
+      const rendered = renderPi(
+        cursorX,
+        options.y,
+        options.fontSize,
+        options.color,
+        options.strokeWidth,
+      );
+      strokes.push(...rendered.strokes);
+      cursorX += rendered.width;
+      maxHeight = Math.max(maxHeight, rendered.height);
+      continue;
+    }
+
+    if (token.type === "fraction") {
+      const rendered = renderFraction(token, { ...options, x: cursorX });
+      strokes.push(...rendered.strokes);
+      cursorX += rendered.width;
       maxHeight = Math.max(maxHeight, rendered.height);
       continue;
     }

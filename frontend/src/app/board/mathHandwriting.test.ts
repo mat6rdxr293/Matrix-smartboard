@@ -18,18 +18,82 @@ const fakeStroke = (x: number, y: number) => ({
 describe("math handwriting parsing", () => {
   it("parses integral limits separately from the integrand", () => {
     expect(parseMathHandwritingTokens("∫₍0₎⁴ (3x² + 1) dx")).toEqual([
-      { type: "integral", lower: "0", upper: "4" },
+      { type: "integral", lower: [{ type: "text", value: "0" }], upper: [{ type: "text", value: "4" }] },
       { type: "text", value: " (3x² + 1) dx" },
     ]);
 
     expect(parseMathHandwritingTokens("∫_0⁴ x² dx")).toEqual([
-      { type: "integral", lower: "0", upper: "4" },
+      { type: "integral", lower: [{ type: "text", value: "0" }], upper: [{ type: "text", value: "4" }] },
       { type: "text", value: " x² dx" },
     ]);
 
     expect(parseMathHandwritingTokens("∫⁴_0 x² dx")).toEqual([
-      { type: "integral", lower: "0", upper: "4" },
+      { type: "integral", lower: [{ type: "text", value: "0" }], upper: [{ type: "text", value: "4" }] },
       { type: "text", value: " x² dx" },
+    ]);
+  });
+
+
+
+  it("parses normalized fractions with nested radicals and pi", () => {
+    expect(parseMathHandwritingTokens("(4√(π))/(11)")).toEqual([
+      {
+        type: "fraction",
+        numerator: [
+          { type: "text", value: "4" },
+          {
+            type: "sqrt",
+            body: [{ type: "pi" }],
+          },
+        ],
+        denominator: [{ type: "text", value: "11" }],
+      },
+    ]);
+  });
+
+  it("parses a fractional radical upper integral limit", () => {
+    expect(
+      parseMathHandwritingTokens("∫₍-√(π)₎⁽(4√(π))/(11)⁾ f(x) dx"),
+    ).toEqual([
+      {
+        type: "integral",
+        lower: [
+          { type: "text", value: "-" },
+          { type: "sqrt", body: [{ type: "pi" }] },
+        ],
+        upper: [
+          {
+            type: "fraction",
+            numerator: [
+              { type: "text", value: "4" },
+              { type: "sqrt", body: [{ type: "pi" }] },
+            ],
+            denominator: [{ type: "text", value: "11" }],
+          },
+        ],
+      },
+      { type: "text", value: " f(x) dx" },
+    ]);
+  });
+
+  it("keeps decimal separators as dedicated math tokens", () => {
+    expect(parseMathHandwritingTokens("0.0468")).toEqual([
+      { type: "text", value: "0" },
+      { type: "decimal", value: "." },
+      { type: "text", value: "0468" },
+    ]);
+    expect(parseMathHandwritingTokens("0,0468")).toEqual([
+      { type: "text", value: "0" },
+      { type: "decimal", value: "," },
+      { type: "text", value: "0468" },
+    ]);
+  });
+
+  it("parses the tends-to arrow as a geometric math token", () => {
+    expect(parseMathHandwritingTokens("x → 0")).toEqual([
+      { type: "text", value: "x " },
+      { type: "arrow" },
+      { type: "text", value: " 0" },
     ]);
   });
 
@@ -78,6 +142,36 @@ describe("math handwriting geometry", () => {
     expect(result.width).toBeGreaterThan(90);
   });
 
+  it("draws decimal point and comma as explicit visible strokes", () => {
+    const point = render("0.0468");
+    const comma = render("0,0468");
+
+    const pointGlyphs = point.strokes.filter((item) =>
+      item.points.length === 3 &&
+      Math.max(...item.points.map((p) => p.x)) - Math.min(...item.points.map((p) => p.x)) < 10
+    );
+    const commaGlyphs = comma.strokes.filter((item) =>
+      item.points.length === 3 &&
+      Math.max(...item.points.map((p) => p.x)) - Math.min(...item.points.map((p) => p.x)) < 10
+    );
+
+    expect(pointGlyphs.length).toBeGreaterThanOrEqual(1);
+    expect(commaGlyphs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("draws x tends to zero with a real arrow shaft and head", () => {
+    const result = render("x → 0");
+    const shaft = result.strokes.find((item) => {
+      if (item.points.length !== 2) return false;
+      const [a, b] = item.points;
+      return Math.abs(a.y - b.y) < 0.01 && b.x - a.x > 20;
+    });
+    const head = result.strokes.find((item) => item.points.length === 3);
+
+    expect(shaft).toBeTruthy();
+    expect(head).toBeTruthy();
+  });
+
   it("draws less/greater relations geometrically", () => {
     const result = render("< > ≤ ≥");
 
@@ -85,6 +179,25 @@ describe("math handwriting geometry", () => {
       (item) => item.points.length === 2 && item.points[1].x - item.points[0].x === 1,
     );
     expect(result.strokes.length).toBeGreaterThan(longTextSkeletons.length + 8);
+  });
+
+
+
+  it("renders a real fraction bar and a geometric pi glyph", () => {
+    const result = render("(4√(π))/(11)");
+
+    const fractionBars = result.strokes.filter((item) => {
+      if (item.points.length !== 2) return false;
+      const [a, b] = item.points;
+      return Math.abs(a.y - b.y) < 0.01 && Math.abs(b.x - a.x) > 15;
+    });
+    expect(fractionBars.length).toBeGreaterThanOrEqual(2);
+
+    const piLike = result.strokes.filter((item) => item.points.length === 3);
+    expect(piLike.length).toBeGreaterThanOrEqual(3);
+
+    const ys = result.strokes.flatMap((item) => item.points.map((point) => point.y));
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(24);
   });
 
   it("draws an integral taller than normal text and renders both limits", () => {

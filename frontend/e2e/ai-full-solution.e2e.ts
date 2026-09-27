@@ -348,7 +348,7 @@ test("math handwriting uses geometric integral, radical bar and relation signs",
       text: "Решение",
       steps: [
         {
-          text: "$$\\int_{0}^{4}(3x^2+\\sqrt{x+1})\\,dx$$",
+          text: "$$\\int_{-\\sqrt{\\pi}}^{\\frac{4\\sqrt{\\pi}}{11}}(3x^2+\\sqrt{x+1})\\,dx$$",
           kind: "math",
         },
         {
@@ -375,6 +375,17 @@ test("math handwriting uses geometric integral, radical bar and relation signs",
   });
   expect(radicalBar).toBeTruthy();
 
+  const horizontalBars = strokes.filter((stroke) => {
+    if (stroke.points.length !== 2) return false;
+    const [start, end] = stroke.points;
+    return Math.abs(start.y - end.y) < 0.01 && Math.abs(end.x - start.x) > 10;
+  });
+  // Radical overbars + the actual fraction bar in the upper integral limit.
+  expect(horizontalBars.length).toBeGreaterThanOrEqual(3);
+
+  const piGlyphStrokes = strokes.filter((stroke) => stroke.points.length === 3);
+  expect(piGlyphStrokes.length).toBeGreaterThanOrEqual(6);
+
   const integralCurve = strokes.find((stroke) => {
     if (stroke.points.length < 25) return false;
     const ys = stroke.points.map((point) => point.y);
@@ -390,4 +401,46 @@ test("math handwriting uses geometric integral, radical bar and relation signs",
     return dx > 6 && dy > 6 && dx < 40 && dy < 40;
   });
   expect(shortAngularStrokes.length).toBeGreaterThanOrEqual(4);
+});
+
+test("math handwriting keeps approximation, decimals and tends-to arrow visible", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  await seedLesson(page, {
+    captureOps: operations,
+    aiResponse: {
+      text: "Решение",
+      steps: [
+        { text: "$$x\\approx0.0468$$", kind: "result" },
+        { text: "$$x\\to0$$", kind: "math" },
+      ],
+    },
+  });
+
+  await generateSolution(page, operations);
+
+  const batch = operations.find((operation) => operation.op === "stroke_batch_add");
+  const strokes = batch?.strokes ?? [];
+  expect(strokes.length).toBeGreaterThan(8);
+
+  const decimalDot = strokes.find((stroke) => {
+    if (stroke.points.length !== 3) return false;
+    const xs = stroke.points.map((point) => point.x);
+    const ys = stroke.points.map((point) => point.y);
+    return Math.max(...xs) - Math.min(...xs) < 8 && Math.max(...ys) - Math.min(...ys) < 8;
+  });
+  expect(decimalDot).toBeTruthy();
+
+  const arrowShaft = strokes.find((stroke) => {
+    if (stroke.points.length !== 2) return false;
+    const [start, end] = stroke.points;
+    return Math.abs(start.y - end.y) < 0.01 && end.x - start.x > 20;
+  });
+  const arrowHead = strokes.find((stroke) => {
+    if (stroke.points.length !== 3) return false;
+    const [start, tip, end] = stroke.points;
+    return tip.x > start.x && tip.x > end.x && start.y < tip.y && end.y > tip.y;
+  });
+
+  expect(arrowShaft).toBeTruthy();
+  expect(arrowHead).toBeTruthy();
 });

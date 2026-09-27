@@ -7,12 +7,32 @@ describe("normalizeHandwritingText", () => {
       .toBe("x² = (4)/(2) ± √(9)");
   });
 
+  it("preserves fractional radical integral limits for math layout", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`$$\int_{-\sqrt{\pi}}^{\frac{4\sqrt{\pi}}{11}} \sqrt{x+1} \, dx$$`,
+      ),
+    ).toBe("∫₍-√(π)₎⁽(4√(π))/(11)⁾ √(x+1) dx");
+  });
+
   it("preserves math layout markers for integrals, roots and inequalities", () => {
     expect(
       normalizeHandwritingText(
         "$$\\int_{0}^{4} \\sqrt{x+1} \\le 7,\\quad y \\ge 2$$",
       ),
     ).toBe("∫₍0₎⁴ √(x+1) ≤ 7, y ≥ 2");
+  });
+
+  it("normalizes tends-to notation to a real arrow", () => {
+    expect(normalizeHandwritingText("x \\to 0")).toBe("x → 0");
+    expect(normalizeHandwritingText("x -> 0")).toBe("x → 0");
+    expect(normalizeHandwritingText("x arrow 0")).toBe("x → 0");
+  });
+
+  it("renders approximation commands as mathematical symbols", () => {
+    expect(normalizeHandwritingText("x \\approx 1.41")).toBe("x ≈ 1.41");
+    expect(normalizeHandwritingText("a \\simeq b")).toBe("a ≃ b");
+    expect(normalizeHandwritingText("x \\sim y")).toBe("x ∼ y");
   });
 
   it("keeps Cyrillic explanations readable", () => {
