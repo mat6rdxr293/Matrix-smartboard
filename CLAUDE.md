@@ -60,3 +60,7 @@
 - Сервер для бэкенда: `scripts/serve.sh` (llama-server, без mmap, 4 потока) — `docs/API_FOR_BACKEND.md`.
 - Не использовать `pkill -f llama-server` из Bash-инструмента: под шаблон попадает сама оболочка.
   Нужно `pkill -x llama-server`.
+- Учебники (сценарий доски): `extract_pdf.py --ocr` (Tesseract; водяные знаки вырезаются) →
+  `sections.py` (§ ↔ страницы, `data/sections/`) → `lesson.py <книга> --section N` (задания + слайды, JSON).
+  Качественный текст для обучения: `vlm_ocr.py` (Qwen3.5-4B со зрением на GPU, `data/vlm/`).
+- Журнал автономной работы — раздел «Апдейты» в `README.md` (пользователь просил вести его по времени).
