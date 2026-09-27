@@ -82,13 +82,22 @@ const isLikelyTaskText = (value: string) => {
   return hasMathSignal || hasEnoughText;
 };
 
-export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
-  let tasks = values
-    .flatMap(splitLogicalTasksFromOcr)
-    .filter(isLikelyTaskText);
+const taskStatementFromCompletedWork = (value: string) => {
+  if (!isLikelyCompletedWork(value)) return value.trim();
 
-  const unfinished = tasks.filter((value) => !isLikelyCompletedWork(value));
-  if (unfinished.length > 0) tasks = unfinished;
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstTaskLine = lines.find(isStandaloneTaskEquation);
+  return firstTaskLine ?? value.trim();
+};
+
+export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
+  const tasks = values
+    .flatMap(splitLogicalTasksFromOcr)
+    .map(taskStatementFromCompletedWork)
+    .filter(isLikelyTaskText);
 
   return [...new Set(tasks.map((value) => value.trim()).filter(Boolean))];
 }

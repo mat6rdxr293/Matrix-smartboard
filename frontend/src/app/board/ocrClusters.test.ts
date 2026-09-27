@@ -196,7 +196,10 @@ it("drops stale worked solution and OCR junk when a new task is present", () => 
       "9x^2 + 11x + 3 = 3",
       "OK",
     ]),
-  ).toEqual(["9x^2 + 11x + 3 = 3"]);
+  ).toEqual([
+    "5x^2 + 4x - 9 = 0",
+    "9x^2 + 11x + 3 = 3",
+  ]);
 });
 
 it("splits two fresh equations even when OCR returns them in one close block", () => {
@@ -215,7 +218,10 @@ it("splits a new close task out of a completed first solution in one OCR block",
     sanitizeMultiTaskOcrTexts([
       "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8\n9x^2 + 11x + 3 = 3",
     ]),
-  ).toEqual(["9x^2 + 11x + 3 = 3"]);
+  ).toEqual([
+    "5x^2 + 4x - 9 = 0",
+    "9x^2 + 11x + 3 = 3",
+  ]);
 });
 
 it("cuts a stale root row accidentally attached before a new equation", () => {
