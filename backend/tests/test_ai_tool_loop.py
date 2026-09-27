@@ -1201,6 +1201,80 @@ def test_visual_board_request_does_not_capture_ordinary_equation_solution():
     assert ai_module._is_visual_board_request("Реши уравнение x^2-5x+6=0") is False
 
 
+def test_solve_and_plot_request_requires_full_solution_path():
+    problem = "Реши уравнение 5x^2 + 4x - 9 = 0 и построй график."
+    assert ai_module._is_visual_board_request(problem) is True
+    assert ai_module._visual_request_requires_solution(problem) is True
+
+
+def test_zero_form_equation_graph_fallback_uses_left_side_as_function():
+    problem = "5x^2 + 4x - 9 = 0\nПострой график"
+    actions = ai_module._fallback_visual_board_actions(problem)
+    assert actions[0]["type"] == "add_graph"
+    assert actions[0]["expressions"] == ["5*x^2 + 4*x - 9"]
+
+
+def test_solve_and_plot_quadratic_uses_fast_deterministic_path(monkeypatch):
+    def fail_visual_plan(*args, **kwargs):
+        raise AssertionError("visual planner must not be used for solve+plot quadratic")
+
+    monkeypatch.setattr(ai_module, "_generate_visual_board_plan", fail_visual_plan)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "5x^2 + 4x - 9 = 0 реши и построй график",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert len(steps) == 5
+    assert steps[-1]["kind"] == "result"
+    assert "9}{5" in steps[-1]["text"]
+    assert "1" in steps[-1]["text"]
+    assert actions == [{
+        "type": "add_graph",
+        "expressions": ["5*x^2 + 4*x - 9"],
+        "x_min": -10.0,
+        "x_max": 10.0,
+        "y_min": -10.0,
+        "y_max": 10.0,
+        "x": 8.0,
+        "y": 8.0,
+        "width": 58.0,
+        "height": 58.0,
+    }]
+    assert "D=196" in text
+
+
+def test_verified_quadratic_steps_recover_when_structured_response_is_broken():
+    trace = [{
+        "tool": "math_quadratic",
+        "payload": {
+            "ok": True,
+            "result": {
+                "variable": "x",
+                "a": {"text": "5", "latex": "5"},
+                "b": {"text": "4", "latex": "4"},
+                "c": {"text": "-9", "latex": "-9"},
+                "discriminant": {"text": "196", "latex": "196"},
+                "has_real_roots": True,
+                "real_roots": [
+                    {"text": "-9/5", "latex": "- \\frac{9}{5}"},
+                    {"text": "1", "latex": "1"},
+                ],
+            },
+        },
+    }]
+    steps = ai_module._verified_quadratic_board_steps(trace, "ru")
+    assert steps is not None
+    assert len(steps) == 5
+    assert any("196" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "- \\frac{9}{5}" in steps[-1]["text"]
+    assert "1" in steps[-1]["text"]
+
+
 def test_board_actions_parser_supports_stroke_move_and_delete():
     raw = (
         '{"board_actions":['

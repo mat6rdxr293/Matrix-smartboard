@@ -910,6 +910,67 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
     return _postprocess_math(text), steps
 
 
+def _repair_board_solution_response(
+    client,
+    *,
+    raw: str,
+    problem: str,
+    response_locale: str,
+    tool_trace: list[dict],
+    include_actions: bool,
+) -> tuple[str, list[dict[str, str]], list[dict]]:
+    if not (raw or "").strip():
+        return "", [], []
+
+    language_rule = _response_language_rule(response_locale)
+    sys = (
+        f"{language_rule} "
+        "Ты исправляешь поврежденный structured response локальной модели. "
+        "Верни ТОЛЬКО один валидный JSON-объект без markdown. "
+        "Обязательный формат: "
+        '{"summary":"кратко","steps":[{"text":"шаг","kind":"text|math|result|warning"}]'
+        + (',"board_actions":[]}' if include_actions else "}")
+        + ". Не удаляй полезные математические шаги. Последний шаг должен быть kind=result, "
+        "если исходный ответ уже содержит конечный результат. "
+        "Не придумывай новый ответ вопреки проверенным вычислительным данным."
+    )
+    verified = [
+        entry
+        for entry in tool_trace
+        if isinstance(entry.get("payload"), dict) and entry["payload"].get("ok")
+    ]
+    user = (
+        "Задача:\n"
+        + problem[:5000]
+        + "\n\nПроверенные вычислительные данные:\n"
+        + json.dumps(verified, ensure_ascii=False)[:10000]
+        + "\n\nПоврежденный ответ:\n"
+        + raw[:12000]
+    )
+    request = {
+        "model": settings.ai_model,
+        "messages": [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": 1400,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        response = client.chat.completions.create(**request)
+    except Exception:
+        request.pop("response_format", None)
+        response = client.chat.completions.create(**request)
+
+    repaired_raw = (
+        getattr(response.choices[0].message, "content", None) or ""
+    ).strip()
+    text, steps = _parse_board_solution(repaired_raw)
+    actions = _parse_board_actions(repaired_raw) if include_actions else []
+    return text, steps, actions
+
+
 _BOARD_ACTION_TYPES = {
     "add_graph",
     "update_graph",
@@ -1050,6 +1111,42 @@ def _is_visual_board_request(problem: str) -> bool:
     return any(term in lower for term in visual_terms)
 
 
+_SOLVE_AND_VISUAL_RE = re.compile(
+    r"\b(?:реши|решить|решите|решение|найди|найти|вычисли|вычислить|"
+    r"определи|определить|solve|calculate|compute|find)\b",
+    re.I,
+)
+
+
+def _visual_request_requires_solution(problem: str) -> bool:
+    text = (problem or "").strip()
+    if not _is_visual_board_request(text):
+        return False
+    if _SOLVE_AND_VISUAL_RE.search(text):
+        return True
+    # A zero-form equation plus a graph request is a school task, not merely
+    # a drawing command. Full-solution mode must solve it and then plot f(x).
+    return bool(
+        re.search(
+            r"[-+()0-9A-Za-zπ√^²³*/·×.,\s]+\s*=\s*0(?:\b|$)",
+            text,
+            flags=re.I,
+        )
+    )
+
+
+def _extract_zero_equation_for_graph(problem: str) -> str | None:
+    match = re.search(
+        r"([-+()0-9A-Za-zπ√^²³*/·×.,\s]+?)\s*=\s*0(?:\b|$)",
+        problem or "",
+        flags=re.I,
+    )
+    if not match:
+        return None
+    left = _normalize_graph_expression(match.group(1))
+    return f"{left}=0" if left else None
+
+
 def _normalize_graph_expression(value: str) -> str:
     result = value.strip().replace("²", "^2").replace("³", "^3")
     result = result.replace("π", "pi").replace("×", "*").replace("·", "*")
@@ -1099,6 +1196,16 @@ def _fallback_visual_board_actions(
         for match in graph_matches
         if _normalize_graph_expression(match)
     ]
+    if not expressions and ("граф" in lower or "graph" in lower or "plot" in lower):
+        zero_equation = re.search(
+            r"([-+()0-9A-Za-zπ√^²³*/·×.,\s]+?)\s*=\s*0(?:\b|$)",
+            text,
+            flags=re.I,
+        )
+        if zero_equation:
+            expression = _normalize_graph_expression(zero_equation.group(1))
+            if expression:
+                expressions.append(expression)
     target_graph = known_graphs[0] if len(known_graphs) == 1 else None
     if graph_delete and target_graph:
         actions.append({
@@ -1465,8 +1572,12 @@ def _strip_solution_meta_steps(
         "проверка подтвердила",
         "проверим наше решение",
         "проверим решение",
+        "проверим результаты",
+        "используем функцию math_",
+        "используем инструмент",
         "verification confirms",
         "check confirms",
+        "use the math_",
         "тексеру растайды",
     )
     cleaned: list[dict[str, str]] = []
@@ -1518,6 +1629,73 @@ def _domain_failure_board_steps(
         domain_step,
         {"text": f"На участке $$ {invalid} $$ интегранд не определён.", "kind": "warning"},
         {"text": "Поэтому в действительных числах определённый интеграл не существует.", "kind": "result"},
+    ]
+
+
+def _verified_quadratic_board_steps(
+    tool_trace: list[dict],
+    response_locale: str,
+) -> list[dict[str, str]] | None:
+    result = None
+    for entry in reversed(tool_trace):
+        if entry.get("tool") != "math_quadratic":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        candidate = payload.get("result")
+        if isinstance(candidate, dict):
+            result = candidate
+            break
+    if result is None:
+        return None
+
+    def math_text(item) -> str:
+        if isinstance(item, dict):
+            return str(item.get("latex") or item.get("text") or "").strip()
+        return str(item or "").strip()
+
+    variable = str(result.get("variable") or "x")
+    a = math_text(result.get("a"))
+    b = math_text(result.get("b"))
+    c = math_text(result.get("c"))
+    discriminant = math_text(result.get("discriminant"))
+    if not all((a, b, c, discriminant)):
+        return None
+
+    if not result.get("has_real_roots"):
+        final = {
+            "ru": "Ответ: действительных корней нет",
+            "kk": "Жауап: нақты түбірлер жоқ",
+            "en": "Answer: no real roots",
+        }.get(response_locale, "Ответ: действительных корней нет")
+        return [
+            {"text": f"$$a={a},\\;b={b},\\;c={c}$$", "kind": "math"},
+            {"text": "$$D=b^2-4ac$$", "kind": "math"},
+            {"text": f"$$D={discriminant}<0$$", "kind": "math"},
+            {"text": final, "kind": "result"},
+        ]
+
+    roots = [
+        math_text(item)
+        for item in (result.get("real_roots") or [])
+        if math_text(item)
+    ]
+    if not roots:
+        return None
+
+    roots_display = ",\\;".join(roots)
+    answer_prefix = {
+        "ru": "Ответ",
+        "kk": "Жауап",
+        "en": "Answer",
+    }.get(response_locale, "Ответ")
+    return [
+        {"text": f"$$a={a},\\;b={b},\\;c={c}$$", "kind": "math"},
+        {"text": "$$D=b^2-4ac$$", "kind": "math"},
+        {"text": f"$$D={discriminant}$$", "kind": "math"},
+        {"text": f"$${variable}_{{1,2}}=\\frac{{-b\\pm\\sqrt{{D}}}}{{2a}}$$", "kind": "math"},
+        {"text": f"{answer_prefix}: $${variable}={roots_display}$$", "kind": "result"},
     ]
 
 
@@ -2829,7 +3007,29 @@ def generate_board_solution(
     api_key = get_openai_key()
     base_url = settings.ai_base_url
 
-    if include_actions and _is_visual_board_request(problem):
+    if include_actions and _visual_request_requires_solution(problem):
+        equation = _extract_zero_equation_for_graph(problem)
+        if equation:
+            try:
+                payload = execute_tool("math_quadratic", {"equation": equation})
+                deterministic_steps = _verified_quadratic_board_steps(
+                    [{"tool": "math_quadratic", "payload": payload}],
+                    response_locale,
+                )
+                deterministic_actions = _fallback_visual_board_actions(
+                    problem,
+                    board_state,
+                )
+                if deterministic_steps and deterministic_actions:
+                    deterministic_text = "\n".join(
+                        f"{index + 1}. {step['text']}"
+                        for index, step in enumerate(deterministic_steps)
+                    )
+                    return deterministic_text, deterministic_steps, deterministic_actions
+            except ToolError:
+                pass
+
+    if include_actions and _is_visual_board_request(problem) and not _visual_request_requires_solution(problem):
         if base_url or api_key:
             return _generate_visual_board_plan(
                 problem,
@@ -2943,6 +3143,35 @@ def generate_board_solution(
     )
     actions = _parse_board_actions(raw) if include_actions else []
     text, steps = _parse_board_solution(raw)
+
+    if not steps:
+        verified_quadratic_steps = _verified_quadratic_board_steps(
+            tool_trace,
+            response_locale,
+        )
+        if verified_quadratic_steps:
+            steps = verified_quadratic_steps
+            text = "\n".join(
+                f"{index + 1}. {step['text']}"
+                for index, step in enumerate(steps)
+            )
+        else:
+            repaired_text, repaired_steps, repaired_actions = _repair_board_solution_response(
+                client,
+                raw=raw,
+                problem=problem,
+                response_locale=response_locale,
+                tool_trace=tool_trace,
+                include_actions=include_actions,
+            )
+            if repaired_steps:
+                text, steps = repaired_text, repaired_steps
+                if include_actions and not actions:
+                    actions = repaired_actions
+
+    if include_actions and _is_visual_board_request(problem) and not actions:
+        actions = _fallback_visual_board_actions(problem, board_state)
+
     text, steps = _sanitize_board_language(text, steps, response_locale)
     steps = _strip_repeated_problem_steps(steps, problem)
     steps = _normalize_board_result_tail(steps, response_locale)
