@@ -59,16 +59,23 @@ const LATEX_SYMBOLS: Array<[string, string]> = [
   ["\\propto", "∝"], ["\\sim", "∼"], ["\\ll", "≪"], ["\\gg", "≫"],
   ["\\leq", "≤"], ["\\geq", "≥"], ["\\le", "≤"], ["\\ge", "≥"],
   ["\\lt", "<"], ["\\gt", ">"], ["\\mid", "|"], ["\\nmid", "∤"],
-  ["\\notin", "∉"], ["\\subseteq", "⊆"], ["\\supseteq", "⊇"],
-  ["\\subset", "⊂"], ["\\supset", "⊃"], ["\\emptyset", "∅"],
-  ["\\varnothing", "∅"], ["\\in", "∈"], ["\\cup", "∪"], ["\\cap", "∩"],
-  ["\\setminus", "∖"], ["\\forall", "∀"], ["\\exists", "∃"], ["\\land", "∧"], ["\\wedge", "∧"],
-  ["\\lor", "∨"], ["\\vee", "∨"], ["\\neg", "¬"], ["\\therefore", "∴"], ["\\because", "∵"],
-  ["\\parallel", "∥"], ["\\perp", "⟂"], ["\\angle", "∠"], ["\\triangle", "△"], ["\\square", "□"],
-  ["\\partial", "∂"], ["\\nabla", "∇"], ["\\infty", "∞"],
+  ["\\notin", "∉"], ["\\notni", "∌"], ["\\ni", "∋"], ["\\owns", "∋"],
+  ["\\subsetneqq", "⫋"], ["\\supsetneqq", "⫌"], ["\\subsetneq", "⊊"], ["\\supsetneq", "⊋"],
+  ["\\subseteq", "⊆"], ["\\supseteq", "⊇"], ["\\subset", "⊂"], ["\\supset", "⊃"],
+  ["\\emptyset", "∅"], ["\\varnothing", "∅"], ["\\in", "∈"], ["\\cup", "∪"], ["\\cap", "∩"],
+  ["\\setminus", "∖"], ["\\forall", "∀"], ["\\exists", "∃"], ["\\nexists", "∄"],
+  ["\\land", "∧"], ["\\wedge", "∧"], ["\\lor", "∨"], ["\\vee", "∨"], ["\\neg", "¬"],
+  ["\\top", "⊤"], ["\\bot", "⊥"], ["\\therefore", "∴"], ["\\because", "∵"],
+  ["\\parallel", "∥"], ["\\perp", "⟂"], ["\\measuredangle", "∡"], ["\\sphericalangle", "∢"],
+  ["\\angle", "∠"], ["\\triangle", "△"], ["\\square", "□"], ["\\diamond", "◇"],
+  ["\\partial", "∂"], ["\\nabla", "∇"], ["\\infty", "∞"], ["\\ell", "ℓ"],
+  ["\\Re", "ℜ"], ["\\Im", "ℑ"],
   ["\\iiint", "∭"], ["\\iint", "∬"], ["\\oint", "∮"], ["\\sum", "∑"], ["\\prod", "∏"], ["\\int", "∫"],
-  ["\\pm", "±"], ["\\mp", "∓"], ["\\times", "×"], ["\\cdot", "·"], ["\\div", "÷"],
-  ["\\ldots", "…"], ["\\dots", "…"], ["\\cdots", "⋯"], ["\\circ", "°"],
+  ["\\pm", "±"], ["\\mp", "∓"], ["\\times", "×"], ["\\cdot", "·"], ["\\bullet", "•"],
+  ["\\colon", ":"], ["\\%", "%"],
+  ["\\ast", "∗"], ["\\star", "⋆"], ["\\div", "÷"], ["\\oplus", "⊕"], ["\\otimes", "⊗"],
+  ["\\ldots", "…"], ["\\dots", "…"], ["\\cdots", "⋯"], ["\\vdots", "⋮"], ["\\ddots", "⋱"],
+  ["\\degree", "°"], ["\\circ", "°"], ["\\prime", "′"],
   ["\\alpha", "α"], ["\\beta", "β"], ["\\gamma", "γ"], ["\\delta", "δ"],
   ["\\epsilon", "ε"], ["\\varepsilon", "ε"], ["\\zeta", "ζ"], ["\\eta", "η"],
   ["\\theta", "θ"], ["\\vartheta", "ϑ"], ["\\iota", "ι"], ["\\kappa", "κ"],
@@ -79,7 +86,13 @@ const LATEX_SYMBOLS: Array<[string, string]> = [
   ["\\Xi", "Ξ"], ["\\Pi", "Π"], ["\\Sigma", "Σ"], ["\\Phi", "Φ"], ["\\Psi", "Ψ"], ["\\Omega", "Ω"],
 ];
 
-const LATEX_FUNCTIONS = ["sin", "cos", "tan", "cot", "tg", "ctg", "ln", "log", "lg", "exp", "min", "max", "lim"];
+const LATEX_FUNCTIONS = [
+  "sin", "cos", "tan", "cot", "tg", "ctg", "sec", "csc",
+  "arcsin", "arccos", "arctan", "arctg", "arcctg",
+  "sinh", "cosh", "tanh", "coth",
+  "ln", "log", "lg", "exp", "min", "max", "lim", "limsup", "liminf",
+  "det", "gcd", "lcm", "mod", "bmod",
+];
 
 const CJK_SCRIPT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+/g;
 
@@ -152,19 +165,29 @@ export function normalizeHandwritingText(source: string) {
   }[value.trim()] ?? value.trim()));
   text = text.replace(/\\(?:mathcal|mathfrak)\{([^{}]*)\}/g, "$1");
   text = text.replace(/\\(?:overrightarrow|vec)\{([^{}]+)\}/g, "$1⃗");
-  text = text.replace(/\\overline\{([^{}]+)\}/g, "$1̅");
+  text = text.replace(/\\(?:overline|bar)\{([^{}]+)\}/g, "$1̅");
+  text = text.replace(/\\hat\{([^{}]+)\}/g, "$1̂");
+  text = text.replace(/\\underline\{([^{}]+)\}/g, "$1");
   text = text.replace(/\\binom\{([^{}]+)\}\{([^{}]+)\}/g, "C($1,$2)");
   text = text.replace(/\\(?:lvert|rvert|vert)\b/g, "|");
   text = text.replace(/\\lfloor\b/g, "⌊").replace(/\\rfloor\b/g, "⌋");
   text = text.replace(/\\lceil\b/g, "⌈").replace(/\\rceil\b/g, "⌉");
   text = text.replace(/\\langle\b/g, "⟨").replace(/\\rangle\b/g, "⟩");
   text = text.replace(/\\\{/g, "{").replace(/\\\}/g, "}");
-  text = text.replace(/\\begin\{(?:cases|aligned|array|matrix|pmatrix|bmatrix)\}/g, "");
-  text = text.replace(/\\end\{(?:cases|aligned|array|matrix|pmatrix|bmatrix)\}/g, "");
+  text = text.replace(/\\begin\{(?:cases|aligned|array|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}/g, "");
+  text = text.replace(/\\end\{(?:cases|aligned|array|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}/g, "");
   text = text.replace(/\\\\/g, "; ");
+  text = text.replace(/\s*&\s*/g, " ");
+  text = text.replace(/\\not\s*\\in\b/g, "∉");
+  text = text.replace(/\\not\s*\\subseteq\b/g, "⊈").replace(/\\not\s*\\subset\b/g, "⊄");
+  text = text.replace(/\\not\s*\\supseteq\b/g, "⊉").replace(/\\not\s*\\supset\b/g, "⊅");
+  text = text.replace(/\\not\s*\\parallel\b/g, "∦");
+  text = text.replace(/\\not\s*=/g, "≠");
   text = text.replace(/\\sqrt\[([^\]]+)\]\{([^{}]+)\}/g, (_, index: string, body: string) =>
     `${toSuperscript(index)}√(${body})`
   );
+  text = text.replace(/\\pmod\{([^{}]+)\}/g, "(mod $1)");
+  text = text.replace(/\\(?:bmod|mod)\b/g, "mod");
   for (const [command, symbol] of [...LATEX_SYMBOLS].sort((a, b) => b[0].length - a[0].length)) {
     text = text.split(command).join(symbol);
   }
@@ -190,18 +213,27 @@ export function normalizeHandwritingText(source: string) {
   text = text.replace(/\\infty/g, "∞");
   text = text.replace(/\\pi/g, "π");
 
-  for (let pass = 0; pass < 4; pass += 1) {
+  text = text.replace(
+    /\\(?:dfrac|tfrac|frac)\s*([A-Za-z0-9])\s*([A-Za-z0-9])/g,
+    "($1)/($2)",
+  );
+  text = text.replace(/\\sqrt\s*([A-Za-z0-9π])/g, "√($1)");
+  for (let pass = 0; pass < 6; pass += 1) {
     const previous = text;
     text = text.replace(/\\(?:dfrac|tfrac|frac)\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
     text = text.replace(/\\sqrt\{([^{}]+)\}/g, "√($1)");
     if (text === previous) break;
   }
 
+  text = text.replace(/\^\{°\}|\^°/g, "°");
+  text = text.replace(/\^\{([′]+)\}/g, "$1").replace(/\^([′]+)/g, "$1");
   text = text.replace(/\^\{([0-9+-]+)\}/g, (_, value: string) => toSuperscript(value));
   text = text.replace(/\^\{([^{}]+)\}/g, "⁽$1⁾");
-  text = text.replace(/\^([0-9])/g, (_, value: string) => toSuperscript(value));
+  text = text.replace(/\^([+-]?\d+)/g, (_, value: string) => toSuperscript(value));
+  text = text.replace(/\^([A-Za-zα-ωΑ-Ω])/g, "⁽$1⁾");
   text = text.replace(/_\{([^{}]+)\}/g, "₍$1₎");
-  text = text.replace(/_([0-9+-])/g, (_, value: string) => toSubscript(value));
+  text = text.replace(/_([+-]?\d+)/g, (_, value: string) => toSubscript(value));
+  text = text.replace(/_([A-Za-zα-ωΑ-Ω])/g, "₍$1₎");
   text = text.replace(/\bsqrt\s*\(/gi, "√(");
   text = text.replace(/\bint\b(?=\s*(?:₍|\(|\[|[A-Za-z0-9]))/gi, "∫");
   text = text.replace(/[{}]/g, "");

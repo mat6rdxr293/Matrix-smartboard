@@ -68,6 +68,40 @@ describe("normalizeHandwritingText", () => {
     ).toBe("AB⃗, CD̅, C(5,2), ⌊x⌋, x=1; y=2");
   });
 
+  it("normalizes degrees, primes and unbraced indices", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`a_12+b_n+c^\alpha+30^{\circ}+f^{\prime}(x)`,
+      ),
+    ).toBe("a₁₂+b₍n₎+c⁽α⁾+30°+f′(x)");
+  });
+
+  it("normalizes common function, modular and negated-set notation", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\sec x+\arcsin y+\sinh z+\det A+\gcd(12,18)`,
+      ),
+    ).toBe("sec x+arcsin y+sinh z+det A+gcd(12,18)");
+    expect(
+      normalizeHandwritingText(
+        String.raw`x \not\in A, A \not\subseteq B, a \not\parallel b, x\equiv2\pmod{7}`,
+      ),
+    ).toBe("x ∉ A, A ⊈ B, a ∦ b, x≡2(mod 7)");
+  });
+
+  it("normalizes short-form fractions and radicals", () => {
+    expect(normalizeHandwritingText(String.raw`\frac12+\sqrt2`))
+      .toBe("(1)/(2)+√(2)");
+  });
+
+  it("covers additional school symbols without leaking LaTeX command names", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`\measuredangle ABC=60\degree, \ell\perp m, \Re z+\Im z, \nexists x, A\subsetneq B, p\oplus q`,
+    );
+    expect(normalized).toBe("∡ ABC=60°, ℓ⟂ m, ℜ z+ℑ z, ∄ x, A⊊ B, p⊕ q");
+    expect(normalized).not.toMatch(/\\[A-Za-z]+/);
+  });
+
   it("does not silently turn unknown LaTeX commands into plain words", () => {
     expect(normalizeHandwritingText(String.raw`x \mystery y`)).toContain("\\mystery");
   });
