@@ -102,6 +102,8 @@ async function seedLesson(
       steps: Array<{ text: string; kind: "text" | "math" | "warning" | "result" }>;
       board_actions?: Array<Record<string, unknown>>;
     };
+    ocrResponses?: string[];
+    captureAiProblems?: string[];
   },
 ) {
   await page.addInitScript(({ schoolId, roomId, lessonId }) => {
@@ -109,6 +111,7 @@ async function seedLesson(
     localStorage.setItem("practice.lesson." + lessonId + ".boardProfile", "universal");
   }, { schoolId: school.id, roomId: room.id, lessonId: lesson.id });
 
+  let ocrResponseIndex = 0;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -150,10 +153,21 @@ async function seedLesson(
     if (path === "/api/status") return json(route, { ok: true, ai: true, ocr: true });
     if (path === "/api/storage" && method === "GET") return json(route, { tasks: [], slides: [] });
     if (path === "/api/storage" && method === "POST") return json(route, { ok: true });
-    if (path === "/api/ocr" && method === "POST") return json(route, { text: "Решить: x^2 - 4 = 0" });
+    if (path === "/api/ocr" && method === "POST") {
+      const responses = options?.ocrResponses;
+      const text = responses?.[ocrResponseIndex] ?? responses?.[responses.length - 1] ?? "Решить: x^2 - 4 = 0";
+      ocrResponseIndex += 1;
+      return json(route, { text });
+    }
 
     if (path === "/api/ai" && method === "POST") {
-      const payload = request.postDataJSON() as { mode?: string; board_output?: boolean; response_locale?: string };
+      const payload = request.postDataJSON() as {
+        mode?: string;
+        board_output?: boolean;
+        response_locale?: string;
+        problem?: string;
+      };
+      if (payload.problem) options?.captureAiProblems?.push(payload.problem);
       expect(payload.mode).toBe(options?.aiMode ?? "solution");
       expect(payload.board_output).toBe(true);
       expect(payload.response_locale).toBe("ru");
@@ -253,8 +267,9 @@ test("one undo removes the whole AI handwriting batch and redo restores it", asy
 });
 
 
-test("with two equations the latest user block is OCR target and solution stays close to it", async ({ page }) => {
+test("with two equations full solution OCR sends both tasks to AI", async ({ page }) => {
   const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
   const first = [
     taskStroke(60, 100, 120, 165),
     taskStroke(125, 130, 180, 130),
@@ -268,6 +283,8 @@ test("with two equations the latest user block is OCR target and solution stays 
   await seedLesson(page, {
     captureOps: operations,
     initialStrokes: [...first, ...second],
+    ocrResponses: ["x^2 - 4 = 0", "x^2 - 9 = 0"],
+    captureAiProblems: aiProblems,
   });
   await generateSolution(page, operations);
 
@@ -296,17 +313,9 @@ test("with two equations the latest user block is OCR target and solution stays 
   expect(overlaps(solution, firstBounds)).toBe(false);
   expect(overlaps(solution, secondBounds)).toBe(false);
 
-  const dx = Math.max(
-    0,
-    secondBounds.left - solution.right,
-    solution.left - secondBounds.right,
-  );
-  const dy = Math.max(
-    0,
-    secondBounds.top - solution.bottom,
-    solution.top - secondBounds.bottom,
-  );
-  expect(Math.hypot(dx, dy)).toBeLessThan(90);
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0]).toContain("Задание 1:\nx^2 - 4 = 0");
+  expect(aiProblems[0]).toContain("Задание 2:\nx^2 - 9 = 0");
 });
 
 

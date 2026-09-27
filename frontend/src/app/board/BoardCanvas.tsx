@@ -10,7 +10,7 @@ import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
 import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { chooseActiveOcrCluster, clusterOcrStrokes, composeOcrText } from "@/app/board/ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -66,7 +66,7 @@ const BG_EXTRA = [
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
 export type BoardCanvasHandle = {
-  recognize: () => Promise<string>;
+  recognize: (options?: { multipleTasks?: boolean }) => Promise<string>;
   getLastOcrTargetColor: () => string | null;
   allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
   animateAiStrokes: (
@@ -1677,7 +1677,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     });
   };
 
-  const handleOcr = async (): Promise<string> => {
+  const handleOcr = async (
+    options?: { multipleTasks?: boolean },
+  ): Promise<string> => {
     const graphLines = graphsRef.current.flatMap((graph) =>
       graph.expressions
         .filter((expression) => expression.visible && expression.expression.trim())
@@ -1688,13 +1690,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       ? lassoSelection.strokeIndices
       : undefined;
     const clusters = clusterOcrStrokes(strokesRef.current, selectedIndices);
-    const activeCluster = selectedIndices
-      ? (clusters[0] ?? null)
-      : chooseActiveOcrCluster(clusters);
-    lastOcrTargetBoundsRef.current = activeCluster?.bounds ?? null;
-    if (activeCluster) {
+    const targetClusters = selectedIndices
+      ? (clusters[0] ? [clusters[0]] : [])
+      : options?.multipleTasks
+        ? chooseOcrTaskClusters(clusters)
+        : (() => {
+            const active = chooseActiveOcrCluster(clusters);
+            return active ? [active] : [];
+          })();
+
+    lastOcrTargetBoundsRef.current = targetClusters.length
+      ? unionRects(targetClusters.map((cluster) => cluster.bounds))
+      : null;
+
+    if (targetClusters.length) {
       const colorWeights = new Map<string, number>();
-      for (const stroke of activeCluster.strokes) {
+      for (const stroke of targetClusters.flatMap((cluster) => cluster.strokes)) {
         let length = 0;
         for (let index = 1; index < stroke.points.length; index += 1) {
           const previous = stroke.points[index - 1];
@@ -1709,20 +1720,32 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       lastOcrTargetColorRef.current = null;
     }
 
-    if (!activeCluster && graphLines.length > 0) {
+    if (!targetClusters.length && graphLines.length > 0) {
       const text = composeOcrText("", graphLines, false);
       onOcrText?.(text);
       return text;
     }
-    if (!activeCluster) throw new Error(tl("ocr_not_available"));
+    if (!targetClusters.length) throw new Error(tl("ocr_not_available"));
     if (!ocrEnabled) throw new Error(tl("ocr_not_available"));
 
     setLoading(true);
     try {
-      const blob = await renderOcrBlob(activeCluster.strokes);
-      if (!blob) throw new Error(tl("ocr_not_available"));
-      const res = await callOcr(blob);
-      const text = composeOcrText(res.text, graphLines, true);
+      const recognized: string[] = [];
+      for (const cluster of targetClusters) {
+        const blob = await renderOcrBlob(cluster.strokes);
+        if (!blob) throw new Error(tl("ocr_not_available"));
+        const res = await callOcr(blob);
+        const value = res.text.trim();
+        if (!value) throw new Error(tl("ocr_not_available"));
+        recognized.push(value);
+      }
+
+      const text = recognized.length > 1
+        ? recognized
+            .map((value, index) => `Задание ${index + 1}:\n${value}`)
+            .join("\n\n")
+        : composeOcrText(recognized[0] ?? "", graphLines, true);
+
       if (!text) throw new Error(tl("ocr_not_available"));
       onOcrText?.(text);
       return text;

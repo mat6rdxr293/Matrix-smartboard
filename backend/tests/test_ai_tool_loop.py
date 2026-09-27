@@ -1279,6 +1279,36 @@ def test_verified_quadratic_steps_recover_when_structured_response_is_broken():
     assert "1" in steps[-1]["text"]
 
 
+def test_multi_task_full_solution_solves_every_labeled_problem(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("standard quadratic batch should not need the LLM")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        """Задание 1:
+x^2 - 5x + 6 = 0
+
+Задание 2:
+x^2 - 9 = 0""",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    headings = [step["text"] for step in steps if step["text"].startswith("Задание ")]
+    results = [step["text"] for step in steps if step["kind"] == "result"]
+
+    assert headings == ["Задание 1", "Задание 2"]
+    assert len(results) == 2
+    assert any("x_1=3" in result and "x_2=2" in result for result in results)
+    assert any("x_1=3" in result and "x_2=-3" in result for result in results)
+    assert actions == []
+    assert "Задание 1" in text
+    assert "Задание 2" in text
+
+
 def test_plain_quadratic_full_solution_uses_detailed_deterministic_path(monkeypatch):
     def fail_model(*args, **kwargs):
         raise AssertionError("LLM must not be needed for a standard quadratic")

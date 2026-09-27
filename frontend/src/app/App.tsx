@@ -806,11 +806,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return Number.isFinite(value) ? clamp(Math.round(value), 0, 100) : null;
   };
 
-  const recognizeBoard = async () => {
+  const recognizeBoard = async (mode: AiMode) => {
     if (!apiStatus?.ocr || !boardCanvasRef.current) {
       throw new Error(tl("ocr_not_available"));
     }
-    return boardCanvasRef.current.recognize();
+    return boardCanvasRef.current.recognize({
+      multipleTasks: mode === "solution",
+    });
   };
 
   const cancelAiSolution = (solutionId: string) => {

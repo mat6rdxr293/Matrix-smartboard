@@ -21,7 +21,7 @@ type AIAssistantProps = {
   loading?: boolean;
   lowPowerMode?: boolean;
   ocrEnabled?: boolean;
-  onRecognizeBoard?: () => Promise<string>;
+  onRecognizeBoard?: (mode: AiMode) => Promise<string>;
   onSubmitRecognized?: (mode: AiMode, text: string) => void;
 };
 
@@ -69,7 +69,7 @@ export default function AIAssistant({
     setRecognitionError(null);
     setRecognizing(true);
     try {
-      const text = (await onRecognizeBoard()).trim();
+      const text = (await onRecognizeBoard(mode)).trim();
       if (!text) throw new Error(tl("ocr_not_available"));
       setPendingMode(mode);
       setRecognizedText(text);

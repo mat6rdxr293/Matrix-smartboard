@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Stroke } from "./boardEngine";
-import { chooseActiveOcrCluster, clusterOcrStrokes, composeOcrText } from "./ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText } from "./ocrClusters";
 
 const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): Stroke => ({
   points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
@@ -24,6 +24,51 @@ describe("clusterOcrStrokes", () => {
     const clusters = clusterOcrStrokes(strokes);
     expect(clusters).toHaveLength(2);
     expect(chooseActiveOcrCluster(clusters)?.indices).toEqual([3, 4, 5]);
+  });
+
+  it("returns multiple substantial tasks in reading order", () => {
+    const strokes = [
+      // Task 1, left.
+      stroke(50, 80, 120, 140),
+      stroke(125, 100, 180, 100),
+      stroke(190, 70, 190, 145),
+      // Task 2, right.
+      stroke(430, 90, 500, 150),
+      stroke(505, 110, 565, 110),
+      stroke(580, 80, 580, 155),
+      // Tiny accidental scribble below.
+      stroke(820, 520, 832, 530),
+      stroke(835, 528, 844, 536),
+    ];
+
+    const clusters = clusterOcrStrokes(strokes);
+    const tasks = chooseOcrTaskClusters(clusters);
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].indices).toEqual([0, 1, 2]);
+    expect(tasks[1].indices).toEqual([3, 4, 5]);
+  });
+
+  it("keeps the rows of each worked task together while keeping tasks separate", () => {
+    const strokes = [
+      // Task 1, two rows.
+      stroke(40, 70, 110, 120),
+      stroke(120, 90, 185, 90),
+      stroke(50, 200, 115, 245),
+      stroke(125, 220, 210, 220),
+      // Task 2, two rows far to the right.
+      stroke(500, 75, 575, 125),
+      stroke(585, 95, 650, 95),
+      stroke(505, 205, 575, 250),
+      stroke(585, 225, 675, 225),
+    ];
+
+    const clusters = clusterOcrStrokes(strokes);
+    const tasks = chooseOcrTaskClusters(clusters);
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].indices).toEqual([0, 1, 2, 3]);
+    expect(tasks[1].indices).toEqual([4, 5, 6, 7]);
   });
 
   it("merges a superscript with its equation", () => {

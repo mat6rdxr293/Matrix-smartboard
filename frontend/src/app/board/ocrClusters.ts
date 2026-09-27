@@ -231,6 +231,87 @@ const mergeClusters = (clusters: OcrStrokeCluster[]): OcrStrokeCluster => ({
   bounds: unionRects(clusters.map((cluster) => cluster.bounds)),
 });
 
+const expandOcrWorkBlock = (
+  clusters: OcrStrokeCluster[],
+  anchor: OcrStrokeCluster,
+  maxScore: number,
+): OcrStrokeCluster => {
+  const selected = new Set<OcrStrokeCluster>([anchor]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const candidate of clusters) {
+      if (selected.has(candidate)) continue;
+      const score = clusterContentScore(candidate);
+      const candidateWidth = clusterWidth(candidate);
+      const candidateHeight = clusterHeight(candidate);
+      const substantial =
+        score >= maxScore * 0.12 ||
+        candidate.strokes.length >= 3 ||
+        candidateWidth >= 54 ||
+        candidateHeight >= 38;
+      const touchesSelectedRow = [...selected].some((row) =>
+        likelySameVerticalWork(row, candidate)
+      );
+      if (!substantial || !touchesSelectedRow) continue;
+      selected.add(candidate);
+      changed = true;
+    }
+  }
+
+  return mergeClusters([...selected]);
+};
+
+export function chooseOcrTaskClusters(
+  clusters: OcrStrokeCluster[],
+  maxTasks = 8,
+): OcrStrokeCluster[] {
+  if (!clusters.length) return [];
+  if (clusters.length === 1) return [clusters[0]];
+
+  const scored = clusters.map((cluster) => ({
+    cluster,
+    score: clusterContentScore(cluster),
+  }));
+  const maxScore = Math.max(...scored.map((item) => item.score));
+
+  const candidateAnchors = scored
+    .filter((item) => {
+      const width = clusterWidth(item.cluster);
+      const height = clusterHeight(item.cluster);
+      return (
+        item.score >= maxScore * 0.22 ||
+        item.cluster.strokes.length >= 4 ||
+        width >= 72 ||
+        height >= 42
+      );
+    })
+    .map((item) => item.cluster);
+
+  const unique = new Map<string, OcrStrokeCluster>();
+  for (const anchor of candidateAnchors) {
+    const block = expandOcrWorkBlock(clusters, anchor, maxScore);
+    const signature = [...block.indices].sort((a, b) => a - b).join(",");
+    unique.set(signature, block);
+  }
+
+  return [...unique.values()]
+    .sort((a, b) => {
+      const aCenterY = (a.bounds.top + a.bounds.bottom) / 2;
+      const bCenterY = (b.bounds.top + b.bounds.bottom) / 2;
+      const rowTolerance = Math.max(
+        48,
+        Math.min(clusterHeight(a), clusterHeight(b)) * 0.55,
+      );
+      if (Math.abs(aCenterY - bCenterY) <= rowTolerance) {
+        return a.bounds.left - b.bounds.left;
+      }
+      return a.bounds.top - b.bounds.top;
+    })
+    .slice(0, Math.max(1, maxTasks));
+}
+
 export function chooseActiveOcrCluster(
   clusters: OcrStrokeCluster[],
 ): OcrStrokeCluster | null {

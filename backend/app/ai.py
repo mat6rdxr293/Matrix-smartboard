@@ -3378,6 +3378,28 @@ def generate_board_response(
     return finish(text, steps)
 
 
+_MULTI_BOARD_TASK_RE = re.compile(
+    r"(?im)^\s*(?:задание|task|тапсырма)\s*(\d+)\s*:\s*(.*)$"
+)
+
+
+def _split_labeled_board_tasks(problem: str) -> list[tuple[int, str]]:
+    text = (problem or "").strip()
+    matches = list(_MULTI_BOARD_TASK_RE.finditer(text))
+    if len(matches) < 2:
+        return []
+
+    tasks: list[tuple[int, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        first_line = (match.group(2) or "").strip()
+        remainder = text[match.end():end].strip()
+        body = "\n".join(part for part in (first_line, remainder) if part).strip()
+        if body:
+            tasks.append((int(match.group(1)), body))
+    return tasks if len(tasks) >= 2 else []
+
+
 def generate_board_solution(
     problem: str,
     *,
@@ -3389,6 +3411,47 @@ def generate_board_solution(
 ):
     api_key = get_openai_key()
     base_url = settings.ai_base_url
+
+    multi_tasks = _split_labeled_board_tasks(problem)
+    if multi_tasks:
+        heading_word = {
+            "ru": "Задание",
+            "kk": "Тапсырма",
+            "en": "Task",
+        }.get(response_locale, "Задание")
+        combined_steps: list[dict[str, str]] = []
+        combined_actions: list[dict] = []
+
+        for display_index, (_source_number, task) in enumerate(multi_tasks, start=1):
+            combined_steps.append({
+                "text": f"{heading_word} {display_index}",
+                "kind": "text",
+            })
+            result = generate_board_solution(
+                task,
+                subject=subject,
+                board_context=board_context,
+                response_locale=response_locale,
+                include_actions=include_actions,
+                board_state=board_state,
+            )
+            if include_actions:
+                task_text, task_steps, task_actions = result
+                combined_actions.extend(task_actions or [])
+            else:
+                task_text, task_steps = result
+            if task_steps:
+                combined_steps.extend(task_steps)
+            elif task_text:
+                combined_steps.append({"text": task_text, "kind": "result"})
+
+        combined_text = "\n".join(
+            f"{index + 1}. {step['text']}"
+            for index, step in enumerate(combined_steps)
+        )
+        if include_actions:
+            return combined_text, combined_steps, combined_actions
+        return combined_text, combined_steps
 
     equation = _extract_zero_equation_for_graph(problem)
     if include_actions and equation and _check_task_kind(problem, subject) == "equation":
