@@ -1353,17 +1353,53 @@ def _math_tool_names_for_task(subject: Optional[str], task_text: Optional[str]) 
         "math_expand",
     }
 
-    if any(cue in text for cue in ("систем", "system of", "жүйе")):
+    equation_lines = [line for line in (task_text or "").splitlines() if "=" in line]
+    if (
+        any(cue in text for cue in ("систем", "system of", "жүйе"))
+        or "\\begin{cases}" in (task_text or "")
+        or (len(equation_lines) >= 2 and any(mark in (task_text or "") for mark in ("{", "⎧")))
+    ):
         names.add("math_solve_system")
-    if any(cue in text for cue in ("неравен", "inequal", "теңсіз", "<", ">")):
+
+    inequality_view = (
+        (task_text or "")
+        .replace("->", "")
+        .replace("→", "")
+        .replace("⇒", "")
+        .replace("⟶", "")
+    )
+    if (
+        any(cue in text for cue in ("неравен", "inequal", "теңсіз"))
+        or any(symbol in inequality_view for symbol in ("<", ">", "≤", "≥"))
+    ):
         names.add("math_solve_inequalities")
+
     if any(cue in text for cue in ("област", "domain", "одз", "анықталу облысы")):
         names.add("math_domain")
-    if any(cue in text for cue in ("предел", "limit", "шек")):
+
+    if (
+        any(cue in text for cue in ("предел", "limit", "шек"))
+        or re.search(r"(?i)(?:\\lim|\blim\s*(?:_|\^|\(|\[))", task_text or "")
+    ):
         names.update({"math_limit", "math_domain"})
-    if any(cue in text for cue in ("производн", "derivative", "туынды")):
+
+    if (
+        any(cue in text for cue in ("производн", "derivative", "туынды"))
+        or re.search(
+            r"(?i)(?:\bd\s*/\s*d[a-z]\b|\bd[a-z]\s*/\s*d[a-z]\b|"
+            r"\\frac\s*\{?d\}?\s*\{?d[a-z]\}?|"
+            r"\b[a-z][a-z0-9_]*\s*'\s*\()",
+            task_text or "",
+        )
+    ):
         names.update({"math_differentiate", "math_domain"})
-    if any(cue in text for cue in ("интеграл", "integral", "алғашқы функция")):
+
+    if (
+        any(cue in text for cue in ("интеграл", "integral", "алғашқы функция"))
+        or "∫" in (task_text or "")
+        or "\\int" in (task_text or "")
+        or re.search(r"(?i)\bint\s*(?:_|\^|\[|\()", task_text or "")
+    ):
         names.update({"math_integrate", "math_domain"})
     if any(cue in text for cue in ("процент", "percent", "%", "пайыз")):
         names.add("math_percent")

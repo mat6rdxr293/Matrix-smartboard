@@ -215,6 +215,14 @@ def test_local_ocr_raises_only_after_all_retries(monkeypatch):
     assert len(calls) == 4
 
 
+def test_ocr_normalization_repairs_missing_frac_prefix():
+    value = ocr_module._normalize_ocr_text(
+        r"\int_{-\frac{\pi}{2}}^{rac{\pi}{2}} cos(x) dx"
+    )
+
+    assert value == r"\int_{-\frac{\pi}{2}}^{\frac{\pi}{2}} cos(x) dx"
+
+
 def test_local_ocr_recovers_with_low_context_emergency_pass(monkeypatch):
     calls = []
     compact_sizes = []

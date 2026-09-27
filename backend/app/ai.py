@@ -740,6 +740,11 @@ def _local_chat_with_tools(
         finalized = finalize_from_tools()
         if finalized:
             return finalized
+        # The computation already succeeded. Returning an empty structured
+        # response lets the board layer render a deterministic fallback from
+        # the verified tool trace instead of turning a formatting failure into
+        # a 503 for the whole task.
+        return ""
 
     raise RuntimeError("AI не смог завершить ответ после вызова инструментов")
 
@@ -1181,6 +1186,190 @@ def _extract_quadratic_equation(problem: str) -> str | None:
         if left and right:
             return f"{left}={right}"
     return None
+
+
+def _balanced_group(
+    source: str,
+    start: int,
+    opening: str,
+    closing: str,
+) -> tuple[str, int] | None:
+    if start >= len(source) or source[start] != opening:
+        return None
+    depth = 0
+    for index in range(start, len(source)):
+        char = source[index]
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return source[start + 1:index], index + 1
+    return None
+
+
+def _repair_latex_fraction_prefix(value: str) -> str:
+    result = value
+    result = re.sub(r"(?<![A-Za-z\\])rac(?=\s*\{)", r"\\frac", result)
+    result = re.sub(r"(?<![A-Za-z\\])frac(?=\s*\{)", r"\\frac", result)
+    return result
+
+
+def _latexish_to_tool_expression(value: str) -> str:
+    result = _repair_latex_fraction_prefix(value.strip())
+    result = result.replace("−", "-").replace("π", "pi")
+    result = result.replace("²", "^2").replace("³", "^3")
+    result = result.replace("\\left", "").replace("\\right", "")
+    result = result.replace("\\cdot", "*").replace("\\times", "*")
+    result = result.replace("×", "*").replace("·", "*")
+    result = result.replace("\\pi", "pi")
+
+    while "\\frac" in result:
+        start = result.find("\\frac")
+        cursor = start + len("\\frac")
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        numerator_group = _balanced_group(result, cursor, "{", "}")
+        if numerator_group is None:
+            break
+        numerator, cursor = numerator_group
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        denominator_group = _balanced_group(result, cursor, "{", "}")
+        if denominator_group is None:
+            break
+        denominator, end = denominator_group
+        replacement = (
+            f"(({_latexish_to_tool_expression(numerator)})/"
+            f"({_latexish_to_tool_expression(denominator)}))"
+        )
+        result = result[:start] + replacement + result[end:]
+
+    while "\\sqrt" in result:
+        start = result.find("\\sqrt")
+        cursor = start + len("\\sqrt")
+        while cursor < len(result) and result[cursor].isspace():
+            cursor += 1
+        group = _balanced_group(result, cursor, "{", "}")
+        if group is None:
+            break
+        inner, end = group
+        result = (
+            result[:start]
+            + f"sqrt({_latexish_to_tool_expression(inner)})"
+            + result[end:]
+        )
+
+    result = re.sub(r"\\(sin|cos|tan|ln|log|exp)\b", r"\1", result)
+
+    trig_power = re.compile(
+        r"\b(sin|cos|tan)\s*\^\s*(?:\{\s*([^{}]+?)\s*\}|([0-9]+))\s*\("
+    )
+    while True:
+        match = trig_power.search(result)
+        if not match:
+            break
+        group = _balanced_group(result, match.end() - 1, "(", ")")
+        if group is None:
+            break
+        argument, end = group
+        power = (match.group(2) or match.group(3) or "1").strip()
+        replacement = (
+            f"({match.group(1)}({_latexish_to_tool_expression(argument)}))"
+            f"^({_latexish_to_tool_expression(power)})"
+        )
+        result = result[:match.start()] + replacement + result[end:]
+
+    previous = None
+    while previous != result:
+        previous = result
+        result = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", result)
+
+    result = result.replace("{", "(").replace("}", ")")
+    result = re.sub(r"\\[,;:! ]", "", result)
+    result = result.replace("\\", "")
+    result = re.sub(r"\s+", " ", result).strip()
+    return result
+
+
+def _extract_definite_integral_tool_args(problem: str) -> dict | None:
+    task, _answer = _split_problem_and_marked_answer(problem)
+    source = _repair_latex_fraction_prefix(task.strip())
+
+    compact_match = re.search(
+        r"(?is)\bint_\[([^\]]+)\]\^\[([^\]]+)\]\s*(.*?)\s*d([A-Za-z])\s*$",
+        source,
+    )
+    if compact_match:
+        lower, upper, expression, variable = compact_match.groups()
+        expression = expression.strip()
+        if expression.startswith("(") and expression.endswith(")"):
+            expression = expression[1:-1].strip()
+        return {
+            "expression": _latexish_to_tool_expression(expression),
+            "variable": variable,
+            "lower": _latexish_to_tool_expression(lower),
+            "upper": _latexish_to_tool_expression(upper),
+        }
+
+    integral_match = re.search(r"(?:\\int|∫)", source)
+    if not integral_match:
+        return None
+    cursor = integral_match.end()
+
+    def read_script(marker: str) -> str | None:
+        nonlocal cursor
+        while cursor < len(source) and source[cursor].isspace():
+            cursor += 1
+        if cursor >= len(source) or source[cursor] != marker:
+            return None
+        cursor += 1
+        while cursor < len(source) and source[cursor].isspace():
+            cursor += 1
+        if cursor < len(source) and source[cursor] == "{":
+            group = _balanced_group(source, cursor, "{", "}")
+            if group is None:
+                return None
+            value, cursor = group
+            return value
+        if cursor < len(source) and source[cursor] == "[":
+            group = _balanced_group(source, cursor, "[", "]")
+            if group is None:
+                return None
+            value, cursor = group
+            return value
+        start = cursor
+        while cursor < len(source) and not source[cursor].isspace() and source[cursor] not in "^_":
+            cursor += 1
+        return source[start:cursor] or None
+
+    lower = read_script("_")
+    upper = read_script("^")
+    if lower is None or upper is None:
+        return None
+
+    remainder = source[cursor:].strip()
+    differential = re.search(
+        r"(?is)(?:\\[,;:]\s*)?d\s*([A-Za-z])\s*$",
+        remainder,
+    )
+    if not differential:
+        return None
+    variable = differential.group(1)
+    expression = remainder[:differential.start()].strip()
+    expression = re.sub(r"^\s*\\?left\s*", "", expression)
+    expression = re.sub(r"\\?right\s*$", "", expression)
+    if expression.startswith("(") and expression.endswith(")"):
+        expression = expression[1:-1].strip()
+    if not expression:
+        return None
+
+    return {
+        "expression": _latexish_to_tool_expression(expression),
+        "variable": variable,
+        "lower": _latexish_to_tool_expression(lower),
+        "upper": _latexish_to_tool_expression(upper),
+    }
 
 
 def _normalize_graph_expression(value: str) -> str:
@@ -3571,6 +3760,31 @@ def generate_board_solution(
         except ToolError:
             pass
 
+    if include_actions and _check_task_kind(problem, subject) == "integral":
+        integral_arguments = _extract_definite_integral_tool_args(problem)
+        if integral_arguments:
+            try:
+                payload = execute_tool("math_integrate", integral_arguments)
+                trace = [{
+                    "tool": "math_integrate",
+                    "arguments": integral_arguments,
+                    "payload": payload,
+                }]
+                domain_failure = _integral_domain_failure(trace)
+                deterministic_steps = (
+                    _domain_failure_board_steps(domain_failure, response_locale)
+                    if domain_failure is not None
+                    else _verified_integral_board_steps(trace, response_locale)
+                )
+                if deterministic_steps:
+                    deterministic_text = "\n".join(
+                        f"{index + 1}. {step['text']}"
+                        for index, step in enumerate(deterministic_steps)
+                    )
+                    return deterministic_text, deterministic_steps, []
+            except ToolError:
+                pass
+
     if include_actions and _is_visual_board_request(problem) and not _visual_request_requires_solution(problem):
         if base_url or api_key:
             return _generate_visual_board_plan(
@@ -3673,6 +3887,19 @@ def generate_board_solution(
     if base_url:
         client_options["base_url"] = base_url
     client = OpenAI(**client_options)
+    task_kind = _check_task_kind(problem, subject)
+    required_reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
+    constrained_tools = (
+        set(required_reference_tools)
+        if include_actions and required_reference_tools
+        else None
+    )
+    return_after_verified_tool = (
+        set(required_reference_tools)
+        if include_actions and task_kind == "integral"
+        else None
+    )
+
     tool_trace: list[dict] = []
     raw = _local_chat_with_tools(
         client,
@@ -3684,10 +3911,10 @@ def generate_board_solution(
         postprocess=False,
         require_tool=_requires_tool_use(subject, "solution"),
         tool_trace=tool_trace,
+        only_tool_names=constrained_tools,
+        return_after_tool_names=return_after_verified_tool,
     )
 
-    task_kind = _check_task_kind(problem, subject)
-    required_reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
     if include_actions and required_reference_tools and not _check_trace_covers_task(
         problem,
         subject,
@@ -3745,6 +3972,12 @@ def generate_board_solution(
             postprocess=False,
             require_tool=True,
             tool_trace=retry_trace,
+            only_tool_names=set(required_reference_tools),
+            return_after_tool_names=(
+                set(required_reference_tools)
+                if task_kind == "integral"
+                else None
+            ),
         )
         tool_trace = retry_trace
 
@@ -3759,12 +3992,41 @@ def generate_board_solution(
     text, steps = _parse_board_solution(raw)
 
     if not steps:
-        verified_quadratic_steps = _verified_quadratic_board_steps(
-            tool_trace,
-            response_locale,
+        verified_fallback_steps = (
+            _verified_quadratic_board_steps(tool_trace, response_locale)
+            or _verified_integral_board_steps(tool_trace, response_locale)
         )
-        if verified_quadratic_steps:
-            steps = verified_quadratic_steps
+        if verified_fallback_steps is None:
+            domain_failure = _integral_domain_failure(tool_trace)
+            if domain_failure is not None:
+                verified_fallback_steps = _domain_failure_board_steps(
+                    domain_failure,
+                    response_locale,
+                )
+
+        if verified_fallback_steps is None:
+            reference = _reference_answer_from_trace(problem, subject, tool_trace)
+            if reference and str(reference.get("display") or "").strip():
+                display = str(reference["display"]).strip()
+                answer_prefix = {
+                    "ru": "Ответ",
+                    "kk": "Жауап",
+                    "en": "Answer",
+                }.get(response_locale, "Ответ")
+                verified_fallback_steps = [
+                    {
+                        "text": {
+                            "ru": "Используем проверенный результат вычислений.",
+                            "kk": "Тексерілген есептеу нәтижесін қолданамыз.",
+                            "en": "Use the verified computation result.",
+                        }.get(response_locale, "Используем проверенный результат вычислений."),
+                        "kind": "text",
+                    },
+                    {"text": f"{answer_prefix}: {display}", "kind": "result"},
+                ]
+
+        if verified_fallback_steps:
+            steps = verified_fallback_steps
             text = "\n".join(
                 f"{index + 1}. {step['text']}"
                 for index, step in enumerate(steps)

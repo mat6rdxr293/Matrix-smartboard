@@ -1426,6 +1426,78 @@ def test_structured_ocr_notation_preserves_math_task_type():
     assert ai_module._check_task_kind("2x+1 >= 7", "алгебра") == "inequality"
 
 
+def test_board_solution_directly_solves_structured_definite_integral_without_llm(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise AssertionError("structured definite integral should bypass the LLM")
+
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fail_model)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        r"\int_{0}^{rac{1}{2}} x dx",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert steps[-1]["kind"] == "result"
+    assert "\\frac{1}{8}" in text
+
+
+def test_board_solution_falls_back_to_verified_integral_when_model_finalization_is_empty(monkeypatch):
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+    def fake_local_chat(*args, **kwargs):
+        kwargs["tool_trace"].append({
+            "tool": "math_integrate",
+            "arguments": {
+                "expression": "x",
+                "variable": "x",
+                "lower": "0",
+                "upper": "1",
+            },
+            "payload": {
+                "ok": True,
+                "tool": "math_integrate",
+                "result": {
+                    "input": {"text": "x", "latex": "x"},
+                    "variable": "x",
+                    "bounds": [
+                        {"text": "0", "latex": "0"},
+                        {"text": "1", "latex": "1"},
+                    ],
+                    "domain_valid": True,
+                    "antiderivative": {"text": "x**2/2", "latex": "\\frac{x^2}{2}"},
+                    "upper_value": {"text": "1/2", "latex": "\\frac{1}{2}"},
+                    "lower_value": {"text": "0", "latex": "0"},
+                    "result": {"text": "1/2", "latex": "\\frac{1}{2}"},
+                },
+            },
+        })
+        return ""
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "int_[0]^[1](x) dx",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert any("F(x)" in step["text"] for step in steps)
+    assert steps[-1]["kind"] == "result"
+    assert "\\frac{1}{2}" in text
+
+
 def test_solution_retries_when_model_uses_wrong_tool_for_detected_task(monkeypatch):
     calls = []
 

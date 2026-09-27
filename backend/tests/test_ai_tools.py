@@ -2,6 +2,7 @@ import pytest
 
 from app.ai_tools import (
     ToolError,
+    _math_tool_names_for_task,
     chemistry_balance_equation,
     chemistry_molar_mass,
     execute_tool,
@@ -29,6 +30,36 @@ from app.ai_tools import (
     physics_check_dimensions,
     physics_convert_unit,
 )
+
+
+def test_structured_ocr_notation_exposes_the_matching_math_tools():
+    integral_tools = _math_tool_names_for_task(
+        "algebra",
+        r"\int_{0}^{1}(cos(x)+x^2) dx",
+    )
+    limit_tools = _math_tool_names_for_task(
+        "algebra",
+        "lim_(x->0) sin(x)/x",
+    )
+    derivative_tools = _math_tool_names_for_task(
+        "algebra",
+        "d/dx (x^2 + sin(x))",
+    )
+    system_tools = _math_tool_names_for_task(
+        "algebra",
+        "{ x+y=3\n  x-y=1",
+    )
+    inequality_tools = _math_tool_names_for_task(
+        "algebra",
+        "2x+1 >= 7",
+    )
+
+    assert "math_integrate" in integral_tools
+    assert "math_limit" in limit_tools
+    assert "math_solve_inequalities" not in limit_tools
+    assert "math_differentiate" in derivative_tools
+    assert "math_solve_system" in system_tools
+    assert "math_solve_inequalities" in inequality_tools
 
 
 def test_math_tools_return_exact_results():

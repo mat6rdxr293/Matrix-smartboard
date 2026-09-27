@@ -86,6 +86,10 @@ def _normalize_ocr_text(text: str | None) -> str:
     value = value.replace("\\\\", "\n")
     value = re.sub(r"(?m)^\s*&\s*", "", value)
     value = value.replace("\\[", "").replace("\\]", "")
+    # Vision models occasionally drop the leading "\\f" from LaTeX fractions
+    # while preserving the brace structure, e.g. ^{rac{\\pi}{2}}.
+    value = re.sub(r"(?<![A-Za-z\\])rac(?=\s*\{)", r"\\frac", value)
+    value = re.sub(r"(?<![A-Za-z\\])frac(?=\s*\{)", r"\\frac", value)
     for left, right in (("\\[", "\\]"), ("\\(", "\\)"), ("$$", "$$")):
         if value.startswith(left) and value.endswith(right):
             value = value[len(left):-len(right)].strip()
