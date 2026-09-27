@@ -35,6 +35,77 @@ describe("normalizeHandwritingText", () => {
     expect(normalizeHandwritingText("x \\sim y")).toBe("x ∼ y");
   });
 
+  it("normalizes common relations, sets, arrows and Greek LaTeX", () => {
+    expect(normalizeHandwritingText(String.raw`\alpha \in A \subseteq B, x \neq y \Leftrightarrow y \notin \emptyset`))
+      .toBe("α ∈ A ⊆ B, x ≠ y ⇔ y ∉ ∅");
+    expect(normalizeHandwritingText(String.raw`\Gamma \perp \Delta, a \parallel b`))
+      .toBe("Γ ⟂ Δ, a ∥ b");
+  });
+
+  it("normalizes indexed roots, functions and numeric subscripts", () => {
+    expect(normalizeHandwritingText(String.raw`x_1=\sqrt[3]{8}, \sin(\pi/2)=1`))
+      .toBe("x₁=³√(8), sin(π/2)=1");
+  });
+
+  it("normalizes broader school LaTeX without leaking command names", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\forall x\in\mathbb{R}: x\neq0 \Rightarrow \frac{1}{x}\in\mathbb{R}`,
+      ),
+    ).toBe("∀ x∈ℝ: x≠0 ⇒ (1)/(x)∈ℝ");
+    expect(
+      normalizeHandwritingText(
+        String.raw`\triangle ABC \cong \triangle DEF, AB\perp CD, A\setminus B\subseteq A`,
+      ),
+    ).toBe("△ ABC ≅ △ DEF, AB⟂ CD, A∖ B⊆ A");
+  });
+
+  it("normalizes vectors, intervals, combinatorics and multiline wrappers", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\vec{AB}, \overline{CD}, \binom{5}{2}, \lfloor x\rfloor, \begin{cases}x=1\\y=2\end{cases}`,
+      ),
+    ).toBe("AB⃗, CD̅, C(5,2), ⌊x⌋, x=1; y=2");
+  });
+
+  it("normalizes degrees, primes and unbraced indices", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`a_12+b_n+c^\alpha+30^{\circ}+f^{\prime}(x)`,
+      ),
+    ).toBe("a₁₂+b₍n₎+c⁽α⁾+30°+f′(x)");
+  });
+
+  it("normalizes common function, modular and negated-set notation", () => {
+    expect(
+      normalizeHandwritingText(
+        String.raw`\sec x+\arcsin y+\sinh z+\det A+\gcd(12,18)`,
+      ),
+    ).toBe("sec x+arcsin y+sinh z+det A+gcd(12,18)");
+    expect(
+      normalizeHandwritingText(
+        String.raw`x \not\in A, A \not\subseteq B, a \not\parallel b, x\equiv2\pmod{7}`,
+      ),
+    ).toBe("x ∉ A, A ⊈ B, a ∦ b, x≡2(mod 7)");
+  });
+
+  it("normalizes short-form fractions and radicals", () => {
+    expect(normalizeHandwritingText(String.raw`\frac12+\sqrt2`))
+      .toBe("(1)/(2)+√(2)");
+  });
+
+  it("covers additional school symbols without leaking LaTeX command names", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`\measuredangle ABC=60\degree, \ell\perp m, \Re z+\Im z, \nexists x, A\subsetneq B, p\oplus q`,
+    );
+    expect(normalized).toBe("∡ ABC=60°, ℓ⟂ m, ℜ z+ℑ z, ∄ x, A⊊ B, p⊕ q");
+    expect(normalized).not.toMatch(/\\[A-Za-z]+/);
+  });
+
+  it("does not silently turn unknown LaTeX commands into plain words", () => {
+    expect(normalizeHandwritingText(String.raw`x \mystery y`)).toContain("\\mystery");
+  });
+
   it("keeps Cyrillic explanations readable", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");

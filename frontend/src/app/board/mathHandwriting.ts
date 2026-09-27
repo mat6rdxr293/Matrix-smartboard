@@ -5,9 +5,10 @@ export type MathHandwritingToken =
   | { type: "sqrt"; body: MathHandwritingToken[] }
   | { type: "fraction"; numerator: MathHandwritingToken[]; denominator: MathHandwritingToken[] }
   | { type: "integral"; lower?: MathHandwritingToken[]; upper?: MathHandwritingToken[] }
-  | { type: "relation"; value: "<" | ">" | "≤" | "≥" }
+  | { type: "relation"; value: "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡" }
   | { type: "decimal"; value: "." | "," }
-  | { type: "arrow" }
+  | { type: "operator"; value: "·" | "•" | "×" | "÷" | "±" | "∓" | "°" | "∞" | "′" | "″" | "‴" }
+  | { type: "arrow"; value: "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦" }
   | { type: "pi" };
 
 type Point = { x: number; y: number };
@@ -44,6 +45,13 @@ const SUPER_TO_NORMAL: Record<string, string> = {
 };
 
 const superscriptChars = new Set(Object.keys(SUPER_TO_NORMAL));
+
+const SUB_TO_NORMAL: Record<string, string> = {
+  "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+  "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+  "₊": "+", "₋": "-",
+};
+const subscriptChars = new Set(Object.keys(SUB_TO_NORMAL));
 
 const stroke = (
   points: Point[],
@@ -109,6 +117,15 @@ function readIntegralLimits(source: string, start: number) {
         index = end + 1;
         return true;
       }
+    }
+    let compactSubscript = "";
+    while (index < source.length && subscriptChars.has(source[index])) {
+      compactSubscript += SUB_TO_NORMAL[source[index]];
+      index += 1;
+    }
+    if (compactSubscript) {
+      lower = compactSubscript;
+      return true;
     }
     if (source[index] !== "_") return false;
     index += 1;
@@ -286,23 +303,31 @@ export function parseMathHandwritingTokens(source: string): MathHandwritingToken
       continue;
     }
 
-    if (source[index] === "→") {
+    if ("·•×÷±∓°∞′″‴".includes(source[index])) {
       flushPlain();
-      tokens.push({ type: "arrow" });
+      tokens.push({
+        type: "operator",
+        value: source[index] as "·" | "•" | "×" | "÷" | "±" | "∓" | "°" | "∞" | "′" | "″" | "‴",
+      });
       index += 1;
       continue;
     }
 
-    if (
-      source[index] === "<" ||
-      source[index] === ">" ||
-      source[index] === "≤" ||
-      source[index] === "≥"
-    ) {
+    if ("→←↔⇒⇐⇔↦".includes(source[index])) {
+      flushPlain();
+      tokens.push({
+        type: "arrow",
+        value: source[index] as "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦",
+      });
+      index += 1;
+      continue;
+    }
+
+    if ("<>≤≥≈≃∼≠≡".includes(source[index])) {
       flushPlain();
       tokens.push({
         type: "relation",
-        value: source[index] as "<" | ">" | "≤" | "≥",
+        value: source[index] as "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡",
       });
       index += 1;
       continue;
@@ -362,46 +387,174 @@ function renderDecimalSeparator(
   };
 }
 
-function renderArrow(
+function renderOperator(
+  value: "·" | "•" | "×" | "÷" | "±" | "∓" | "°" | "∞" | "′" | "″" | "‴",
   x: number,
   y: number,
   fontSize: number,
   color: string,
   strokeWidth: number,
 ): RenderResult {
-  const width = fontSize * 1.05;
+  const centerY = y + fontSize * 0.58;
+  const dot = (cx: number, cy: number, radius = Math.max(1.7, strokeWidth * 0.9)) =>
+    stroke([
+      { x: cx - radius, y: cy },
+      { x: cx, y: cy + radius * 0.22 },
+      { x: cx + radius, y: cy },
+    ], color, Math.max(strokeWidth, 2.1));
+
+  if (value === "·" || value === "•") {
+    const width = fontSize * 0.34;
+    return {
+      strokes: [dot(x + width * 0.5, centerY, value === "•" ? Math.max(2.2, strokeWidth) : undefined)],
+      width,
+      height: fontSize,
+    };
+  }
+
+  if (value === "×") {
+    const width = fontSize * 0.62;
+    const left = x + fontSize * 0.08;
+    const right = x + width - fontSize * 0.08;
+    const dy = fontSize * 0.22;
+    return {
+      strokes: [
+        stroke([{ x: left, y: centerY - dy }, { x: right, y: centerY + dy }], color, strokeWidth),
+        stroke([{ x: left, y: centerY + dy }, { x: right, y: centerY - dy }], color, strokeWidth),
+      ],
+      width,
+      height: fontSize,
+    };
+  }
+
+  if (value === "÷") {
+    const width = fontSize * 0.68;
+    const left = x + fontSize * 0.08;
+    const right = x + width - fontSize * 0.08;
+    const cx = (left + right) / 2;
+    return {
+      strokes: [
+        stroke([{ x: left, y: centerY }, { x: right, y: centerY }], color, strokeWidth),
+        dot(cx, centerY - fontSize * 0.25),
+        dot(cx, centerY + fontSize * 0.25),
+      ],
+      width,
+      height: fontSize,
+    };
+  }
+
+  if (value === "±" || value === "∓") {
+    const width = fontSize * 0.68;
+    const left = x + fontSize * 0.08;
+    const right = x + width - fontSize * 0.08;
+    const upperY = centerY - fontSize * 0.17;
+    const lowerY = centerY + fontSize * 0.20;
+    const plusY = value === "±" ? upperY : lowerY;
+    const minusY = value === "±" ? lowerY : upperY;
+    return {
+      strokes: [
+        stroke([{ x: left, y: plusY }, { x: right, y: plusY }], color, strokeWidth),
+        stroke([
+          { x: (left + right) / 2, y: plusY - fontSize * 0.18 },
+          { x: (left + right) / 2, y: plusY + fontSize * 0.18 },
+        ], color, strokeWidth),
+        stroke([{ x: left, y: minusY }, { x: right, y: minusY }], color, strokeWidth),
+      ],
+      width,
+      height: fontSize,
+    };
+  }
+
+  if (value === "°") {
+    const width = fontSize * 0.36;
+    const cx = x + width * 0.50;
+    const cy = y + fontSize * 0.24;
+    const radius = fontSize * 0.12;
+    const points: Point[] = [];
+    for (let index = 0; index <= 16; index += 1) {
+      const angle = (index / 16) * Math.PI * 2;
+      points.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
+    }
+    return { strokes: [stroke(points, color, strokeWidth)], width, height: fontSize };
+  }
+
+  if (value === "′" || value === "″" || value === "‴") {
+    const count = value === "′" ? 1 : value === "″" ? 2 : 3;
+    const gap = fontSize * 0.13;
+    const width = fontSize * (0.18 + count * 0.14);
+    const strokes: Stroke[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const px = x + fontSize * 0.08 + index * gap;
+      strokes.push(stroke([
+        { x: px + fontSize * 0.08, y: y + fontSize * 0.08 },
+        { x: px, y: y + fontSize * 0.32 },
+      ], color, strokeWidth));
+    }
+    return { strokes, width, height: fontSize };
+  }
+
+  const width = fontSize * 0.90;
+  const cx = x + width * 0.5;
+  const cy = centerY;
+  const rx = width * 0.42;
+  const ry = fontSize * 0.20;
+  const points: Point[] = [];
+  for (let index = 0; index <= 36; index += 1) {
+    const t = (index / 36) * Math.PI * 2;
+    points.push({
+      x: cx + Math.cos(t) * rx,
+      y: cy + Math.sin(t * 2) * ry,
+    });
+  }
+  return { strokes: [stroke(points, color, strokeWidth)], width, height: fontSize };
+}
+
+function renderArrow(
+  value: "→" | "←" | "↔" | "⇒" | "⇐" | "⇔" | "↦",
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  strokeWidth: number,
+): RenderResult {
+  const width = fontSize * 1.08;
   const centerY = y + fontSize * 0.58;
   const leftX = x + fontSize * 0.08;
-  const tipX = x + width - fontSize * 0.08;
-  const head = fontSize * 0.25;
+  const rightX = x + width - fontSize * 0.08;
+  const head = fontSize * 0.24;
+  const isDouble = value === "⇒" || value === "⇐" || value === "⇔";
+  const pointsRight = value === "→" || value === "↔" || value === "⇒" || value === "⇔" || value === "↦";
+  const pointsLeft = value === "←" || value === "↔" || value === "⇐" || value === "⇔";
+  const offsets = isDouble ? [-fontSize * 0.09, fontSize * 0.09] : [0];
+  const strokes: Stroke[] = offsets.map((offset) =>
+    stroke([{ x: leftX, y: centerY + offset }, { x: rightX, y: centerY + offset }], color, strokeWidth),
+  );
 
-  return {
-    strokes: [
-      stroke(
-        [
-          { x: leftX, y: centerY },
-          { x: tipX, y: centerY },
-        ],
-        color,
-        strokeWidth,
-      ),
-      stroke(
-        [
-          { x: tipX - head, y: centerY - head * 0.70 },
-          { x: tipX, y: centerY },
-          { x: tipX - head, y: centerY + head * 0.70 },
-        ],
-        color,
-        strokeWidth,
-      ),
-    ],
-    width,
-    height: fontSize,
-  };
+  if (pointsRight) {
+    strokes.push(stroke([
+      { x: rightX - head, y: centerY - head * 0.68 },
+      { x: rightX, y: centerY },
+      { x: rightX - head, y: centerY + head * 0.68 },
+    ], color, strokeWidth));
+  }
+  if (pointsLeft) {
+    strokes.push(stroke([
+      { x: leftX + head, y: centerY - head * 0.68 },
+      { x: leftX, y: centerY },
+      { x: leftX + head, y: centerY + head * 0.68 },
+    ], color, strokeWidth));
+  }
+  if (value === "↦") {
+    strokes.push(stroke([
+      { x: leftX, y: centerY - fontSize * 0.22 },
+      { x: leftX, y: centerY + fontSize * 0.22 },
+    ], color, strokeWidth));
+  }
+  return { strokes, width, height: fontSize };
 }
 
 function renderRelation(
-  value: "<" | ">" | "≤" | "≥",
+  value: "<" | ">" | "≤" | "≥" | "≈" | "≃" | "∼" | "≠" | "≡",
   x: number,
   y: number,
   fontSize: number,
@@ -415,6 +568,46 @@ function renderRelation(
   const right = x + width - fontSize * 0.08;
   const top = centerY - height * 0.42;
   const bottom = centerY + height * 0.42;
+
+  if (value === "∼" || value === "≈" || value === "≃") {
+    const wave = (waveY: number) => {
+      const points: Point[] = [];
+      for (let index = 0; index <= 12; index += 1) {
+        const t = index / 12;
+        points.push({
+          x: left + (right - left) * t,
+          y: waveY + Math.sin(t * Math.PI * 2) * fontSize * 0.055,
+        });
+      }
+      return stroke(points, color, strokeWidth);
+    };
+    const strokes = [wave(value === "∼" ? centerY : centerY - fontSize * 0.12)];
+    if (value === "≈") strokes.push(wave(centerY + fontSize * 0.16));
+    if (value === "≃") {
+      strokes.push(stroke([
+        { x: left, y: centerY + fontSize * 0.18 },
+        { x: right, y: centerY + fontSize * 0.18 },
+      ], color, strokeWidth));
+    }
+    return { strokes, width, height: fontSize };
+  }
+
+  if (value === "≠" || value === "≡") {
+    const offsets = value === "≡" ? [-0.18, 0, 0.18] : [-0.11, 0.11];
+    const strokes = offsets.map((offset) =>
+      stroke([
+        { x: left, y: centerY + fontSize * offset },
+        { x: right, y: centerY + fontSize * offset },
+      ], color, strokeWidth),
+    );
+    if (value === "≠") {
+      strokes.push(stroke([
+        { x: left + fontSize * 0.08, y: centerY + fontSize * 0.28 },
+        { x: right - fontSize * 0.08, y: centerY - fontSize * 0.28 },
+      ], color, strokeWidth));
+    }
+    return { strokes, width, height: fontSize };
+  }
   const isLess = value === "<" || value === "≤";
   const apexX = isLess ? left : right;
   const outerX = isLess ? right : left;
@@ -686,8 +879,24 @@ function renderTokens(
       continue;
     }
 
+    if (token.type === "operator") {
+      const rendered = renderOperator(
+        token.value,
+        cursorX,
+        options.y,
+        options.fontSize,
+        options.color,
+        options.strokeWidth,
+      );
+      strokes.push(...rendered.strokes);
+      cursorX += rendered.width + options.fontSize * 0.04;
+      maxHeight = Math.max(maxHeight, rendered.height);
+      continue;
+    }
+
     if (token.type === "arrow") {
       const rendered = renderArrow(
+        token.value,
         cursorX,
         options.y,
         options.fontSize,

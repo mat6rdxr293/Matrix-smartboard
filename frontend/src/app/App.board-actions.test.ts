@@ -19,7 +19,7 @@ describe("board quick actions layout", () => {
     expect(source).toContain('aria-pressed={freeBoardMode}');
     expect(source).toContain('onClick={toggleFreeBoardMode}');
     expect(source).toContain('{tl("free_board_mode")}');
-    expect(source).toContain('freeBoardMode\n                                ? "w-full rounded-xl border border-accent/60 bg-accent/10 px-3 py-2.5 text-left"');
+    expect(source).toMatch(/freeBoardMode\s*\?\s*"w-full rounded-xl border border-accent\/60 bg-accent\/10 px-3 py-2.5 text-left"/);
   });
 
   it("raises the floating panel that the user interacts with", () => {

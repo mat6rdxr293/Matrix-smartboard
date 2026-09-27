@@ -1143,3 +1143,94 @@ def test_full_board_solution_prompt_requires_visible_work(monkeypatch):
     assert "область определения интегранда" in prompt
     assert "первообразную" in prompt
     assert "подстановку обоих пределов" in prompt
+
+
+def test_board_actions_parser_accepts_safe_visual_actions():
+    raw = (
+        '{"summary":"ok","steps":[{"text":"done","kind":"result"}],'
+        '"board_actions":['
+        '{"type":"add_graph","expressions":["x^2","sin(x)"],"x_min":-5,"x_max":5},'
+        '{"type":"add_shape","shape":"triangle","x":10,"y":20,"width":40,"height":30},'
+        '{"type":"update_graph","target_id":"graph-1","expressions":["x^3"]}'
+        ']}'
+    )
+    actions = ai_module._parse_board_actions(raw)
+    assert [item["type"] for item in actions] == ["add_graph", "add_shape", "update_graph"]
+    assert actions[0]["expressions"] == ["x^2", "sin(x)"]
+    assert actions[1]["shape"] == "triangle"
+    assert actions[2]["target_id"] == "graph-1"
+
+
+def test_board_actions_parser_sanitizes_graph_expression_from_model_prose():
+    raw = (
+        '{"board_actions":['
+        '{"type":"add_graph","expressions":["y=x^2 и рядом нарисуй треугольник"]}'
+        ']}'
+    )
+    actions = ai_module._parse_board_actions(raw)
+    assert actions == [{"type": "add_graph", "expressions": ["x^2"]}]
+
+
+def test_board_actions_parser_rejects_unknown_or_unbounded_payloads():
+    raw = '{"board_actions":[{"type":"shell","command":"rm -rf /"},' \
+          '{"type":"add_shape","shape":"triangle","x":999,"y":-50}]}'
+    actions = ai_module._parse_board_actions(raw)
+    assert actions == [{"type": "add_shape", "shape": "triangle", "x": 100.0, "y": 0.0}]
+
+
+def test_visual_board_request_uses_deterministic_graph_and_shape_fallback():
+    problem = "Построй графики y=x² и y=sin(x) и нарисуй треугольник."
+    assert ai_module._is_visual_board_request(problem) is True
+    actions = ai_module._fallback_visual_board_actions(problem)
+    assert actions[0]["type"] == "add_graph"
+    assert actions[0]["expressions"] == ["x^2", "sin(x)"]
+    assert actions[1]["type"] == "add_shape"
+    assert actions[1]["shape"] == "triangle"
+
+
+def test_visual_fallback_stops_graph_expression_before_adjacent_shape_request():
+    problem = "Построй на доске график y=x^2 и рядом нарисуй треугольник."
+    actions = ai_module._fallback_visual_board_actions(problem)
+    assert actions[0]["type"] == "add_graph"
+    assert actions[0]["expressions"] == ["x^2"]
+    assert actions[1]["type"] == "add_shape"
+    assert actions[1]["shape"] == "triangle"
+
+
+def test_visual_board_request_does_not_capture_ordinary_equation_solution():
+    assert ai_module._is_visual_board_request("Реши уравнение x^2-5x+6=0") is False
+
+
+def test_board_actions_parser_supports_stroke_move_and_delete():
+    raw = (
+        '{"board_actions":['
+        '{"type":"move_strokes","indexes":[3,1,3,-1],"dx":140,"dy":-150},'
+        '{"type":"delete_strokes","indexes":[4,2,4]}'
+        ']}'
+    )
+    actions = ai_module._parse_board_actions(raw)
+    assert actions == [
+        {"type": "move_strokes", "indexes": [1, 3], "dx": 100.0, "dy": -100.0},
+        {"type": "delete_strokes", "indexes": [2, 4]},
+    ]
+
+
+def test_visual_fallback_updates_single_known_graph_instead_of_adding_duplicate():
+    state = {"graphs": [{"id": "graph-1", "expressions": ["x^2"]}]}
+    actions = ai_module._fallback_visual_board_actions(
+        "Перемести существующий график вправо и замени его функцию на y=x^3.",
+        state,
+    )
+    assert actions == [{
+        "type": "update_graph",
+        "target_id": "graph-1",
+        "expressions": ["x^3"],
+        "x": 70.0,
+    }]
+
+
+def test_visual_fallback_deletes_only_an_unambiguous_graph():
+    state = {"graphs": [{"id": "graph-1"}]}
+    assert ai_module._fallback_visual_board_actions("Удали график.", state) == [
+        {"type": "delete_graph", "target_id": "graph-1"},
+    ]

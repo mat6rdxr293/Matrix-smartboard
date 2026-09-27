@@ -9,7 +9,7 @@ import secrets
 import re
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import jwt as pyjwt
@@ -127,12 +127,14 @@ class AiRequest(BaseModel):
     client_message_id: Optional[str] = None
     board_context: bool = False
     board_output: bool = False
+    board_state: Optional[dict[str, Any]] = None
     response_locale: Optional[str] = Field(default=None, pattern="^(ru|kk|en)$")
 
 
 class AiResponse(BaseModel):
     text: str
     steps: Optional[list[dict[str, str]]] = None
+    board_actions: Optional[list[dict[str, Any]]] = None
 
 
 class PolyRequest(BaseModel):
@@ -569,13 +571,16 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
         )
     try:
         steps = None
+        board_actions = None
         if payload.board_output and payload.mode in {"hint", "check", "solution"}:
-            text, steps = generate_board_response(
+            text, steps, board_actions = generate_board_response(
                 payload.mode,
                 payload.problem,
                 subject=payload.subject,
                 board_context=payload.board_context,
                 response_locale=payload.response_locale or "ru",
+                include_actions=True,
+                board_state=payload.board_state,
             )
         else:
             text = generate_ai_response(
@@ -613,7 +618,7 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 text=text,
                 mode=payload.mode,
             )
-        return AiResponse(text=text, steps=steps)
+        return AiResponse(text=text, steps=steps, board_actions=board_actions)
     except Exception as exc:  # noqa: BLE001
         async with ai_history_lock:
             _append_ai_history(
