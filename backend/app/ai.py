@@ -1148,6 +1148,41 @@ def _extract_zero_equation_for_graph(problem: str) -> str | None:
     return f"{left}=0" if left else None
 
 
+def _extract_quadratic_equation(problem: str) -> str | None:
+    for raw_line in (problem or "").splitlines():
+        line = raw_line.strip()
+        if not line or "=" not in line:
+            continue
+        if re.match(
+            r"^(?:D|Δ|Д|д)\s*=|^[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=",
+            line,
+            flags=re.I,
+        ):
+            continue
+        if not re.search(r"[xх].*(?:\^\s*2|²)", line, flags=re.I):
+            continue
+
+        line = re.sub(
+            r"^(?:реши(?:ть|те)?|решить|solve|найди(?:те)?|find)\s*:?\s*",
+            "",
+            line,
+            flags=re.I,
+        )
+        left_raw, right_raw = line.split("=", 1)
+        right_raw = re.split(
+            r"\s+(?:и\s+)?(?:реши(?:ть|те)?|построй(?:те)?|нарисуй(?:те)?|"
+            r"solve|plot|graph|draw)\b",
+            right_raw,
+            maxsplit=1,
+            flags=re.I,
+        )[0]
+        left = _normalize_graph_expression(left_raw.replace("х", "x").replace("Х", "X"))
+        right = _normalize_graph_expression(right_raw.replace("х", "x").replace("Х", "X"))
+        if left and right:
+            return f"{left}={right}"
+    return None
+
+
 def _normalize_graph_expression(value: str) -> str:
     result = value.strip().replace("²", "^2").replace("³", "^3")
     result = result.replace("π", "pi").replace("×", "*").replace("·", "*")
@@ -1792,24 +1827,49 @@ def _verified_quadratic_board_steps(
         plus_value = (-b_num + Decimal(sqrt_value)) / denominator
         minus_value = (-b_num - Decimal(sqrt_value)) / denominator
 
-        def exact_latex_for(value: Decimal) -> str:
-            canonical = _canonical_numeric_token(pretty_decimal(value))
+        def matching_root_item(value: Decimal):
             for item in roots:
-                root_text = ""
-                if isinstance(item, dict):
-                    root_text = str(item.get("text") or "").strip()
-                root_canonical = _canonical_numeric_token(root_text)
-                if canonical is not None and canonical == root_canonical:
-                    return math_text(item)
-            return pretty_decimal(value)
+                candidate = decimal_value(item)
+                if candidate is not None and abs(candidate - value) <= Decimal("1e-12"):
+                    return item
+            return None
+
+        def exact_latex_for(value: Decimal) -> str:
+            item = matching_root_item(value)
+            return math_text(item) if item is not None else pretty_decimal(value)
+
+        def decimal_suffix_for(value: Decimal) -> str:
+            item = matching_root_item(value)
+            raw = ""
+            if isinstance(item, dict):
+                raw = str(item.get("text") or "").strip()
+            elif item is not None:
+                raw = str(item).strip()
+
+            fraction = re.fullmatch(r"\s*([-+]?\d+)\s*/\s*(\d+)\s*", raw)
+            if not fraction:
+                return ""
+
+            numerator = int(fraction.group(1))
+            denominator_raw = int(fraction.group(2))
+            divisor = math.gcd(abs(numerator), denominator_raw)
+            reduced_denominator = denominator_raw // max(1, divisor)
+            finite = reduced_denominator
+            for factor in (2, 5):
+                while finite % factor == 0:
+                    finite //= factor
+
+            if finite == 1:
+                return f"={pretty_decimal(value)}"
+
+            rounded = value.quantize(Decimal("0.001"))
+            return f"\\approx{pretty_decimal(rounded)}"
 
         plus_exact = exact_latex_for(plus_value)
         minus_exact = exact_latex_for(minus_value)
         denominator_text = pretty_decimal(denominator)
-        plus_decimal = pretty_decimal(plus_value)
-        minus_decimal = pretty_decimal(minus_value)
-        plus_display = plus_exact if plus_exact == plus_decimal else f"{plus_exact}={plus_decimal}"
-        minus_display = minus_exact if minus_exact == minus_decimal else f"{minus_exact}={minus_decimal}"
+        plus_display = f"{plus_exact}{decimal_suffix_for(plus_value)}"
+        minus_display = f"{minus_exact}{decimal_suffix_for(minus_value)}"
 
         base_steps.append({
             "text": f"$$\\sqrt{{D}}=\\sqrt{{{discriminant}}}={sqrt_value}$$",
@@ -3020,7 +3080,7 @@ def generate_board_response(
         return (result_text, result_steps, []) if include_actions else (result_text, result_steps)
 
     if mode == "check" and _problem_has_intermediate_work(problem):
-        equation = _extract_zero_equation_for_graph(problem)
+        equation = _extract_quadratic_equation(problem)
         if equation:
             try:
                 quadratic_payload = execute_tool("math_quadratic", {"equation": equation})
@@ -3453,7 +3513,7 @@ def generate_board_solution(
             return combined_text, combined_steps, combined_actions
         return combined_text, combined_steps
 
-    equation = _extract_zero_equation_for_graph(problem)
+    equation = _extract_quadratic_equation(problem)
     if include_actions and equation and _check_task_kind(problem, subject) == "equation":
         try:
             payload = execute_tool("math_quadratic", {"equation": equation})

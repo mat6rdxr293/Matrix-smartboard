@@ -1290,7 +1290,7 @@ def test_multi_task_full_solution_solves_every_labeled_problem(monkeypatch):
 x^2 - 5x + 6 = 0
 
 Задание 2:
-x^2 - 9 = 0""",
+9x^2 + 11x + 3 = 3""",
         subject="алгебра",
         response_locale="ru",
         include_actions=True,
@@ -1303,7 +1303,12 @@ x^2 - 9 = 0""",
     assert headings == ["Задание 1", "Задание 2"]
     assert len(results) == 2
     assert any("x_1=3" in result and "x_2=2" in result for result in results)
-    assert any("x_1=3" in result and "x_2=-3" in result for result in results)
+    assert any(
+        "x_1=0" in result
+        and "11}{9" in result
+        and "\\approx-1.222" in result
+        for result in results
+    )
     assert actions == []
     assert "Задание 1" in text
     assert "Задание 2" in text
