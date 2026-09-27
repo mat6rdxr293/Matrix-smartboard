@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Stroke } from "./boardEngine";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText } from "./ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, sanitizeMultiTaskOcrTexts } from "./ocrClusters";
 
 const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): Stroke => ({
   points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
@@ -166,6 +166,39 @@ it("ignores a tiny newer scribble when an older equation is much more substantia
   const clusters = clusterOcrStrokes(strokes);
   expect(clusters).toHaveLength(2);
   expect(chooseActiveOcrCluster(clusters)?.indices).toEqual([0, 1, 2, 3, 4]);
+});
+
+it("drops stale worked solution and OCR junk when a new task is present", () => {
+  expect(
+    sanitizeMultiTaskOcrTexts([
+      "5x^2 + 4x - 9 = 0\nD = 196\nx1 = 1\nx2 = -1.8",
+      "9x^2 + 11x + 3 = 3",
+      "OK",
+    ]),
+  ).toEqual(["9x^2 + 11x + 3 = 3"]);
+});
+
+it("cuts a stale root row accidentally attached before a new equation", () => {
+  expect(
+    sanitizeMultiTaskOcrTexts([
+      "x2 = (-4 - 14) / 10 = -1.8\n9x^2 + 11x + 3 = 3",
+      "OK",
+    ]),
+  ).toEqual(["9x^2 + 11x + 3 = 3"]);
+});
+
+it("keeps several fresh standalone tasks", () => {
+  expect(
+    sanitizeMultiTaskOcrTexts([
+      "x^2 - 4 = 0",
+      "9x^2 + 11x + 3 = 3",
+      "2x + 7 = 11",
+    ]),
+  ).toEqual([
+    "x^2 - 4 = 0",
+    "9x^2 + 11x + 3 = 3",
+    "2x + 7 = 11",
+  ]);
 });
 
 it("keeps graph text out of OCR when handwriting was actually recognized", () => {

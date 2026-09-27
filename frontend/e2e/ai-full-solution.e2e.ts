@@ -319,6 +319,39 @@ test("with two equations full solution OCR sends both tasks to AI", async ({ pag
 });
 
 
+test("full solution drops stale worked rows and OCR junk before sending task", async ({ page }) => {
+  const operations: CapturedOp[] = [];
+  const aiProblems: string[] = [];
+  const first = [
+    taskStroke(60, 100, 120, 165),
+    taskStroke(125, 130, 180, 130),
+    taskStroke(190, 100, 190, 170),
+  ];
+  const second = [
+    taskStroke(390, 110, 450, 175),
+    taskStroke(455, 140, 510, 140),
+    taskStroke(520, 110, 520, 180),
+  ];
+
+  await seedLesson(page, {
+    captureOps: operations,
+    initialStrokes: [...first, ...second],
+    ocrResponses: [
+      "x2 = (-4 - 14) / 10 = -1.8\n9x^2 + 11x + 3 = 3",
+      "OK",
+    ],
+    captureAiProblems: aiProblems,
+  });
+
+  await generateSolution(page, operations);
+
+  expect(aiProblems).toHaveLength(1);
+  expect(aiProblems[0].trim()).toBe("9x^2 + 11x + 3 = 3");
+  expect(aiProblems[0]).not.toContain("x2 =");
+  expect(aiProblems[0]).not.toContain("OK");
+});
+
+
 async function generateBoardMode(
   page: Page,
   operations: CapturedOp[],

@@ -7,6 +7,77 @@ export type OcrStrokeCluster = {
   bounds: BoardRect;
 };
 
+const isWorkedSolutionLine = (line: string) =>
+  /^\s*(?:D|Δ|Д|д)\s*=/.test(line) ||
+  /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line);
+
+const isStandaloneTaskEquation = (line: string) =>
+  /[xх]/i.test(line) &&
+  /=/.test(line) &&
+  !isWorkedSolutionLine(line) &&
+  !/^\s*y\s*=/i.test(line);
+
+const trimOldWorkedPrefix = (value: string) => {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return value.trim();
+
+  const lastEquation = [...lines]
+    .map((line, index) => ({ line, index }))
+    .reverse()
+    .find(({ line }) => isStandaloneTaskEquation(line));
+
+  if (
+    lastEquation &&
+    lastEquation.index > 0 &&
+    lines.slice(0, lastEquation.index).every(isWorkedSolutionLine)
+  ) {
+    return lines.slice(lastEquation.index).join("\n");
+  }
+  return lines.join("\n");
+};
+
+const isLikelyCompletedWork = (value: string) => {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const rootRows = lines.filter((line) =>
+    /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line)
+  ).length;
+  const hasDiscriminant = lines.some((line) =>
+    /^\s*(?:D|Δ|Д|д)\s*=/.test(line)
+  );
+  const hasAnswer = lines.some((line) =>
+    /^\s*(?:ответ|жауап|answer)\s*:/i.test(line)
+  );
+  return rootRows >= 2 || (hasDiscriminant && rootRows >= 1) || hasAnswer;
+};
+
+const isLikelyTaskText = (value: string) => {
+  const compact = value.replace(/\s+/g, "");
+  if (compact.length < 3) return false;
+  const hasMathSignal = /[=<>≤≥+\-*/^²³√∫Σ∑π\d]/.test(value);
+  const hasEnoughText = value.replace(
+    /[^A-Za-zА-Яа-яӘәҒғҚқҢңӨөҰұҮүҺһІі]/g,
+    "",
+  ).length >= 8;
+  return hasMathSignal || hasEnoughText;
+};
+
+export function sanitizeMultiTaskOcrTexts(values: string[]): string[] {
+  let tasks = values
+    .map(trimOldWorkedPrefix)
+    .filter(isLikelyTaskText);
+
+  const unfinished = tasks.filter((value) => !isLikelyCompletedWork(value));
+  if (unfinished.length > 0) tasks = unfinished;
+
+  return [...new Set(tasks.map((value) => value.trim()).filter(Boolean))];
+}
+
 export function composeOcrText(
   recognized: string,
   graphLines: string[],

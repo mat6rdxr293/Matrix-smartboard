@@ -10,7 +10,7 @@ import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
 import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, unionRects } from "@/app/board/ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -1736,15 +1736,17 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         if (!blob) throw new Error(tl("ocr_not_available"));
         const res = await callOcr(blob);
         const value = res.text.trim();
-        if (!value) throw new Error(tl("ocr_not_available"));
+        if (!value) continue;
         recognized.push(value);
       }
 
-      const text = recognized.length > 1
-        ? recognized
+      const taskTexts = sanitizeMultiTaskOcrTexts(recognized);
+
+      const text = taskTexts.length > 1
+        ? taskTexts
             .map((value, index) => `Задание ${index + 1}:\n${value}`)
             .join("\n\n")
-        : composeOcrText(recognized[0] ?? "", graphLines, true);
+        : composeOcrText(taskTexts[0] ?? "", graphLines, true);
 
       if (!text) throw new Error(tl("ocr_not_available"));
       onOcrText?.(text);
