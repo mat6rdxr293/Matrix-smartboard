@@ -317,6 +317,36 @@ export function normalizeHandwritingText(source: string) {
   return text;
 }
 
+export function splitMathAwareWrapUnits(source: string): string[] {
+  const units: string[] = [];
+  let current = "";
+  let roundDepth = 0;
+  let squareDepth = 0;
+
+  const flush = () => {
+    const value = current.trim();
+    if (value) units.push(value);
+    current = "";
+  };
+
+  for (const char of source) {
+    if (char === "(") roundDepth += 1;
+    if (char === "[") squareDepth += 1;
+
+    if (/\s/.test(char) && roundDepth === 0 && squareDepth === 0) {
+      flush();
+      continue;
+    }
+
+    current += char;
+
+    if (char === ")") roundDepth = Math.max(0, roundDepth - 1);
+    if (char === "]") squareDepth = Math.max(0, squareDepth - 1);
+  }
+  flush();
+  return units;
+}
+
 function wrapLine(
   ctx: CanvasRenderingContext2D,
   source: string,
@@ -326,7 +356,7 @@ function wrapLine(
   if (!clean) return [];
   if (ctx.measureText(clean).width <= maxWidth) return [clean];
 
-  const words = clean.split(/\s+/);
+  const words = splitMathAwareWrapUnits(clean);
   const lines: string[] = [];
   let current = "";
 

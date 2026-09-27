@@ -3,6 +3,7 @@ import {
   buildDistinctSixPoints,
   extractSafeHandwritingSteps,
   normalizeHandwritingText,
+  splitMathAwareWrapUnits,
 } from "./aiHandwriting";
 
 describe("normalizeHandwritingText", () => {
@@ -109,6 +110,18 @@ describe("normalizeHandwritingText", () => {
     expect(normalized).toContain("√(π)");
     expect(normalized).toMatch(/^\(.+\)\/\(70\)$/);
     expect(normalized).not.toMatch(/\\(?:frac|sqrt|left|right)\b/);
+  });
+
+  it("wraps only at top-level spaces so nested fractions stay intact", () => {
+    const normalized = normalizeHandwritingText(
+      String.raw`F(x)=\frac{\sqrt{70}\sqrt{\pi}(a+b)}{70} + \frac{x\sin^2(3x+2)}{2}`,
+    );
+
+    expect(splitMathAwareWrapUnits(normalized)).toEqual([
+      "F(x)=(√(70)√(π)(a+b))/(70)",
+      "+",
+      "(xsin²(3x+2))/(2)",
+    ]);
   });
 
   it("covers additional school symbols without leaking LaTeX command names", () => {
