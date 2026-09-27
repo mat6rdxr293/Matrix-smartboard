@@ -11,6 +11,7 @@ import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
+import type { Stroke } from "@/app/board/boardEngine";
 import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
 import { pickAiInkColor } from "@/app/board/aiInkColor";
 import {
@@ -1053,52 +1054,79 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       const lineGap = mode === "solution" ? 11 : 9;
       const stepGap = mode === "solution" ? 16 : mode === "check" ? 12 : 10;
 
-      const draft = solutionStepsToHandwritingStrokes(boardSteps, {
-        x: 12,
-        y: 10,
-        maxWidth: width - 24,
-        color: aiColor,
-        strokeWidth,
-        fontSize,
-        lineGap,
-        stepGap,
-      });
-      if (!draft.strokes.length) {
+      const taskHeading = /^(?:Задание|Task|Тапсырма)\s+\d+\s*$/i;
+      const taskGroups: typeof boardSteps[] = [];
+      if (
+        mode === "solution" &&
+        boardSteps.filter((step) => taskHeading.test(step.text.trim())).length > 1
+      ) {
+        let currentGroup: typeof boardSteps = [];
+        for (const step of boardSteps) {
+          if (taskHeading.test(step.text.trim()) && currentGroup.length) {
+            taskGroups.push(currentGroup);
+            currentGroup = [];
+          }
+          currentGroup.push(step);
+        }
+        if (currentGroup.length) taskGroups.push(currentGroup);
+      } else {
+        taskGroups.push(boardSteps);
+      }
+
+      const writtenAll: Stroke[] = [];
+      for (let groupIndex = 0; groupIndex < taskGroups.length; groupIndex += 1) {
+        const group = taskGroups[groupIndex];
+        const draft = solutionStepsToHandwritingStrokes(group, {
+          x: 12,
+          y: 10,
+          maxWidth: width - 24,
+          color: aiColor,
+          strokeWidth,
+          fontSize,
+          lineGap,
+          stepGap,
+        });
+        if (!draft.strokes.length) continue;
+
+        const requiredHeight = Math.max(
+          mode === "hint" ? 130 : 160,
+          Math.ceil(draft.height + 24),
+        );
+        const placement = boardCanvasRef.current?.allocateSolutionPlacement(
+          width,
+          requiredHeight,
+          taskGroups.length > 1 ? groupIndex : undefined,
+        ) ?? {
+          x: 48,
+          y: 48 + groupIndex * (requiredHeight + 24),
+          width,
+          minHeight: requiredHeight,
+        };
+
+        const generatedStrokes = draft.strokes.map((stroke) => ({
+          ...stroke,
+          points: stroke.points.map((point) => ({
+            x: point.x + placement.x,
+            y: point.y + placement.y,
+          })),
+        }));
+
+        const written = await boardCanvasRef.current?.animateAiStrokes(
+          generatedStrokes,
+          isCancelled,
+          ultraLite,
+        );
+        if (written?.length) writtenAll.push(...written);
+        if (isCancelled()) return;
+      }
+
+      if (!writtenAll.length) {
         throw new Error("Не удалось построить рукописные штрихи");
       }
 
-      const requiredHeight = Math.max(
-        mode === "hint" ? 130 : 160,
-        Math.ceil(draft.height + 24),
-      );
-      const placement = boardCanvasRef.current?.allocateSolutionPlacement(
-        width,
-        requiredHeight,
-      ) ?? {
-        x: 48,
-        y: 48,
-        width,
-        minHeight: requiredHeight,
-      };
-
-      const generatedStrokes = draft.strokes.map((stroke) => ({
-        ...stroke,
-        points: stroke.points.map((point) => ({
-          x: point.x + placement.x,
-          y: point.y + placement.y,
-        })),
-      }));
-
-      const written = await boardCanvasRef.current?.animateAiStrokes(
-        generatedStrokes,
-        isCancelled,
-        ultraLite,
-      );
-      if (!written?.length) return;
-
       onBoardReplayOp({
         op: "stroke_batch_add",
-        strokes: written,
+        strokes: writtenAll,
         ts: Date.now(),
       });
 

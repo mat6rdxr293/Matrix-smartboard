@@ -68,7 +68,7 @@ const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 export type BoardCanvasHandle = {
   recognize: (options?: { multipleTasks?: boolean }) => Promise<string>;
   getLastOcrTargetColor: () => string | null;
-  allocateSolutionPlacement: (width?: number, height?: number) => { x: number; y: number; width: number; minHeight: number };
+  allocateSolutionPlacement: (width?: number, height?: number, targetIndex?: number) => { x: number; y: number; width: number; minHeight: number };
   animateAiStrokes: (
     strokes: Stroke[],
     shouldCancel?: () => boolean,
@@ -194,6 +194,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const activePointerIdRef = useRef<number | null>(null);
   const areaRef = useRef<HTMLDivElement | null>(null);
   const lastOcrTargetBoundsRef = useRef<BoardRect | null>(null);
+  const lastOcrTaskBoundsRef = useRef<BoardRect[]>([]);
   const lastOcrTargetColorRef = useRef<string | null>(null);
   const penToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
   const lineToolbarAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1387,7 +1388,11 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     return rects;
   };
 
-  const allocateSolutionPlacement = (requestedWidth = 500, requestedHeight = 320) => {
+  const allocateSolutionPlacement = (
+    requestedWidth = 500,
+    requestedHeight = 320,
+    targetIndex?: number,
+  ) => {
     const scale = Math.max(zoomRef.current, 0.01);
     const currentPan = panRef.current;
     const viewport: BoardRect = {
@@ -1397,11 +1402,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       bottom: (heightPx - currentPan.y) / scale,
     };
     const occupied = occupiedBoardRects();
-    const nearTarget = lastOcrTargetBoundsRef.current
+    const targetBounds =
+      targetIndex !== undefined
+        ? (lastOcrTaskBoundsRef.current[targetIndex] ?? lastOcrTargetBoundsRef.current)
+        : lastOcrTargetBoundsRef.current;
+    const nearTarget = targetBounds
       ? findFreeBoardSpaceNearTarget(
           viewport,
           occupied,
-          lastOcrTargetBoundsRef.current,
+          targetBounds,
           requestedWidth,
           requestedHeight,
           38,
@@ -1699,8 +1708,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             return active ? [active] : [];
           })();
 
+    lastOcrTaskBoundsRef.current = targetClusters.map((cluster) => cluster.bounds);
     lastOcrTargetBoundsRef.current = targetClusters.length
-      ? unionRects(targetClusters.map((cluster) => cluster.bounds))
+      ? unionRects(lastOcrTaskBoundsRef.current)
       : null;
 
     if (targetClusters.length) {

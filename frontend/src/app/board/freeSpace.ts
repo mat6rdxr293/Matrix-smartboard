@@ -56,10 +56,14 @@ export function findFreeBoardSpaceNearTarget(
     { x: target.right + gap, y: targetCenterY - safeHeight / 2, priority: 1 },
     { x: target.left, y: target.bottom + gap, priority: 2 },
     { x: targetCenterX - safeWidth / 2, y: target.bottom + gap, priority: 3 },
-    { x: target.left - gap - safeWidth, y: target.top, priority: 4 },
-    { x: target.left - gap - safeWidth, y: targetCenterY - safeHeight / 2, priority: 5 },
-    { x: target.left, y: target.top - gap - safeHeight, priority: 6 },
-    { x: targetCenterX - safeWidth / 2, y: target.top - gap - safeHeight, priority: 7 },
+    { x: target.right + gap, y: target.bottom + gap, priority: 4 },
+    { x: target.left - gap - safeWidth, y: target.bottom + gap, priority: 5 },
+    { x: target.left - gap - safeWidth, y: target.top, priority: 6 },
+    { x: target.left - gap - safeWidth, y: targetCenterY - safeHeight / 2, priority: 7 },
+    { x: target.right + gap, y: target.top - gap - safeHeight, priority: 8 },
+    { x: target.left - gap - safeWidth, y: target.top - gap - safeHeight, priority: 9 },
+    { x: target.left, y: target.top - gap - safeHeight, priority: 10 },
+    { x: targetCenterX - safeWidth / 2, y: target.top - gap - safeHeight, priority: 11 },
   ];
 
   const scored = candidates
