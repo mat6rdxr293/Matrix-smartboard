@@ -183,6 +183,54 @@ const clusterContentScore = (cluster: OcrStrokeCluster) => {
   );
 };
 
+const clusterWidth = (cluster: OcrStrokeCluster) =>
+  Math.max(1, cluster.bounds.right - cluster.bounds.left);
+
+const clusterHeight = (cluster: OcrStrokeCluster) =>
+  Math.max(1, cluster.bounds.bottom - cluster.bounds.top);
+
+const likelySameVerticalWork = (
+  block: OcrStrokeCluster,
+  candidate: OcrStrokeCluster,
+) => {
+  const verticalGap = axisGap(
+    block.bounds.top,
+    block.bounds.bottom,
+    candidate.bounds.top,
+    candidate.bounds.bottom,
+  );
+  // Only join stacked rows here. Side-by-side equations can have overlapping
+  // y ranges and must stay separate OCR targets.
+  if (verticalGap <= 0) return false;
+
+  const maxRowHeight = Math.max(clusterHeight(block), clusterHeight(candidate));
+  const allowedGap = clamp(maxRowHeight * 1.9, 72, 220);
+  if (verticalGap > allowedGap) return false;
+
+  const overlap = overlapLength(
+    block.bounds.left,
+    block.bounds.right,
+    candidate.bounds.left,
+    candidate.bounds.right,
+  );
+  const overlapRatio = overlap / Math.min(clusterWidth(block), clusterWidth(candidate));
+  const leftDelta = Math.abs(block.bounds.left - candidate.bounds.left);
+  const leftAligned = leftDelta <= clamp(Math.min(clusterWidth(block), clusterWidth(candidate)) * 0.45, 58, 150);
+
+  const blockCenter = (block.bounds.left + block.bounds.right) / 2;
+  const candidateCenter = (candidate.bounds.left + candidate.bounds.right) / 2;
+  const centerDelta = Math.abs(blockCenter - candidateCenter);
+  const centerAligned = centerDelta <= Math.max(clusterWidth(block), clusterWidth(candidate)) * 0.48;
+
+  return overlapRatio >= 0.16 || leftAligned || centerAligned;
+};
+
+const mergeClusters = (clusters: OcrStrokeCluster[]): OcrStrokeCluster => ({
+  strokes: clusters.flatMap((cluster) => cluster.strokes),
+  indices: clusters.flatMap((cluster) => cluster.indices).sort((a, b) => a - b),
+  bounds: unionRects(clusters.map((cluster) => cluster.bounds)),
+});
+
 export function chooseActiveOcrCluster(
   clusters: OcrStrokeCluster[],
 ): OcrStrokeCluster | null {
@@ -200,7 +248,38 @@ export function chooseActiveOcrCluster(
   // accidental scribble/dot drawn later replace a substantially larger
   // equation as the OCR target.
   const meaningful = scored.filter((item) => item.score >= maxScore * 0.34);
-  return meaningful.reduce((latest, item) =>
+  const anchor = meaningful.reduce((latest, item) =>
     item.lastIndex > latest.lastIndex ? item : latest
-  ).cluster;
+  );
+
+  const selected = new Set<OcrStrokeCluster>([anchor.cluster]);
+  let changed = true;
+
+  // A worked solution is usually several vertically stacked rows. Expand from
+  // the anchor through nearby aligned rows while keeping unrelated side-by-side
+  // tasks and distant scribbles out of the OCR crop. Compare against individual
+  // selected rows rather than the union bounds: a missing middle row may sit
+  // inside the union of an upper and lower row and would otherwise look like
+  // zero vertical gap.
+  while (changed) {
+    changed = false;
+    for (const item of scored) {
+      if (selected.has(item.cluster)) continue;
+      const candidateWidth = clusterWidth(item.cluster);
+      const candidateHeight = clusterHeight(item.cluster);
+      const substantial =
+        item.score >= maxScore * 0.12 ||
+        item.cluster.strokes.length >= 3 ||
+        candidateWidth >= 54 ||
+        candidateHeight >= 38;
+      const touchesSelectedRow = [...selected].some((row) =>
+        likelySameVerticalWork(row, item.cluster)
+      );
+      if (!substantial || !touchesSelectedRow) continue;
+      selected.add(item.cluster);
+      changed = true;
+    }
+  }
+
+  return mergeClusters([...selected]);
 }

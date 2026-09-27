@@ -62,6 +62,50 @@ describe("clusterOcrStrokes", () => {
 });
 
 
+it("merges a vertically stacked worked solution into one OCR target", () => {
+  const strokes = [
+    // equation
+    stroke(60, 80, 125, 135),
+    stroke(132, 105, 195, 105),
+    stroke(205, 78, 260, 138),
+    // discriminant row
+    stroke(80, 205, 135, 245),
+    stroke(145, 225, 250, 225),
+    stroke(260, 205, 330, 245),
+    // x1 row
+    stroke(72, 325, 135, 365),
+    stroke(145, 345, 285, 345),
+    stroke(295, 325, 360, 365),
+    // x2 row
+    stroke(70, 445, 135, 485),
+    stroke(145, 465, 290, 465),
+    stroke(300, 445, 380, 485),
+  ];
+
+  const clusters = clusterOcrStrokes(strokes);
+  expect(clusters.length).toBeGreaterThanOrEqual(2);
+  expect(chooseActiveOcrCluster(clusters)?.indices).toEqual([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+  ]);
+});
+
+it("does not merge a distant problem written lower on the board", () => {
+  const strokes = [
+    stroke(60, 80, 130, 135),
+    stroke(140, 105, 205, 105),
+    stroke(70, 205, 135, 250),
+    stroke(145, 225, 240, 225),
+    // Separate later task, far below.
+    stroke(65, 650, 145, 705),
+    stroke(155, 675, 235, 675),
+    stroke(245, 650, 315, 705),
+  ];
+
+  const clusters = clusterOcrStrokes(strokes);
+  const active = chooseActiveOcrCluster(clusters);
+  expect(active?.indices).toEqual([4, 5, 6]);
+});
+
 it("ignores a tiny newer scribble when an older equation is much more substantial", () => {
   const strokes = [
     stroke(40, 90, 120, 150),
