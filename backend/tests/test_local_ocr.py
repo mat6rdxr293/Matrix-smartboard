@@ -287,6 +287,214 @@ def test_ocr_normalizer_removes_outer_display_math_wrapper():
     assert ocr_module._normalize_ocr_text(r"\[ x^2 + 1 \]") == "x^2 + 1"
 
 
+def test_ocr_normalizer_cleans_aligned_wrappers_and_unicode_minus():
+    raw = r"""\begin{aligned}
+&x_1 = \frac{-4 + 14}{10} = 1 \\
+&x_2 = \frac{-4 - 14}{10} = −1.8
+\end{aligned}"""
+
+    assert ocr_module._normalize_ocr_text(raw) == (
+        r"x_1 = \frac{-4 + 14}{10} = 1" + "\n"
+        + r"x_2 = \frac{-4 - 14}{10} = -1.8"
+    )
+
+
+def test_math_candidate_prefers_later_candidate_on_exact_tie():
+    assert ocr_module._choose_math_candidate(["x = 1", "y = 1"]) == "y = 1"
+
+
+def test_reconciled_candidate_rejects_new_integral_and_line_collapse():
+    references = [
+        "x = 0\ny ≈ 0.0468\na = 3.1415",
+        "x → 0\ny ≈ 0.0468\na = 3.1415",
+    ]
+
+    assert ocr_module._reconciled_candidate_supported(
+        r"\int_0^1 y dx",
+        references,
+    ) is False
+    assert ocr_module._reconciled_candidate_supported(
+        "x → 0\ny ≈ 0.0468",
+        references,
+    ) is True
+    assert ocr_module._reconciled_candidate_supported(
+        "x → 0",
+        references,
+    ) is False
+
+
+def test_multiple_integrals_do_not_use_single_integral_spatial_pass(monkeypatch):
+    calls = []
+    responses = [
+        r"\int_0^4 x^2 dx" + "\n" + r"\int_1^2 cos(x) dx",
+        r"\int_{0}^{4} x^2 dx" + "\n" + r"\int_{1}^{2} cos(x) dx",
+        r"\int_{0}^{4} x^2 dx" + "\n" + r"\int_{1}^{2} cos(x) dx",
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=responses[min(len(calls) - 1, 2)])
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_compact_ocr_image", lambda _data, **_kwargs: b"compact")
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda _data, **_kwargs: b"detail")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert ocr_module._integral_count(result) == 2
+    assert len(calls) >= 2
+    prompts = [call["messages"][0]["content"][0]["text"] for call in calls]
+    assert all("пространственная OCR-проверка ОДНОГО" not in prompt for prompt in prompts)
+
+
+def test_later_detail_pass_cannot_invent_integral(monkeypatch):
+    calls = []
+    responses = [
+        "x = 0\ny ≈ 0.0468\na = 3.1415",
+        r"\int_0^pi y dx",
+        "x = 0\ny ≈ 0.0468\na = 3.1415",
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=responses[min(len(calls) - 1, 2)])
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+    monkeypatch.setattr(ocr_module, "_compact_ocr_image", lambda _data, **_kwargs: b"compact")
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda _data, **_kwargs: b"detail")
+    monkeypatch.setattr(ocr_module, "_contrast_variant", lambda _data: b"contrast")
+
+    result = ocr_module.ocr_image(b"raw")
+
+    assert "int" not in result.lower()
+    assert "∫" not in result
+    assert "0.0468" in result
+
+
+def test_zero_tends_to_verifier_repairs_times_root_zero_misread(monkeypatch):
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
+    monkeypatch.setattr(
+        ocr_module,
+        "_request_ocr",
+        lambda *_args, **_kwargs: "x → 0",
+    )
+
+    result = ocr_module._verify_zero_tends_to(
+        object(),
+        "× √0",
+        b"line",
+        "http://localhost:11434/v1",
+    )
+
+    assert result == "x → 0"
+
+
+def test_zero_tends_to_verifier_repairs_latex_times_sqrt_zero_misread(monkeypatch):
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
+    monkeypatch.setattr(
+        ocr_module,
+        "_request_ocr",
+        lambda *_args, **_kwargs: "x → 0",
+    )
+
+    result = ocr_module._verify_zero_tends_to(
+        object(),
+        r"\times \sqrt{0}",
+        b"line",
+        "http://localhost:11434/v1",
+    )
+
+    assert result == "x → 0"
+
+
+def test_zero_tends_to_verifier_keeps_times_root_zero_when_confirmed(monkeypatch):
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
+    monkeypatch.setattr(
+        ocr_module,
+        "_request_ocr",
+        lambda *_args, **_kwargs: "× √0",
+    )
+
+    result = ocr_module._verify_zero_tends_to(
+        object(),
+        "× √0",
+        b"line",
+        "http://localhost:11434/v1",
+    )
+
+    assert result == "× √0"
+
+
+def test_line_audit_recovers_rows_dropped_by_full_image_ocr(monkeypatch):
+    visual_rows = [
+        (b"row-1", 1),
+        (b"row-2", 1),
+        (b"row-3", 1),
+        (b"row-4", 1),
+    ]
+    rereads = iter([
+        "5x^2 + 4x - 9 = 0",
+        "D = 16 + 4*5*9 = 196",
+        "x_1 = (-4 + 14)/10 = 1",
+        "x_2 = (-4 - 14)/10 = -1.8",
+    ])
+
+    monkeypatch.setattr(
+        ocr_module,
+        "_horizontal_math_line_crops",
+        lambda _data: visual_rows,
+    )
+    monkeypatch.setattr(ocr_module, "_detail_ocr_image", lambda data, **_kwargs: data)
+    monkeypatch.setattr(
+        ocr_module,
+        "_request_ocr",
+        lambda *_args, **_kwargs: next(rereads),
+    )
+
+    result = ocr_module._audit_math_lines(
+        object(),
+        "x_1 = (-4 + 14)/10 = 1\nx_2 = (-4 - 14)/10 = -1.8",
+        b"full",
+        "http://localhost:11434/v1",
+    )
+
+    assert result.splitlines() == [
+        "5x^2 + 4x - 9 = 0",
+        "D = 16 + 4*5*9 = 196",
+        "x_1 = (-4 + 14)/10 = 1",
+        "x_2 = (-4 - 14)/10 = -1.8",
+    ]
+
+
 def test_spatial_integral_ocr_recovers_complex_limits_and_full_integrand(monkeypatch):
     calls = []
     responses = [
