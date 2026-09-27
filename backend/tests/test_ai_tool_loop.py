@@ -1414,10 +1414,64 @@ def test_board_actions_parser_supports_stroke_move_and_delete():
     ]
 
 
-def test_integral_ocr_notation_is_classified_before_trigonometry():
+def test_structured_ocr_notation_preserves_math_task_type():
     assert ai_module._check_task_kind("int_[0]^[1](cos(x)+x^2) dx", "алгебра") == "integral"
     assert ai_module._check_task_kind("∫_0^1 (cos(x)+x^2) dx", "алгебра") == "integral"
     assert ai_module._check_task_kind("\\int_{0}^{1}(cos(x)+x^2) dx", "алгебра") == "integral"
+    assert ai_module._check_task_kind("lim_(x->0) sin(x)/x", "алгебра") == "limit"
+    assert ai_module._check_task_kind("\\lim_{x->0} sin(x)/x", "алгебра") == "limit"
+    assert ai_module._check_task_kind("d/dx (x^2 + sin(x))", "алгебра") == "derivative"
+    assert ai_module._check_task_kind("f'(x) = 3x^2", "алгебра") == "derivative"
+    assert ai_module._check_task_kind("{ x+y=3\n  x-y=1", "алгебра") == "system"
+    assert ai_module._check_task_kind("2x+1 >= 7", "алгебра") == "inequality"
+
+
+def test_solution_retries_when_model_uses_wrong_tool_for_detected_task(monkeypatch):
+    calls = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+    def fake_local_chat(*args, **kwargs):
+        calls.append(kwargs["sys"])
+        trace = kwargs["tool_trace"]
+        if len(calls) == 1:
+            trace.append({
+                "tool": "math_evaluate",
+                "payload": {"ok": True, "result": {"text": "2*x"}},
+            })
+        else:
+            trace.append({
+                "tool": "math_simplify",
+                "payload": {"ok": True, "result": {"text": "2*x", "latex": "2x"}},
+            })
+        return (
+            '{"summary":"ok","steps":['
+            '{"text":"Упростим выражение.","kind":"text"},'
+            '{"text":"$$x+x=2x$$","kind":"math"},'
+            '{"text":"Ответ: $$2x$$","kind":"result"}]}'
+        )
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module, "_local_chat_with_tools", fake_local_chat)
+
+    text, steps, actions = ai_module.generate_board_solution(
+        "Упрости x+x",
+        subject="алгебра",
+        response_locale="ru",
+        include_actions=True,
+        board_state={"stroke_count": 0, "strokes": [], "graphs": []},
+    )
+
+    assert actions == []
+    assert len(calls) == 2
+    assert "тип исходной задачи уже определён" in calls[1]
+    assert "math_simplify" in calls[1]
+    assert steps[-1]["kind"] == "result"
+    assert "2x" in text
 
 
 def test_visual_fallback_updates_single_known_graph_instead_of_adding_duplicate():

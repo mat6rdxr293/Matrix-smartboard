@@ -2382,15 +2382,20 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
     lower = task.lower()
     subject_value = (subject or "").lower()
 
-    if any(cue in lower for cue in ("неравен", "inequal", "теңсіз", "<", ">")):
-        return "inequality"
-    if any(cue in lower for cue in ("систем", "system of equations", "теңдеулер жүй")):
-        return "system"
-    if any(cue in lower for cue in ("област", "domain", "одз", "анықталу облысы")):
-        return "domain"
-    if any(cue in lower for cue in ("предел", "limit", "шек")):
+    if (
+        any(cue in lower for cue in ("предел", "limit", "шек"))
+        or re.search(r"(?i)(?:\\lim|\blim\s*(?:_|\^|\(|\[))", task)
+    ):
         return "limit"
-    if any(cue in lower for cue in ("производн", "derivative", "туынды")):
+    if (
+        any(cue in lower for cue in ("производн", "derivative", "туынды"))
+        or re.search(
+            r"(?i)(?:\bd\s*/\s*d[a-z]\b|\bd[a-z]\s*/\s*d[a-z]\b|"
+            r"\\frac\s*\{?d\}?\s*\{?d[a-z]\}?|"
+            r"\b[a-z][a-z0-9_]*\s*'\s*\()",
+            task,
+        )
+    ):
         return "derivative"
     if (
         any(cue in lower for cue in ("интеграл", "integral", "интегралын"))
@@ -2399,6 +2404,30 @@ def _check_task_kind(problem: str, subject: Optional[str]) -> str:
         or re.search(r"(?i)\bint\s*(?:_|\^|\[|\()", task)
     ):
         return "integral"
+
+    equation_lines = [line for line in task.splitlines() if "=" in line]
+    if (
+        any(cue in lower for cue in ("систем", "system of equations", "теңдеулер жүй"))
+        or "\\begin{cases}" in task
+        or (len(equation_lines) >= 2 and any(mark in task for mark in ("{", "⎧")))
+    ):
+        return "system"
+
+    inequality_view = (
+        task.replace("->", "")
+        .replace("→", "")
+        .replace("⇒", "")
+        .replace("⟶", "")
+    )
+    if (
+        any(cue in lower for cue in ("неравен", "inequal", "теңсіз"))
+        or any(symbol in inequality_view for symbol in ("<", ">", "≤", "≥"))
+    ):
+        return "inequality"
+
+    if any(cue in lower for cue in ("област", "domain", "одз", "анықталу облысы")):
+        return "domain"
+
     if any(cue in lower for cue in ("раскры", "expand", "жақшаны аш")):
         return "expand"
     if any(cue in lower for cue in ("упрост", "simplif", "ықшамда")):
@@ -3658,20 +3687,56 @@ def generate_board_solution(
     )
 
     task_kind = _check_task_kind(problem, subject)
-    if task_kind == "integral" and not _check_trace_covers_task(
+    required_reference_tools = sorted(_REFERENCE_TOOLS.get(task_kind, set()))
+    if include_actions and required_reference_tools and not _check_trace_covers_task(
         problem,
         subject,
         tool_trace,
     ):
+        task_kind_labels = {
+            "equation": "уравнение",
+            "system": "система уравнений",
+            "inequality": "неравенство",
+            "domain": "область определения",
+            "limit": "предел",
+            "derivative": "производная",
+            "integral": "интеграл",
+            "expand": "раскрытие скобок",
+            "simplify": "упрощение выражения",
+            "factor": "разложение на множители",
+            "percent": "задача на проценты",
+            "sequence_nth": "последовательность",
+            "sequence_sum": "сумма последовательности",
+            "sequence_both": "последовательность",
+            "combinatorics": "комбинаторика",
+            "probability": "вероятность",
+            "statistics_mean": "среднее значение",
+            "statistics_median": "медиана",
+            "statistics_mode": "мода",
+            "statistics_variance": "дисперсия",
+            "number_theory": "теория чисел",
+            "function_analysis": "исследование функции",
+            "trig_value": "тригонометрическое выражение",
+            "trig_equation": "тригонометрическое уравнение",
+            "vector": "векторная задача",
+            "geometry": "геометрическая задача",
+            "arithmetic": "вычисление выражения",
+            "unit_convert": "перевод единиц",
+            "molar_mass": "молярная масса",
+            "chem_balance": "балансировка химического уравнения",
+        }
+        task_label = task_kind_labels.get(task_kind, task_kind)
         retry_trace: list[dict] = []
         raw = _local_chat_with_tools(
             client,
             sys=(
                 sys
-                + "\nКРИТИЧНО: исходная запись является ИНТЕГРАЛОМ. "
-                "Обязательно вызови math_integrate по исходному интегралу, сохрани пределы, "
-                "интегранд и переменную интегрирования. Не заменяй интеграл отдельным "
-                "арифметическим или тригонометрическим выражением."
+                + f"\nКРИТИЧНО: тип исходной задачи уже определён как «{task_label}». "
+                + "Нельзя подменять её задачей другого типа. "
+                + "Для независимой проверки ОБЯЗАТЕЛЬНО используй один из подходящих "
+                + "вычислительных инструментов: "
+                + ", ".join(required_reference_tools)
+                + ". Сохрани все исходные математические данные и решай именно исходную запись."
             ),
             user=user,
             max_tokens=max(max_tokens, 2000),
@@ -3685,8 +3750,9 @@ def generate_board_solution(
 
         if not _check_trace_covers_task(problem, subject, tool_trace):
             raise RuntimeError(
-                "Не удалось надежно разобрать интеграл: вычислительный модуль "
-                "не подтвердил исходную запись. Попробуйте распознать интеграл ещё раз."
+                f"Не удалось надежно подтвердить решение задачи типа «{task_label}». "
+                "Вычислительный модуль не подтвердил исходную запись. "
+                "Попробуйте распознать задание ещё раз."
             )
 
     actions = _parse_board_actions(raw) if include_actions else []
