@@ -1,5 +1,6 @@
 import { apiFetch, backendAssetUrl } from "@/lib/apiClient";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { Task } from "@/app/tasks/tasks";
 import type { Slide, SlideElement } from "@/app/presentation/Slides";
 import { DEFAULT_PRESENTATION_SOURCE, type PresentationSource } from "@/app/presentation/presentationSource";
@@ -170,7 +171,14 @@ export default function TeacherDashboard({
   const { tl, locale } = useI18n();
   const subjectName = getSubjectNameForLocale(subjectId, locale);
   const withSubjectApi = (path: string) => withSubjectQuery(path, subjectId);
+  const prefersReducedMotion = useReducedMotion();
   const [section, setSection] = useState<"home" | "tasks" | "slides" | "replays">("home");
+  const [sectionDirection, setSectionDirection] = useState<1 | -1>(1);
+  const navigateSection = (next: "home" | "tasks" | "slides" | "replays") => {
+    if (next === section) return;
+    setSectionDirection(next === "home" ? -1 : 1);
+    setSection(next);
+  };
   const [taskIndex, setTaskIndex] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -681,7 +689,7 @@ export default function TeacherDashboard({
       }
       await fetchM365Status();
       setServerMessage("PPTX загружен в Microsoft 365");
-      setSection("slides");
+      navigateSection("slides");
     } catch (err) {
       setServerMessage(err instanceof Error ? err.message : "Ошибка загрузки PPTX в Microsoft 365");
     } finally {
@@ -777,7 +785,7 @@ export default function TeacherDashboard({
         throw new Error("Invalid Office Viewer response");
       }
       setServerMessage("Presentation opened in Office Viewer");
-      setSection("slides");
+      navigateSection("slides");
     } catch (err) {
       setServerMessage(err instanceof Error ? err.message : "Office Viewer error");
     } finally {
@@ -815,7 +823,7 @@ export default function TeacherDashboard({
         throw new Error("Некорректный ответ Office Viewer");
       }
       setServerMessage("Ссылка Office Viewer применена");
-      setSection("slides");
+      navigateSection("slides");
     } catch (err) {
       setServerMessage(err instanceof Error ? err.message : "Ошибка Office Viewer");
     } finally {
@@ -1129,7 +1137,7 @@ export default function TeacherDashboard({
             type="button"
             aria-label={`${tl("back")}: ${section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}`}
             className="flex h-10 items-center gap-2 rounded-xl pr-3 text-[14px] font-semibold text-frost transition hover:text-accent"
-            onClick={() => setSection("home")}
+            onClick={() => navigateSection("home")}
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/60">
               <ArrowLeft size={17} />
@@ -1165,7 +1173,20 @@ export default function TeacherDashboard({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <AnimatePresence initial={false} custom={sectionDirection}>
+            <motion.div
+              key={section}
+              className="absolute inset-0 overflow-auto"
+              initial={prefersReducedMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: sectionDirection * 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={prefersReducedMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: sectionDirection * -4 }}
+              transition={
+                prefersReducedMotion
+                  ? { duration: 0 }
+                  : { duration: 0.16, ease: [0.2, 0, 0, 1] }
+              }
+            >
 
         {section === "home" && (
           <div className="flex min-h-full items-center justify-center px-5 py-10 sm:px-8">
@@ -1178,7 +1199,7 @@ export default function TeacherDashboard({
               </div>
 
               <div className="mt-8 grid gap-5 lg:grid-cols-3">
-              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => navigateSection("tasks")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><ListChecks size={22} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
@@ -1187,7 +1208,7 @@ export default function TeacherDashboard({
                 <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
               </button>
 
-              <button type="button" onClick={() => setSection("slides")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => navigateSection("slides")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><Presentation size={22} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
@@ -1196,7 +1217,7 @@ export default function TeacherDashboard({
                 <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
               </button>
 
-              <button type="button" onClick={() => setSection("replays")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => navigateSection("replays")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><History size={22} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
@@ -2146,6 +2167,8 @@ export default function TeacherDashboard({
             </div>
           </div>
         )}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
     </div>
