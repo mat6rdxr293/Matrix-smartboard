@@ -719,8 +719,8 @@ function renderFraction(
 ): RenderResult {
   const childSize = options.fontSize * 0.68;
   const paddingX = options.fontSize * 0.16;
+  const verticalGap = options.fontSize * 0.09;
   const numeratorY = options.y - options.fontSize * 0.08;
-  const denominatorY = options.y + options.fontSize * 0.76;
 
   const numerator = renderTokens(token.numerator, {
     ...options,
@@ -728,6 +728,15 @@ function renderFraction(
     y: numeratorY,
     fontSize: childSize,
   });
+
+  // A nested fraction/root can be much taller than ordinary text. Put this
+  // fraction bar below the *actual* rendered numerator instead of at a fixed
+  // baseline; otherwise nested denominators collide with the outer bar.
+  const barY = Math.max(
+    options.y + options.fontSize * 0.68,
+    numeratorY + numerator.height + verticalGap,
+  );
+  const denominatorY = barY + verticalGap;
   const denominator = renderTokens(token.denominator, {
     ...options,
     x: options.x,
@@ -743,7 +752,6 @@ function renderFraction(
   const totalWidth = innerWidth + paddingX * 2;
   const numeratorDx = paddingX + (innerWidth - numerator.width) / 2;
   const denominatorDx = paddingX + (innerWidth - denominator.width) / 2;
-  const barY = options.y + options.fontSize * 0.68;
 
   return {
     strokes: [

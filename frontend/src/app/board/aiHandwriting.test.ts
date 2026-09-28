@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDistinctSixPoints,
+  buildDistinctXPointSets,
   extractSafeHandwritingSteps,
   normalizeHandwritingText,
   splitMathAwareWrapUnits,
@@ -119,8 +120,7 @@ describe("normalizeHandwritingText", () => {
 
     expect(splitMathAwareWrapUnits(normalized)).toEqual([
       "F(x)=(√(70)√(π)(a+b))/(70)",
-      "+",
-      "(xsin²(3x+2))/(2)",
+      "+ (xsin²(3x+2))/(2)",
     ]);
   });
 
@@ -140,6 +140,22 @@ describe("normalizeHandwritingText", () => {
     expect(normalizeHandwritingText("Переносим **4** вправо"))
       .toBe("Переносим 4 вправо");
   });
+});
+
+it("draws mathematical x as two asymmetric diagonal strokes", () => {
+  const [descending, ascending] = buildDistinctXPointSets(10, 20, 30, 16);
+
+  expect(descending).toHaveLength(4);
+  expect(ascending).toHaveLength(4);
+  expect(descending.at(-1)!.x).toBeGreaterThan(descending[0].x);
+  expect(descending.at(-1)!.y).toBeGreaterThan(descending[0].y);
+  expect(ascending.at(-1)!.x).toBeLessThan(ascending[0].x);
+  expect(ascending.at(-1)!.y).toBeGreaterThan(ascending[0].y);
+
+  const descendingDx = Math.abs(descending.at(-1)!.x - descending[0].x);
+  const descendingDy = Math.abs(descending.at(-1)!.y - descending[0].y);
+  expect(descendingDx).toBeGreaterThan(8);
+  expect(descendingDy).toBeGreaterThan(12);
 });
 
 it("draws 6 with a high entry stroke instead of a closed zero-like loop", () => {

@@ -256,6 +256,29 @@ describe("math handwriting geometry", () => {
 
 
 
+  it("keeps the outer fraction bar below nested fraction content", () => {
+    const result = render(
+      "(√(70)√(π)(cos((32779)/(140))C((√(70)(70x+11))/(70√(π)))-sin((32779)/(140))S((√(70)(70x+11))/(70√(π)))))/(70)",
+    );
+    const bars = result.strokes.filter((item) => {
+      if (item.points.length !== 2) return false;
+      const [a, b] = item.points;
+      return Math.abs(a.y - b.y) < 0.01 && Math.abs(b.x - a.x) > 8;
+    });
+
+    expect(bars.length).toBeGreaterThan(4);
+    const widthOf = (item: (typeof bars)[number]) =>
+      Math.abs(item.points[1].x - item.points[0].x);
+    const outerBar = bars.reduce((widest, item) =>
+      widthOf(item) > widthOf(widest) ? item : widest,
+    );
+    const nestedBars = bars.filter((item) => item !== outerBar);
+    const outerY = outerBar.points[0].y;
+    const deepestNestedY = Math.max(...nestedBars.map((item) => item.points[0].y));
+
+    expect(outerY).toBeGreaterThan(deepestNestedY + 2);
+  });
+
   it("renders a real fraction bar and a geometric pi glyph", () => {
     const result = render("(4√(π))/(11)");
 

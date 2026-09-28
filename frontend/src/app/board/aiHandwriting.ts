@@ -333,8 +333,21 @@ export function splitMathAwareWrapUnits(source: string): string[] {
     if (char === "(") roundDepth += 1;
     if (char === "[") squareDepth += 1;
 
-    if (/\s/.test(char) && roundDepth === 0 && squareDepth === 0) {
-      flush();
+    const atTopLevel = roundDepth === 0 && squareDepth === 0;
+    if (atTopLevel && (char === "+" || char === "-")) {
+      if (current.trim()) flush();
+      current = char;
+      continue;
+    }
+
+    if (/\s/.test(char) && atTopLevel) {
+      // A leading sign belongs to the following term. Keeping it attached
+      // avoids ugly line endings such as "... +" on long solutions.
+      if (current.trim() === "+" || current.trim() === "-") {
+        current += " ";
+      } else {
+        flush();
+      }
       continue;
     }
 
@@ -624,6 +637,42 @@ export function buildDistinctSixPoints(
   return points;
 }
 
+export function buildDistinctXPointSets(
+  x: number,
+  y: number,
+  fontSize: number,
+  advance: number,
+): [Point[], Point[]] {
+  const width = Math.max(fontSize * 0.42, Math.min(advance, fontSize * 0.56));
+  const top = y + fontSize * 0.24;
+  const bottom = y + fontSize * 0.90;
+
+  // Handwritten variable x: narrower and slightly curved/asymmetric. This is
+  // deliberately different from the wide, symmetric geometric × operator.
+  const descending: Point[] = [
+    { x: x + width * 0.08, y: top },
+    { x: x + width * 0.28, y: top + fontSize * 0.11 },
+    { x: x + width * 0.62, y: bottom - fontSize * 0.09 },
+    { x: x + width * 0.92, y: bottom },
+  ];
+  const ascending: Point[] = [
+    { x: x + width * 0.86, y: top + fontSize * 0.04 },
+    { x: x + width * 0.65, y: top + fontSize * 0.13 },
+    { x: x + width * 0.36, y: bottom - fontSize * 0.11 },
+    { x: x + width * 0.05, y: bottom - fontSize * 0.02 },
+  ];
+  return [descending, ascending];
+}
+
+function isMathematicalX(text: string, index: number) {
+  if (text[index] !== "x") return false;
+  const previous = text[index - 1] ?? "";
+  const previousIsLetter = /[A-Za-z]/.test(previous);
+  // Preserve identifiers such as max/exp, while still treating x, 3x,
+  // xsin(...), and the differential dx as the mathematical variable.
+  return !previousIsLetter || previous === "d";
+}
+
 function renderTextLine(
   text: string,
   x: number,
@@ -633,7 +682,8 @@ function renderTextLine(
   strokeWidth: number,
   fontSize: number,
 ) {
-  if (!text.includes("6")) {
+  const hasDistinctX = [...text].some((char, index) => char === "x" && isMathematicalX(text, index));
+  if (!text.includes("6") && !hasDistinctX) {
     return renderRasterTextLine(text, x, y, maxWidth, color, strokeWidth, fontSize);
   }
 
@@ -666,17 +716,30 @@ function renderTextLine(
   };
 
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== "6") continue;
+    const isSix = text[index] === "6";
+    const isVariableX = isMathematicalX(text, index);
+    if (!isSix && !isVariableX) continue;
+
     renderRun(text.slice(runStart, index));
-    const advance = Math.max(fontSize * 0.48, measure.measureText("6").width);
-    strokes.push({
-      points: buildDistinctSixPoints(cursorX, y, fontSize, advance),
-      color,
-      width: strokeWidth,
-      mode: "draw",
-      source: "ai",
-    });
-    cursorX += advance;
+    if (isSix) {
+      const advance = Math.max(fontSize * 0.48, measure.measureText("6").width);
+      strokes.push({
+        points: buildDistinctSixPoints(cursorX, y, fontSize, advance),
+        color,
+        width: strokeWidth,
+        mode: "draw",
+        source: "ai",
+      });
+      cursorX += advance;
+    } else {
+      const advance = Math.max(fontSize * 0.46, measure.measureText("x").width);
+      const [descending, ascending] = buildDistinctXPointSets(cursorX, y, fontSize, advance);
+      strokes.push(
+        { points: descending, color, width: strokeWidth, mode: "draw", source: "ai" },
+        { points: ascending, color, width: strokeWidth, mode: "draw", source: "ai" },
+      );
+      cursorX += advance;
+    }
     runStart = index + 1;
   }
   renderRun(text.slice(runStart));
