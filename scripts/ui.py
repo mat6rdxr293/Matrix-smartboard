@@ -650,6 +650,8 @@ def start_lesson(book, section, what, n_tasks, n_slides):
 
 
 TYPE_RU = {"test": "тест", "open": "открытый вопрос", "calc": "задача"}
+CHECK_RU = {"ok": "✅ *проверено SymPy*", "fixed": "🔧 *исправлено проверкой*", "wrong": "❌ *ошибка в расчёте*",
+            "unverified": "⚠️ *проверьте*"}
 
 
 def render_lesson(path):
@@ -665,8 +667,12 @@ def render_lesson(path):
             md.append(f"**{i}. [{TYPE_RU.get(t['type'], t['type'])}, уровень {t['level']}]** {t['question']}")
             for j, o in enumerate(t.get("options") or []):
                 md.append(f"   {'ABCD'[j] if j < 4 else '-'}) {o}")
+            if t.get("solution"):
+                md.append(f"   📝 *Решение:* {t['solution']}")
             warn = ""
-            if t["type"] == "calc":
+            if c := t.get("check"):
+                warn = "  " + CHECK_RU[c["status"]] + (f" — {c['note']}" if c["note"] else "")
+            elif t["type"] == "calc":  # уроки, сделанные до проверки через SymPy
                 warn = "  ⚠️ *проверьте расчёт*"
             elif t.get("options") and t["answer"].strip() not in [o.strip() for o in t["options"]]:
                 warn = "  ⚠️ *ответ не совпадает ни с одним вариантом*"

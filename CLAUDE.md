@@ -46,6 +46,7 @@
 - Замеры: `benchmark/board_speed.md`. Бенчмарк качества: `python benchmark/run_bench.py --model <hf_id|path>`.
 - PDF → текст: `python scripts/extract_pdf.py [--ocr]`, вход `textbooks/<предмет>/<класс>/*.pdf`, выход `data/raw/`.
 - Тесты: `python -m unittest discover tests -v` (pytest в venv нет). Язык текста — `extract_pdf.lang_guess`: доля казахских букв, латиница из формул не считается.
+- Урок: `lesson.py` → задания в формате контракта v1 (схема задаёт состав, `prefixItems`) → `mathcheck.py` (SymPy, поле `check`). В llama.cpp `pattern` отменяет `maxLength` — длина задаётся в самом шаблоне.
 - Отчёт о состоянии и план: `docs/STATUS.md`, `docs/plan.json` (их показывает вкладка «Обзор и план» в ui.py).
 
 ## Конвейер (скрипты)

@@ -11,16 +11,23 @@
 поэтому llama-server переиспользует его из кэша (cache_prompt) и второй запрос почти не тратит
 время на чтение параграфа.
 
+Задания — в формате контракта v1 с бэкендом: {type, question, options, answer, level}, у calc ещё solution;
+у теста answer всегда один из options. Формулы — Unicode-текстом ($ и \\ запрещены грамматикой).
+Математику проверяет mathcheck.py (SymPy): поле check у задания — ok / fixed / wrong / unverified.
+
 Выход: data/lessons/<книга>_§<n>.json = {book, section, pages, lang, text_source, tasks, slides, timings}
 """
 import argparse
 import json
+import random
 import re
 import sys
 import time
 from pathlib import Path
 
 import requests
+
+from mathcheck import check_tasks
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -33,14 +40,23 @@ SYSTEM = {
           "Write in English. Write formulas exactly and do not invent facts that are not in the text.",
 }
 CONTEXT_HEAD = {"kk": "Оқулық мәтіні", "ru": "Текст учебника", "en": "Textbook text"}
+# Формулы — обычным текстом с Unicode: python-pptx на стороне бэкенда LaTeX не отрисует (контракт v1)
+FORMULAS = {
+    "kk": " Формулаларды LaTeX-сыз, қарапайым мәтінмен және Unicode таңбаларымен жаз: α, ω, Φ, ², ³, √, ·, ×, ≤, π.",
+    "ru": " Формулы пиши обычным текстом с символами Unicode, без LaTeX: α, ω, Φ, ², ³, √, ·, ×, ≤, π.",
+    "en": " Write formulas as plain text with Unicode symbols, no LaTeX: α, ω, Φ, ², ³, √, ·, ×, ≤, π.",
+}
 ASK = {
     "tasks": {
-        "kk": "Осы мәтін бойынша {n} тапсырма құрастыр: тест (4 жауап нұсқасымен), ашық сұрақтар және "
-              "(мәтінде формулалар болса) есептер. Әр тапсырмаға дұрыс жауабын және қиындық деңгейін (1–3) көрсет.",
-        "ru": "Составь по этому тексту {n} заданий: тесты (с 4 вариантами ответа), открытые вопросы и "
-              "(если в тексте есть формулы) расчётные задачи. Для каждого укажи правильный ответ и уровень сложности (1–3).",
-        "en": "Create {n} tasks from this text: multiple-choice tests (4 options), open questions and "
-              "(if the text has formulas) calculation problems. Give the correct answer and difficulty (1–3) for each.",
+        "kk": "Осы мәтін бойынша тапсырмалар құрастыр: {test} тест (4 жауап нұсқасы, correct — дұрыс нұсқаның нөмірі "
+              "0-ден 3-ке дейін), {open} ашық сұрақ және {calc} есеп. Есептің solution өрісіне шешу жолын қадамдап, "
+              "answer өрісіне жауабын бірлігімен жаз; question өрісінде тек есептің шартын жаз. Әр тапсырмаға қиындық деңгейін (1–3) көрсет.",
+        "ru": "Составь по этому тексту задания: {test} теста (4 варианта ответа, correct — номер правильного варианта "
+              "от 0 до 3), {open} открытых вопроса и {calc} расчётных задач. У задачи в поле solution — ход решения "
+              "по шагам, в поле answer — ответ с единицами измерения; в question — только условие задачи. Для каждого задания укажи уровень сложности (1–3).",
+        "en": "Create tasks from this text: {test} multiple-choice tests (4 options, correct is the index of the right "
+              "option, 0–3), {open} open questions and {calc} calculation problems. For a problem, put the step-by-step "
+              "solution in the solution field and the answer with units in answer; question holds only the problem. Give the difficulty (1–3) for each task.",
     },
     "slides": {
         "kk": "Осы мәтін бойынша сабаққа {n} слайдтан тұратын презентация мәтінін жаса: әр слайдқа тақырып, "
@@ -51,20 +67,33 @@ ASK = {
               "2–4 short bullet points and a one-sentence note for the teacher.",
     },
 }
+
+
+def text(max_len):
+    """Строка без $ и \\ — LaTeX невозможен на уровне грамматики. В llama.cpp pattern отменяет maxLength,
+    поэтому длина задаётся в самом шаблоне. Кавычка и перевод строки исключены, чтобы не было экранирования."""
+    return {"type": "string", "pattern": f'^[^$\\\\"\\n]{{1,{max_len}}}$'}
+
+
+LEVEL = {"type": "integer", "enum": [1, 2, 3]}
+# Порядок полей = порядок генерации: ход решения идёт до ответа, чтобы модель сначала считала
+TASK_VARIANTS = [
+    {"type": "object", "properties": {
+        "type": {"const": "test"}, "question": text(300),
+        "options": {"type": "array", "items": text(120), "minItems": 4, "maxItems": 4},
+        "correct": {"type": "integer", "enum": [0, 1, 2, 3]}, "level": LEVEL},
+     "required": ["type", "question", "options", "correct", "level"]},
+    {"type": "object", "properties": {
+        "type": {"const": "open"}, "question": text(300), "answer": text(300), "level": LEVEL},
+     "required": ["type", "question", "answer", "level"]},
+    {"type": "object", "properties": {
+        "type": {"const": "calc"}, "question": text(300), "solution": text(400), "answer": text(120), "level": LEVEL},
+     "required": ["type", "question", "solution", "answer", "level"]},
+]
 SCHEMA = {
     "tasks": {
         "type": "object",
-        "properties": {"tasks": {"type": "array", "items": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["test", "open", "calc"]},
-                "question": {"type": "string", "maxLength": 300},
-                "options": {"type": "array", "items": {"type": "string", "maxLength": 120}, "maxItems": 4},
-                "answer": {"type": "string", "maxLength": 200},
-                "level": {"type": "integer", "enum": [1, 2, 3]},
-            },
-            "required": ["type", "question", "answer", "level"],
-        }}},
+        "properties": {"tasks": {"type": "array"}},  # prefixItems — по составу, см. composition()
         "required": ["tasks"],
     },
     "slides": {
@@ -73,16 +102,49 @@ SCHEMA = {
             "type": "object",
             "properties": {
                 # ограничения длины соблюдаются при генерации (грамматика llama.cpp) → короче и быстрее
-                "title": {"type": "string", "maxLength": 80},
-                "bullets": {"type": "array", "items": {"type": "string", "maxLength": 140},
-                            "minItems": 2, "maxItems": 4},
-                "notes": {"type": "string", "maxLength": 200},
+                "title": text(80),
+                "bullets": {"type": "array", "items": text(140), "minItems": 2, "maxItems": 4},
+                "notes": text(200),
             },
             "required": ["title", "bullets", "notes"],
         }}},
         "required": ["slides"],
     },
 }
+
+
+def composition(n, context):
+    """Сколько тестов, открытых вопросов и задач. Состав задаётся схемой (prefixItems) — иначе модель
+    делает все задания тестами. Задачи — только если в тексте есть формулы (история — без задач)."""
+    calc = max(1, n // 6) if context.count("=") >= 5 else 0
+    open_ = max(1, round(n / 3)) if n - calc > 1 else 0
+    return {"test": n - calc - open_, "open": open_, "calc": calc}
+
+
+def task_schema(comp):
+    by_type = {v["properties"]["type"]["const"]: v for v in TASK_VARIANTS}
+    items = [by_type[t] for t in ("test", "open", "calc") for _ in range(comp[t])]
+    return {"type": "object", "properties": {"tasks": {"type": "array", "prefixItems": items}},
+            "required": ["tasks"]}
+
+
+def to_contract(tasks, seed=0):
+    """Задания в формате контракта v1: {type, question, options, answer, level} (+ solution у calc).
+    У теста answer — всегда один из options; варианты перемешиваются, иначе модель чаще ставит верный первым."""
+    rng = random.Random(seed)
+    out = []
+    for t in tasks:
+        item = {"type": t["type"], "question": t["question"], "options": [], "answer": t.get("answer", ""),
+                "level": t["level"]}
+        if t["type"] == "test":
+            right = t["options"][t["correct"]]
+            opts = t["options"][:]
+            rng.shuffle(opts)
+            item["options"], item["answer"] = opts, right
+        if t["type"] == "calc":
+            item["solution"] = t["solution"]
+        out.append(item)
+    return out
 
 
 def load_pages(book):
@@ -119,14 +181,19 @@ def degenerate(obj):
 
 
 def ask(api, model, lang, context, what, n, max_tokens, seed=0):
-    schema = json.loads(json.dumps(SCHEMA[what]))
-    schema["properties"][what]["maxItems"] = n
+    if what == "tasks":
+        comp = composition(n, context)
+        schema, ask_text = task_schema(comp), ASK[what][lang].format(**comp)
+    else:
+        schema = json.loads(json.dumps(SCHEMA[what]))
+        schema["properties"][what]["maxItems"] = n
+        ask_text = ASK[what][lang].format(n=n)
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM[lang]},
+            {"role": "system", "content": SYSTEM[lang] + FORMULAS[lang]},
             # контекст первым и без изменений между запросами → переиспользуется из кэша сервера
-            {"role": "user", "content": f"{CONTEXT_HEAD[lang]}:\n\n{context}\n\n---\n{ASK[what][lang].format(n=n)}"},
+            {"role": "user", "content": f"{CONTEXT_HEAD[lang]}:\n\n{context}\n\n---\n{ask_text}"},
         ],
         "temperature": 0.4,
         "repeat_penalty": 1.1,  # против зацикливания вида \bar{\bar{\bar{…
@@ -189,6 +256,12 @@ def main():
                 break
             print(f"  {what}: зацикливание в ответе, повтор (попытка {attempt + 2})", flush=True)
         timing["attempts"] = attempt + 1
+        if what == "tasks":
+            items = check_tasks(to_contract(items, seed=attempt))
+            checks = [t["check"]["status"] for t in items if "check" in t]
+            if checks:
+                print(f"  проверка математики: " + ", ".join(f"{k} {checks.count(k)}" for k in dict.fromkeys(checks)),
+                      flush=True)
         result[what], result["timings"][what] = items, timing
         print(f"  {what}: {len(items)} шт. за {timing['total_s']} с "
               f"(промпт {timing['prompt_tokens']} ток., из кэша {timing['prompt_cached']}, {timing['prompt_s']} с; "
