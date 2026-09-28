@@ -210,13 +210,8 @@
     "teacher_tasks_description": "Создание и редактирование заданий",
     "teacher_slides_description": "Слайды, импорт PowerPoint и изображения",
     "teacher_history_description": "Повтор доски и история ИИ",
-    "teacher_save": "Сохранить",
-    "teacher_saving": "Сохраняю...",
     "teacher_download_powerpoint": "Скачать PowerPoint",
     "teacher_save_pptx_server": "Сохранить PPTX на сервер",
-    "teacher_autosave_every": "Автосохранение каждые {sec} с",
-    "teacher_server_saved_at": "Сервер: {time}",
-    "teacher_server_not_saved": "Сервер: ещё не сохранено",
     "teacher_task_list": "Список заданий",
     "teacher_task_editor_friendly": "Редактор задания",
     "teacher_new_slide": "Новый",
@@ -380,7 +375,8 @@
     "history_open_lesson": "Открыть урок",
     "finish_lesson": "Завершить",
     "finish_lesson_title": "Завершить урок",
-    "lines": "Линии"
+    "lines": "Линии",
+    "teacher_presentation_actions": "Действия с презентацией"
   },
   "defaults": {
     "slides": [

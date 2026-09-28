@@ -210,13 +210,8 @@
     "teacher_tasks_description": "Тапсырмаларды құру және өңдеу",
     "teacher_slides_description": "Слайдтар, PowerPoint импорты және суреттер",
     "teacher_history_description": "Тақтаны қайталау және ЖИ тарихы",
-    "teacher_save": "Сақтау",
-    "teacher_saving": "Сақталуда...",
     "teacher_download_powerpoint": "PowerPoint жүктеу",
     "teacher_save_pptx_server": "PPTX-ті серверге сақтау",
-    "teacher_autosave_every": "Автосақтау әр {sec} с",
-    "teacher_server_saved_at": "Сервер: {time}",
-    "teacher_server_not_saved": "Сервер: әлі сақталмаған",
     "teacher_task_list": "Тапсырмалар тізімі",
     "teacher_task_editor_friendly": "Тапсырма редакторы",
     "teacher_new_slide": "Жаңа",
@@ -380,7 +375,8 @@
     "history_open_lesson": "Сабақты ашу",
     "finish_lesson": "Аяқтау",
     "finish_lesson_title": "Сабақты аяқтау",
-    "lines": "Сызықтар"
+    "lines": "Сызықтар",
+    "teacher_presentation_actions": "Презентация әрекеттері"
   },
   "defaults": {
     "slides": [

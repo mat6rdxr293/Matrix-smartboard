@@ -211,13 +211,8 @@
     "teacher_tasks_description": "Create and edit lesson tasks",
     "teacher_slides_description": "Slides, PowerPoint import, and images",
     "teacher_history_description": "Board replay and AI history",
-    "teacher_save": "Save",
-    "teacher_saving": "Saving...",
     "teacher_download_powerpoint": "Download PowerPoint",
     "teacher_save_pptx_server": "Save PPTX on server",
-    "teacher_autosave_every": "Autosave every {sec} s",
-    "teacher_server_saved_at": "Server: {time}",
-    "teacher_server_not_saved": "Server: not saved yet",
     "teacher_task_list": "Task list",
     "teacher_task_editor_friendly": "Task editor",
     "teacher_new_slide": "New",
@@ -380,7 +375,8 @@
     "history_open_lesson": "Open lesson",
     "finish_lesson": "Finish",
     "finish_lesson_title": "Finish lesson",
-    "lines": "Lines"
+    "lines": "Lines",
+    "teacher_presentation_actions": "Presentation actions"
   },
   "defaults": {
     "slides": [

@@ -9,7 +9,7 @@ import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import { withSubjectQuery } from "@/app/subjects/subjectConfig";
-import { ArrowLeft, ChevronRight, Download, FileDown, History, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Save, Settings2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Download, FileDown, History, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Settings2 } from "lucide-react";
 
 const STAGE_W = 960;
 const STAGE_H = 540;
@@ -134,11 +134,9 @@ export default function TeacherDashboard({
   onChangeTasks,
   onChangeSlides,
   onChangePresentationSource,
-  onClose,
   onDragHandlePointerDown,
   siteBackground,
   onChangeSiteBackground,
-  autosaveInfo,
   fullPage = false,
 }: {
   subjectId: string;
@@ -194,7 +192,6 @@ export default function TeacherDashboard({
   const [pptxError, setPptxError] = useState<string | null>(null);
   const [pptxWithBackground, setPptxWithBackground] = useState(false);
   const [pptxMode, setPptxMode] = useState<"full" | "editable" | "stickers">("full");
-  const [serverLoading, setServerLoading] = useState(false);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [m365Loading, setM365Loading] = useState(false);
@@ -500,24 +497,6 @@ export default function TeacherDashboard({
       setPptxWithBackground(false);
       setPptxMode("full");
       setPptxLoading(false);
-    }
-  };
-
-  const handleSaveServer = async () => {
-    setServerMessage(null);
-    setServerLoading(true);
-    try {
-      const res = await apiFetch(withSubjectApi("/api/storage"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks, slides, siteBackground, presentationSource }),
-      });
-      if (!res.ok) throw new Error("save failed");
-      setServerMessage(tl("saved_on_the_server"));
-    } catch {
-      setServerMessage(tl("failed_to_save_to_server"));
-    } finally {
-      setServerLoading(false);
     }
   };
 
@@ -1161,19 +1140,12 @@ export default function TeacherDashboard({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-10 rounded-xl px-3 text-[12px]"
-            onClick={handleSaveServer}
-            disabled={serverLoading}
-          >
-            <Save size={15} className="mr-2" />
-            {serverLoading ? tl("teacher_saving") : tl("teacher_save")}
-          </Button>
+        {section === "slides" && (
           <details className="group relative">
-            <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 text-frost/55 transition hover:bg-white/[0.05] hover:text-frost">
+            <summary
+              aria-label={tl("teacher_presentation_actions")}
+              className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 text-frost/55 transition hover:bg-white/[0.05] hover:text-frost"
+            >
               <MoreHorizontal size={18} />
             </summary>
             <div className="absolute right-0 top-12 z-50 w-[230px] overflow-hidden rounded-xl border border-white/10 bg-graphite p-1.5 shadow-soft">
@@ -1183,21 +1155,9 @@ export default function TeacherDashboard({
               <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleSavePptxServer} disabled={exportLoading}>
                 <FileDown size={15} className="mr-2.5" />{tl("teacher_save_pptx_server")}
               </button>
-              {autosaveInfo && (
-                <div className="mt-1 border-t border-white/[0.06] px-3 py-2 text-[10px] leading-4 text-frost/35">
-                  <div>{tl("teacher_autosave_every", { sec: autosaveInfo.intervalSec })}</div>
-                  <div>{autosaveInfo.lastServerSaveAt ? tl("teacher_server_saved_at", { time: formatDateTime(autosaveInfo.lastServerSaveAt, locale) }) : tl("teacher_server_not_saved")}</div>
-                </div>
-              )}
             </div>
           </details>
-          <button
-            className="h-10 rounded-xl px-3 text-[12px] font-medium text-frost/55 transition hover:bg-white/[0.04] hover:text-frost"
-            onClick={onClose}
-          >
-            {tl("close")}
-          </button>
-        </div>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">

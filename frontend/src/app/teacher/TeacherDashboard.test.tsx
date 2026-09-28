@@ -54,7 +54,7 @@ describe("TeacherDashboard simplified navigation", () => {
   });
 
   it("starts from a simple home screen, uses back navigation, and keeps all major tools reachable", async () => {
-    const view = mount();
+    mount();
 
     expect(screen.getByRole("heading", { name: "Что хотите подготовить?" })).toBeInTheDocument();
     expect(screen.queryByText(/Основные функции находятся здесь/)).not.toBeInTheDocument();
@@ -67,6 +67,10 @@ describe("TeacherDashboard simplified navigation", () => {
     expect(slidesCard).toBeInTheDocument();
     expect(historyCard).toBeInTheDocument();
 
+    expect(screen.queryByRole("button", { name: "Сохранить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрыть" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Действия с презентацией")).not.toBeInTheDocument();
+
     fireEvent.click(taskCard);
     expect(screen.getByText("Редактор задания")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Второй закон Ньютона")).toBeInTheDocument();
@@ -75,6 +79,7 @@ describe("TeacherDashboard simplified navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Презентация/ }));
     expect(await screen.findByRole("button", { name: "Загрузить PowerPoint" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Действия с презентацией")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Дополнительные возможности" }));
     const alternateImport = screen.getByText("Другие варианты импорта PowerPoint");
     expect(alternateImport).toBeInTheDocument();
@@ -89,19 +94,20 @@ describe("TeacherDashboard simplified navigation", () => {
     const officeSummary = screen.getAllByText(/Office Viewer/)[0];
     fireEvent.click(officeSummary);
     expect(screen.getByRole("button", { name: "Импортировать файл" })).toBeInTheDocument();
+    const presentationMenu = screen.getByLabelText("Действия с презентацией");
+    fireEvent.click(presentationMenu);
+    expect(screen.getByRole("button", { name: "Скачать PowerPoint" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сохранить PPTX на сервер" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Назад: Презентация" }));
 
     fireEvent.click(screen.getByRole("button", { name: /^История урока/ }));
     await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     expect(screen.getByText("История работы ИИ")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Назад: История урока" })).toBeInTheDocument();
-
-    expect(screen.getByRole("button", { name: "Сохранить" })).toBeInTheDocument();
-    const topMenu = view.container.querySelector("summary");
-    expect(topMenu).not.toBeNull();
-    fireEvent.click(topMenu!);
-    expect(screen.getByRole("button", { name: "Скачать PowerPoint" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Сохранить PPTX на сервер" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Действия с презентацией")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сохранить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрыть" })).not.toBeInTheDocument();
   });
 
 });
