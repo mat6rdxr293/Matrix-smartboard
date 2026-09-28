@@ -10,3 +10,7 @@ unsloth_compiled_cache/
 __pycache__/
 *.pyc
 scripts/.llama_*.log
+
+# логи задач веб-интерфейса
+runs/
+runs_ui.log
