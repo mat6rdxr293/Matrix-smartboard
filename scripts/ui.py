@@ -605,6 +605,7 @@ def build():
             b_start.click(start_bench, [b_model, b_rag], b_msg)
             b_score.click(start_score, b_res, b_msg)
             b_res.change(show_results, b_res, b_detail)
+            app.load(show_results, b_res, b_detail)  # та же история: первый прогон выбран без .change
 
         # 5. Сервер и урок
         with gr.Tab("5. Сервер и урок"):
@@ -619,8 +620,12 @@ def build():
                     s_msg, s_status = gr.Markdown(), gr.Markdown()
                 with gr.Column(scale=2):
                     gr.Markdown("### Урок по параграфу\nЗадания и текст слайдов по выбранному параграфу учебника.")
-                    l_book = gr.Dropdown(books(), label="Учебник")
-                    l_sec = gr.Dropdown([], label="Параграф")
+                    # Gradio сам выбирает первый вариант, а .change при этом не срабатывает —
+                    # поэтому параграфы первой книги заполняем сразу и ещё раз при загрузке страницы
+                    first_book = (books() or [None])[0]
+                    l_book = gr.Dropdown(books(), value=first_book, label="Учебник")
+                    l_sec = sections_of(first_book) if first_book else gr.Dropdown([])
+                    l_sec.label = "Параграф"
                     with gr.Row():
                         l_what = gr.Radio([("Задания и слайды", "both"), ("Только задания", "tasks"),
                                            ("Только слайды", "slides")], value="both", label="Что сделать")
@@ -632,6 +637,7 @@ def build():
             s_start.click(start_server_env, s_model, s_msg)
             s_stop.click(stop_server, None, s_msg)
             l_book.change(sections_of, l_book, l_sec)
+            app.load(sections_of, l_book, l_sec)
             l_start.click(start_lesson, [l_book, l_sec, l_what, l_nt, l_ns], l_msg)
 
         # периодическое обновление статусов
