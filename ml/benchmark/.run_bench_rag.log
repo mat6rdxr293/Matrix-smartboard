@@ -1,0 +1,43 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Please restructure your imports with 'import unsloth' at the top of your file.
+  from ._gpu_init import *
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+==((====))==  Unsloth 2026.9.11: Fast Qwen3_5 patching. Transformers: 5.5.0.
+   \\   /|    NVIDIA GeForce RTX 5050 Laptop GPU. Num GPUs = 1. Max memory: 7.96 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.11.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.6.0
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[1/30] kk-hist-001 4.9s 47 tok | 'Қазақ хандығы **1465 жылы** құрылды. Оның негізін **Керей** және **Жәнібек** хан'
+[2/30] kk-hist-002 21.8s 256 tok | 'Мәтінде нақты жыл көрсетілмеген, бірақ тарихи деректерге сүйене отырып жауап бер'
+[3/30] kk-hist-003 6.3s 70 tok | 'Алаш Орда үкіметі **1917 жылдың желтоқсанында** өткен **Екінші жалпықазақ съезін'
+[4/30] kk-hist-004 13.1s 150 tok | 'Қазақстан Республикасының Тәуелсіздігі туралы Конституциялық заң **1993 жылы 28 '
+[5/30] kk-biol-005 13.7s 159 tok | 'Фотосинтез өсімдік жасушасында **хлоропласт** органоидында жүреді.\n\nМәтін бойынш'
+[6/30] kk-biol-006 6.9s 79 tok | 'Адамның соматикалық (дене) жасушасында **46** хромосома бар.\n\nБұл саны 22 жұп ау'
+[7/30] kk-biol-007 10.4s 104 tok | 'ДНҚ құрамына кіретін төрт азоттық негіздер: **аденин (А), гуанин (Г), цитозин (Ц'
+[8/30] kk-biol-008 10.5s 104 tok | 'Митохондрияның негізгі қызметі – **энергия қоры (АТФ) түзу**.\n\nБұл энергия жасуш'
+[9/30] kk-phys-009 12.4s 123 tok | 'Ньютонның екінші заңын формуламен мынадай жазамыз:\n\n**F = ma**\n\nМұндағы:\n*   **F'
+[10/30] kk-phys-010 5.2s 60 tok | 'Жарықтың вакуумдағы жылдамдығы ресми түрде **299 792 458 м/с** (шамамен 300 000 '
+[11/30] kk-phys-011 13.7s 163 tok | 'Айнымалы ток тізбегі үшін Ом заңы:\n\n$$I_m = \\frac{U_m}{\\sqrt{R^2 + (\\omega L - \\'
+[12/30] kk-phys-012 4.2s 45 tok | 'Жер бетіндегі еркін түсу үдеуі шамамен **9,8 м/с²** (немесе 9,78 м/с²) тең.'
+[13/30] ru-hist-013 2.5s 27 tok | 'Действующая третья Конституция Республики Казахстан была принята 15 марта 2026 г'
+[14/30] ru-hist-014 16.0s 175 tok | 'В предоставленных фрагментах нет информации о переносе столицы из **Алматы** в А'
+[15/30] ru-hist-015 23.4s 256 tok | 'В декабре 1986 года в Алма-Ате произошли массовые выступления казахской молодёжи'
+[16/30] ru-biol-016 10.4s 122 tok | 'Гаметы у животных образуются в результате **мейоза**.\n\nСогласно предоставленным '
+[17/30] ru-biol-017 4.7s 54 tok | 'Соотношение по фенотипу во втором поколении при моногибридном скрещивании состав'
+[18/30] ru-biol-018 19.1s 220 tok | 'Основным органоидом, осуществляющим синтез белка, является **рибосома**.\n\nСоглас'
+[19/30] ru-phys-019 5.4s 57 tok | 'Единицей измерения силы в Международной системе единиц (СИ) является **ньютон** '
+[20/30] ru-phys-020 13.7s 159 tok | 'Для абсолютно твёрдого тела формула кинетической энергии (по формуле Кёнига) выг'
+[21/30] ru-phys-021 12.9s 146 tok | '**Период полураспада** — это время $T_{1/2}$, в течение которого система (частиц'
+[22/30] en-hist-022 2.5s 22 tok | 'Kazakhstan declared its independence on **December 16, 1991**.'
+[23/30] en-hist-023 3.4s 33 tok | 'Yuri Gagarin was launched from the **Baikonur Cosmodrome** on **April 12, 1961**'
+[24/30] en-hist-024 2.7s 27 tok | 'The Semipalatinsk nuclear test site was officially closed on **August 29, 1991**'
+[25/30] en-biol-025 1.1s 9 tok | 'Transfer RNA (tRNA).'
+[26/30] en-biol-026 6.5s 72 tok | 'Based on the provided text, the main function of hemoglobin in red blood cells i'
+[27/30] en-biol-027 1.5s 13 tok | 'Arteries carry blood away from the heart.'
+[28/30] en-phys-028 2.0s 20 tok | 'The SI unit of electrical resistance is the **ohm** (symbol: Ω).'
+[29/30] en-phys-029 3.6s 39 tok | 'The law of conservation of energy states that the total energy of an isolated sy'
+[30/30] en-phys-030 2.0s 19 tok | 'The SI unit of power is the **watt** (symbol: W).'
+Готово: /home/ker/matrix/benchmark/results_Qwen3.5-4B_rag_2026-09-26.jsonl
+Всего 2830 токенов за 256.3s, в среднем 11.0 tok/s

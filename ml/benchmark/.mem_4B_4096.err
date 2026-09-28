@@ -1,0 +1,68 @@
+0.00.002.855 I llama_completion: llama backend init
+0.00.002.882 I llama_completion: load the model and apply lora adapter, if any
+0.00.960.136 W model has unused tensor blk.32.attn_norm.weight (size = 10240 bytes) -- ignoring
+0.00.960.165 W model has unused tensor blk.32.post_attention_norm.weight (size = 10240 bytes) -- ignoring
+0.00.960.174 W model has unused tensor blk.32.attn_q.weight (size = 11796480 bytes) -- ignoring
+0.00.960.177 W model has unused tensor blk.32.attn_k.weight (size = 1474560 bytes) -- ignoring
+0.00.960.180 W model has unused tensor blk.32.attn_v.weight (size = 2150400 bytes) -- ignoring
+0.00.960.189 W model has unused tensor blk.32.attn_output.weight (size = 5898240 bytes) -- ignoring
+0.00.960.192 W model has unused tensor blk.32.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.00.960.195 W model has unused tensor blk.32.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.00.960.198 W model has unused tensor blk.32.ffn_gate.weight (size = 13271040 bytes) -- ignoring
+0.00.960.201 W model has unused tensor blk.32.ffn_down.weight (size = 19353600 bytes) -- ignoring
+0.00.960.204 W model has unused tensor blk.32.ffn_up.weight (size = 13271040 bytes) -- ignoring
+0.00.960.210 W model has unused tensor blk.32.nextn.eh_proj.weight (size = 7372800 bytes) -- ignoring
+0.00.960.213 W model has unused tensor blk.32.nextn.enorm.weight (size = 10240 bytes) -- ignoring
+0.00.960.217 W model has unused tensor blk.32.nextn.hnorm.weight (size = 10240 bytes) -- ignoring
+0.00.960.225 W model has unused tensor blk.32.nextn.shared_head_norm.weight (size = 10240 bytes) -- ignoring
+0.03.362.336 I cmn          init: llama threadpool init, n_threads = 4
+0.03.619.790 I 
+0.03.619.942 I system_info: n_threads = 4 (n_threads_batch = 4) / 20 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX_VNNI = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+0.03.619.962 I 
+0.03.620.309 I sampler seed: 260119749
+0.03.620.342 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = 64
+	top_k = 40, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.03.620.368 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist 
+0.03.620.369 I generate: n_ctx = 4096, n_batch = 2048, n_predict = 128, n_keep = 0
+0.03.620.369 I 
+0.16.565.645 I common_perf_print:    sampling time =      66.13 ms
+0.16.565.646 I common_perf_print:    samplers time =      21.10 ms /   162 tokens
+0.16.565.650 I common_perf_print:        load time =    2956.02 ms
+0.16.565.651 I common_perf_print: prompt eval time =     812.21 ms /    34 tokens (   23.89 ms per token,    41.86 tokens per second)
+0.16.565.653 I common_perf_print:        eval time =   11570.67 ms /   127 runs   (   91.11 ms per token,    10.98 tokens per second)
+0.16.565.653 I common_perf_print:       total time =   12458.61 ms /   161 tokens
+0.16.565.654 I common_perf_print: unaccounted time =       9.59 ms /   0.1 %      (total - sampling - prompt eval - eval) / (total)
+0.16.565.654 I common_perf_print:    graphs reused =        126
+	Command being timed: "llama.cpp/build/bin/llama-completion -m models/Qwen3.5-4B-Q4_K_M.gguf -t 4 -c 4096 -n 128 --temp 0 -no-cnv -p <|im_start|>user
+Абай Құнанбаев туралы 2 сөйлеммен айтып бер.<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+"
+	User time (seconds): 53.15
+	System time (seconds): 1.49
+	Percent of CPU this job got: 326%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:16.73
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 4553596
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1
+	Minor (reclaiming a frame) page faults: 534096
+	Voluntary context switches: 188
+	Involuntary context switches: 78
+	Swaps: 0
+	File system inputs: 381312
+	File system outputs: 16
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

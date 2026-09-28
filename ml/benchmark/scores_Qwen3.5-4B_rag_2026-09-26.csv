@@ -1,0 +1,109 @@
+﻿id,lang,subject,grade,question,reference_answer,answer,judge_score,judge_reason,judge_model,judge_status,human_score,human_comment
+kk-hist-001,kk,history,10,Қазақ хандығы қай жылы құрылды және оның негізін кімдер қалады?,1465 жылы (кей деректерде 1465–1466 жж.); негізін қалаған Керей мен Жәнібек хандар.,Қазақ хандығы **1465 жылы** құрылды. Оның негізін **Керей** және **Жәнібек** хандар қалады.,2,"The student answer correctly identifies the founding year and the two founders, matching all key facts in the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-hist-002,kk,history,10,Аңырақай шайқасы қай жылы болды және онда кімдер жеңіске жетті?,1730 жылы; Әбілқайыр бастаған қазақ жасақтары жоңғарларды жеңді.,"Мәтінде нақты жыл көрсетілмеген, бірақ тарихи деректерге сүйене отырып жауап беремін:
+
+**Аңырақай шайқасы 1729 жылы** (кейбір деректерде 1728-1729 жылдар аралығында) өтті.
+
+**Жеңіске жеткендер:**
+*   **Қазақ әскері:** Басқарушысы **Бөгенбай** (мәтінде Қазыбек бектің жазбасына сүйене отырып оны басқарған деп айтылған).
+*   **Қалмақтар:** Басқарушысы **Абылай** (мәтінде оның Аңырақайда қатыспағаны айтылған).
+
+Нәтижесінде қазақ қолы жеңіске жетіп, жоңғар басқыншылығына қарсы жүз жылдық соғыстың бетбұрысы болды",0,The student answer is incorrect because it contradicts the reference by stating the year 1729 instead of 1730 and incorrectly identifying the leaders as Bögenbai and Abulay instead of Ablqaikir and the Kazakh forces defeating the Mongols.,qwen3.5-4b-q4-k-m,preliminary,,
+kk-hist-003,kk,history,9,Алашорда үкіметі қашан және қай съезде құрылды?,1917 жылы желтоқсанда Орынборда өткен II жалпықазақ съезінде; төрағасы — Әлихан Бөкейханов.,Алаш Орда үкіметі **1917 жылдың желтоқсанында** өткен **Екінші жалпықазақ съезінің** (1917 ж. желтоқсанның 5-13) шешімімен құрылды.,2,"The student answer correctly identifies the year, month, location (implied by context of the congress), and the specific congress number, matching all key facts in the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-hist-004,kk,history,9,«Қазақстан Республикасының мемлекеттік тәуелсіздігі туралы» Конституциялық заң қашан қабылданды?,1991 жылғы 16 желтоқсанда.,"Қазақстан Республикасының Тәуелсіздігі туралы Конституциялық заң **1993 жылы 28 қаңтарда** қабылданды.
+
+Бұл заң Қазақстанның алғашқы Конституциясы болып табылады және ол елдің егемендігін заңнамалық негізде бекітті. Мәтінде бұл туралы нақты айтылған жоқ, бірақ тарихи деректерге сүйене отырып, жоғарыдағы уақытты анықтауға болады.",0,"The student provided the incorrect date (January 28, 1993) instead of the correct date (December 16, 1991), which constitutes a factual contradiction.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-biol-005,kk,biology,9,Фотосинтез өсімдік жасушасының қай органоидында жүреді?,Хлоропластта.,"Фотосинтез өсімдік жасушасында **хлоропласт** органоидында жүреді.
+
+Мәтін бойынша:
+*   [3] бөлімінде: ""Фотосинтез аппаратының негізі – жасуша ішіндегі органелла-**хлоропластар**"".
+*   [2] бөлімінде: ""Фотосинтез әрекеті бүкіл хлоропласт жасушасында емес осы **граналарда** жүреді"" (граналар хлоропластың құрылымына жатады).",2,"The student correctly identified chloroplasts as the site of photosynthesis, which aligns with the reference and the provided text.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-biol-006,kk,biology,10,Адамның соматикалық жасушасында неше хромосома бар?,46 хромосома (23 жұп).,"Адамның соматикалық (дене) жасушасында **46** хромосома бар.
+
+Бұл саны 22 жұп аутосомалар мен 1 жұп жыныстық хромосомалардан (ерлерде XY, әйелдерде XX) тұрады.",2,"The student answer correctly states the total number of chromosomes (46) and accurately describes their composition (22 pairs of autosomes and 1 pair of sex chromosomes), fully matching the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-biol-007,kk,biology,10,ДНҚ құрамына кіретін төрт азоттық негізді атаңыз.,"Аденин, гуанин, цитозин, тимин.","ДНҚ құрамына кіретін төрт азоттық негіздер: **аденин (А), гуанин (Г), цитозин (Ц) және тимин (Т)**.
+
+*Ескерту: Мәтінде бұл тізім нақты түрде жазылмағанымен, ДНҚ туралы жалпы білім негізінде бұл негіздер белгілі.*",2,The student correctly identified all four nitrogenous bases found in DNA without any contradictions.,qwen3.5-4b-q4-k-m,preliminary,,
+kk-biol-008,kk,biology,9,Митохондрияның негізгі қызметі қандай?,Жасушалық тыныс алу арқылы АТФ синтездеу (энергиямен қамтамасыз ету).,"Митохондрияның негізгі қызметі – **энергия қоры (АТФ) түзу**.
+
+Бұл энергия жасушаның тыныс алу процесі барысында органикалық заттардың тотығуы нәтижесінде бөлінеді. Сондықтан митохондрияны жасушаның **""күш беретін станциясы""** деп атайды.",2,"The student answer correctly identifies the synthesis of ATP as the main function of mitochondria, which aligns with the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-phys-009,kk,physics,9,Ньютонның екінші заңын формуламен жазыңыз.,F = ma — денеге әсер ететін күш масса мен үдеудің көбейтіндісіне тең.,"Ньютонның екінші заңын формуламен мынадай жазамыз:
+
+**F = ma**
+
+Мұндағы:
+*   **F** – әсер етуші күш;
+*   **m** – дененің массасы;
+*   **a** – үдеу.
+
+Бұл заң дененің үдеуі оған әсер ететін күшке тура пропорционал және оның массасына кері пропорционал екенін білдіреді.",2,"The student correctly provided the formula F=ma and explained the variables and the relationship between force, mass, and acceleration, fully matching the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-phys-010,kk,physics,11,Жарықтың вакуумдағы жылдамдығы қандай?,Шамамен 3·10⁸ м/с (дәлірек 299 792 458 м/с).,Жарықтың вакуумдағы жылдамдығы ресми түрде **299 792 458 м/с** (шамамен 300 000 км/с) деп қабылданған.,2,"The student answer correctly states the precise speed of light and provides an accurate approximation, fully matching the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-phys-011,kk,physics,10,Тізбек бөлігі үшін Ом заңын жазыңыз.,"I = U/R — ток күші кернеуге тура, кедергіге кері пропорционал.","Айнымалы ток тізбегі үшін Ом заңы:
+
+$$I_m = \frac{U_m}{\sqrt{R^2 + (\omega L - \frac{1}{\omega C})^2}}$$
+
+Мұндағы:
+*   $I_m$ – токтың амплитудалық мәні;
+*   $U_m$ – кернеудің амплитудалық мәні;
+*   $R$ – кедергі;
+*   $\omega L$ – индуктивті реактивті кедергі;
+*   $\frac{1}{\omega C}$ – конденсатордың реактивті кедергісі.",0,"The student provided the formula for alternating current, whereas the reference requires the standard Ohm's law for a direct current circuit.",qwen3.5-4b-q4-k-m,preliminary,,
+kk-phys-012,kk,physics,9,Жер бетіндегі еркін түсу үдеуі шамамен неге тең?,"Шамамен 9,8 м/с².","Жер бетіндегі еркін түсу үдеуі шамамен **9,8 м/с²** (немесе 9,78 м/с²) тең.",2,"The student answer correctly states the value 9.8 m/s² and adds a precise value of 9.78 m/s², which does not contradict the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-hist-013,ru,history,11,Когда была принята действующая Конституция Республики Казахстан?,30 августа 1995 года на республиканском референдуме.,Действующая третья Конституция Республики Казахстан была принята 15 марта 2026 года.,0,"The student's answer is factually incorrect because the current Constitution of Kazakhstan was adopted in 1995, not 2026.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-hist-014,ru,history,11,В каком году столица Казахстана была перенесена из Алматы в Акмолу?,В 1997 году (10 декабря 1997 г.).,"В предоставленных фрагментах нет информации о переносе столицы из **Алматы** в Акмолу.
+
+Согласно тексту, столица Казахстана была перенесена из **Алма-Аты** в Акмолу. Этот процесс начался в 1994 году (принятие решения Верховным Советом), а официальное объявление Акмолы столицей произошло 10 декабря 1997 года.
+
+По моим знаниям: столица Казахстана никогда не переносилась из Алматы. Алматы был столицей в период советской власти (до 1997 года), но после обретения независимости столицей стала Алма-Ата, которая была перенесена в Акмолу (ныне Астану).",1,"The student answer contains a factual error by stating the capital was moved from Almaty, contradicting the reference which correctly identifies the move from Alma-Ata.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-hist-015,ru,history,9,Что произошло в Алма-Ате в декабре 1986 года?,Желтоксан — выступления казахской молодёжи 16–17 декабря 1986 г. против назначения Г. Колбина первым секретарём ЦК Компартии Казахстана вместо Д. Кунаева.,"В декабре 1986 года в Алма-Ате произошли массовые выступления казахской молодёжи, известные как **Желтоксан** (Декабрьское восстание).
+
+Основные события:
+*   **Причина:** Волнения начались после решения М. С. Горбачёва о снятии с поста первого секретаря Казахской ССР Д. А. Кунаева и назначении на его место Г. В. Колбина.
+*   **Ход событий:** 17–18 декабря 1986 года в городе прошли массовые протесты против решений центра. Участники требовали назначения на должность главы республики представителя коренного казахского населения.
+*   **Разгон:** 19–20 декабря студенты (около 80–120 человек) собрались на площади имени Гагарина, затем двинулись к Советскому проспекту, где их разогнали милиция. Были задержаны 83 человека.
+*   **Последствия:** В вузах Караганды были исключены 54 студента, пять студентов привлечены к уголовной ответственности.",2,"The student answer correctly identifies the event as Zheltoksan, the date (December 1986), the cause (Kunayev's removal and Kolbin's appointment), and the location, matching the reference without contradictions.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-biol-016,ru,biology,10,В результате какого деления клетки образуются гаметы у животных?,Мейоза.,"Гаметы у животных образуются в результате **мейоза**.
+
+Согласно предоставленным фрагментам, именно мейоз сопряжён с гаметогенезом (раздел [2]) и приводит к образованию гаплоидных половых клеток из диплоидной клетки. Также в разделе [3] указано, что цитологическая основа расщепления признаков при скрещивании — это расхождение гомологичных хромосом и образование гаплоидных половых клеток в мейозе.",2,"The student correctly identified meiosis as the process of gamete formation, matching the reference answer without any contradictions.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-biol-017,ru,biology,10,Какое соотношение по фенотипу получается во втором поколении при моногибридном скрещивании (полное доминирование)?,3:1.,Соотношение по фенотипу во втором поколении при моногибридном скрещивании составляет **3:1** (3 особи с доминантным признаком и 1 особь с рецессивным).,2,The student answer correctly identifies the 3:1 phenotypic ratio and provides accurate additional context without contradicting the reference.,qwen3.5-4b-q4-k-m,preliminary,,
+ru-biol-018,ru,biology,9,Какие органоиды клетки осуществляют синтез белка?,Рибосомы.,"Основным органоидом, осуществляющим синтез белка, является **рибосома**.
+
+Согласно предоставленным фрагментам:
+*   Рибосомы — это немембранные органеллы, служащие для биосинтеза белка на стадии трансляции ([1]).
+*   В эукариотических клетках рибосомы могут располагаться на мембранах шероховатой эндоплазматической сети и в цитоплазме ([1]).
+*   Двумембранные органеллы (митохондрии и пластиды) также обладают собственным белоксинтезирующим аппаратом, в который входят рибосомы, сходные с прокариотическими ([2]).
+
+Таким образом, синтез белка осуществляют **рибосомы** (как свободные в цитоплазме, так и связанные с мембранами ЭПС, а также находящиеся внутри митохондрий и пластид).",2,"The student answer correctly identifies ribosomes as the organelles responsible for protein synthesis, fully aligning with the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+ru-phys-019,ru,physics,9,Какова единица измерения силы в СИ?,Ньютон (Н); 1 Н = 1 кг·м/с².,"Единицей измерения силы в Международной системе единиц (СИ) является **ньютон** (обозначение: Н).
+
+Она определяется как сила, изменяющая за 1 секунду скорость тела массой 1 кг на 1 м/с.",2,"The student correctly identifies the unit as the Newton (N) and provides the correct physical definition (force changing the velocity of a 1 kg mass by 1 m/s in 1 second), which is factually equivalent to the reference's formula 1 N = 1 kg·m/s².",qwen3.5-4b-q4-k-m,preliminary,,
+ru-phys-020,ru,physics,9,Запишите формулу кинетической энергии тела.,Eк = mv²/2.,"Для абсолютно твёрдого тела формула кинетической энергии (по формуле Кёнига) выглядит так:
+
+$$T = \frac{Mv^2}{2} + \frac{I\omega^2}{2}$$
+
+где:
+*   $M$ — масса тела;
+*   $v$ — скорость центра масс;
+*   $I$ — момент инерции относительно мгновенной оси;
+*   $\omega$ — угловая скорость.
+
+*Примечание: В предоставленных фрагментах также приведены формулы для плотности кинетической энергии в гидродинамике (турбулентности), но они не подходят для описания энергии отдельного тела.*",1,The student provided the general formula for the kinetic energy of a rigid body (König's theorem) instead of the basic translational formula requested by the question.,qwen3.5-4b-q4-k-m,preliminary,,
+ru-phys-021,ru,physics,11,Что такое период полураспада?,"Время, за которое распадается половина исходного количества радиоактивных ядер.","**Период полураспада** — это время $T_{1/2}$, в течение которого система (частица, ядро, атом) распадается с вероятностью 1/2.
+
+В течение одного периода полураспада в среднем вдвое уменьшается количество выживших частиц и интенсивность реакции распада.
+
+**Ключевые свойства:**
+*   Это константа для данного радиоактивного изотопа.
+*   Не зависит от внешних факторов (температура, давление, химический состав, способ получения), за исключением акта прямого ядерного взаимодействия.
+*   Характеризует скорость распада радиоактивных ядер.",1,"The student answer is partially correct because it correctly identifies the time aspect and the reduction of quantity, but it incorrectly defines the decay probability as 1/2 (which is false) and omits the specific definition that exactly half of the original nuclei decay.",qwen3.5-4b-q4-k-m,preliminary,,
+en-hist-022,en,history,11,On what date did Kazakhstan declare its independence?,16 December 1991.,"Kazakhstan declared its independence on **December 16, 1991**.",2,"The student answer correctly states the date of Kazakhstan's independence, matching the reference exactly.",qwen3.5-4b-q4-k-m,preliminary,,
+en-hist-023,en,history,9,"From which cosmodrome was Yuri Gagarin launched on the first human spaceflight, and when?",From Baikonur (in the Kazakh SSR) on 12 April 1961.,"Yuri Gagarin was launched from the **Baikonur Cosmodrome** on **April 12, 1961**.",2,"The student answer correctly identifies both the Baikonur Cosmodrome and the date April 12, 1961, matching all key facts in the reference.",qwen3.5-4b-q4-k-m,preliminary,,
+en-hist-024,en,history,11,When was the Semipalatinsk nuclear test site officially closed?,"29 August 1991, by decree of the President of the Kazakh SSR.","The Semipalatinsk nuclear test site was officially closed on **August 29, 1991**.",2,The student answer correctly identifies the date and the event without contradicting the reference.,qwen3.5-4b-q4-k-m,preliminary,,
+en-biol-025,en,biology,10,Which molecule carries amino acids to the ribosome during protein synthesis?,Transfer RNA (tRNA).,Transfer RNA (tRNA).,2,The student's answer is identical to the reference and is factually correct.,qwen3.5-4b-q4-k-m,preliminary,,
+en-biol-026,en,biology,9,What is the main function of hemoglobin in red blood cells?,Transporting oxygen (from the lungs to the tissues).,"Based on the provided text, the main function of hemoglobin in red blood cells is to **reversibly bind with oxygen and transport it to tissues**.
+
+Specifically, the text notes that hemoglobin is a complex iron-containing protein found in vertebrate red blood cells (эритроциты) capable of carrying up to four oxygen molecules.",2,The student answer correctly identifies the main function as binding and transporting oxygen without contradicting the reference.,qwen3.5-4b-q4-k-m,preliminary,,
+en-biol-027,en,biology,9,Which blood vessels carry blood away from the heart?,Arteries.,Arteries carry blood away from the heart.,2,"The student's answer correctly identifies arteries as the vessels carrying blood away from the heart, matching the reference factually.",qwen3.5-4b-q4-k-m,preliminary,,
+en-phys-028,en,physics,10,What is the SI unit of electrical resistance?,The ohm (Ω).,The SI unit of electrical resistance is the **ohm** (symbol: Ω).,2,The student answer correctly identifies the SI unit of electrical resistance as the ohm (Ω) without any contradictions.,qwen3.5-4b-q4-k-m,preliminary,,
+en-phys-029,en,physics,9,State the law of conservation of energy.,"Energy cannot be created or destroyed, only transformed from one form to another; the total energy of an isolated system stays constant.","The law of conservation of energy states that the total energy of an isolated system remains constant; energy can neither be created nor destroyed, though it can change from one form to another.",2,The student's answer accurately restates the law of conservation of energy without any contradictions or missing key facts.,qwen3.5-4b-q4-k-m,preliminary,,
+en-phys-030,en,physics,9,What is the SI unit of power?,The watt (W); 1 W = 1 J/s.,The SI unit of power is the **watt** (symbol: W).,2,The student correctly identified the SI unit of power as the watt (W) without any contradictions.,qwen3.5-4b-q4-k-m,preliminary,,

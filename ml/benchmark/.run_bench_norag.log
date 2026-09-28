@@ -1,0 +1,40 @@
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+==((====))==  Unsloth 2026.9.11: Fast Qwen3_5 patching. Transformers: 5.5.0.
+   \\   /|    NVIDIA GeForce RTX 5050 Laptop GPU. Num GPUs = 1. Max memory: 7.96 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.11.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.6.0
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[1/30] kk-hist-001 12.4s 138 tok | 'Қазақ хандығы **1465 жылы** құрылды. Оның негізін **Қабанбай хан** қалады.\n\n*Еск'
+[2/30] kk-hist-002 11.0s 127 tok | 'Аңырақай шайқасы **1916 жылы** 20 тамызда болды. Онда **қазақ әскері мен орыс-қа'
+[3/30] kk-hist-003 14.0s 170 tok | 'Алашорда үкіметі **1917 жылдың 1 желтоқсында** құрылды.\n\nОл **Алаш Орда съезінің'
+[4/30] kk-hist-004 4.5s 53 tok | 'Қазақстан Республикасының Мемлекеттік тәуелсіздігі туралы Конституциялық заң **1'
+[5/30] kk-biol-005 3.0s 36 tok | 'Фотосинтез өсімдік жасушасындағы **хлоропласт** органоидында жүреді.'
+[6/30] kk-biol-006 2.5s 30 tok | 'Адам соматикалық жасушасында **46** хромосома бар (24 жұбы).'
+[7/30] kk-biol-007 4.0s 49 tok | 'ДНҚ құрамына кіретін төрт азоттық негіз: **аденин (А), гуанин (Г), цитозин (Ц) ж'
+[8/30] kk-biol-008 5.9s 72 tok | 'Митохондриялар жасушадағы **энергия өндіру орталығы** болып табылады. Олар аэроб'
+[9/30] kk-phys-009 0.7s 8 tok | '$F = ma$'
+[10/30] kk-phys-010 4.4s 53 tok | 'Жарықтың вакуумдағы жылдамдығы шамамен **300 000 км/с** (нақтырағы: 299 792 458 '
+[11/30] kk-phys-011 8.7s 106 tok | 'Тізбекті қосымшаға қосылған кездегі жалпы кедергі ($R_{жалпы}$) мына формуламен '
+[12/30] kk-phys-012 3.5s 43 tok | 'Жер бетіндегі еркін түсу үдеуі шамамен **9,8 м/с²** (немесе 10 м/с²) тең.'
+[13/30] ru-hist-013 2.0s 24 tok | 'Действующая Конституция Республики Казахстан принята **30 августа 1995 года**.'
+[14/30] ru-hist-014 2.5s 26 tok | 'Столица Казахстана была перенесена из Алматы в Акмолу в **1997 году**.'
+[15/30] ru-hist-015 25.3s 256 tok | 'В декабре 1986 года в Алма-Ате не происходило крупных исторических событий или т'
+[16/30] ru-biol-016 7.8s 85 tok | 'Гаметы у животных образуются в результате **мейоза**.\n\nЭто тип клеточного делени'
+[17/30] ru-biol-017 5.7s 69 tok | 'Соотношение фенотипов во втором поколении (F2) при моногибридном скрещивании с п'
+[18/30] ru-biol-018 4.1s 50 tok | 'Синтез белка осуществляют **рибосомы**.\n\nОни могут находиться как в цитоплазме к'
+[19/30] ru-phys-019 2.2s 27 tok | 'Единица измерения силы в системе СИ — **ньютон** (обозначается как **Н**).'
+[20/30] ru-phys-020 3.2s 39 tok | '$E_k = \\frac{mv^2}{2}$\n\nгде:\n*   $m$ — масса тела,\n*   $v$ — скорость тела.'
+[21/30] ru-phys-021 7.2s 87 tok | '**Период полураспада** — это время, за которое распадается ровно половина атомны'
+[22/30] en-hist-022 1.9s 22 tok | 'Kazakhstan declared its independence on **December 16, 1991**.'
+[23/30] en-hist-023 3.9s 44 tok | 'Yuri Gagarin was launched from the **Baikonur Cosmodrome** (specifically Site 1/'
+[24/30] en-hist-024 3.8s 39 tok | 'The Semipalatinsk nuclear test site was officially closed in **1991**, following'
+[25/30] en-biol-025 0.9s 9 tok | 'Transfer RNA (tRNA).'
+[26/30] en-biol-026 6.5s 68 tok | 'The main function of hemoglobin in red blood cells is to **transport oxygen** fr'
+[27/30] en-biol-027 4.5s 48 tok | '**Arteries** carry blood away from the heart.\n\n*Note: While most arteries carry '
+[28/30] en-phys-028 2.5s 26 tok | 'The SI unit of electrical resistance is the **ohm**, symbolized by the Greek let'
+[29/30] en-phys-029 4.6s 47 tok | 'The law of conservation of energy states that **energy cannot be created or dest'
+[30/30] en-phys-030 4.5s 49 tok | 'The SI unit of power is the **watt** (symbol: **W**).\n\nOne watt is defined as on'
+Готово: /home/ker/matrix/benchmark/results_Qwen3.5-4B_2026-09-26.jsonl
+Всего 1900 токенов за 167.7s, в среднем 11.3 tok/s

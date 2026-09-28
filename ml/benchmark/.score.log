@@ -1,0 +1,70 @@
+benchmark/results_Qwen3.5-4B_2026-09-26.jsonl:
+  [1/30] kk-hist-001: judge=1 The student answer is incorrect because it claims Khan Kabanbai founde
+  [2/30] kk-hist-002: judge=0 The student answer is incorrect because it states the year 1916 and de
+  [3/30] kk-hist-003: judge=1 The student answer is incorrect because it claims the government was f
+  [4/30] kk-hist-004: judge=0 The student provided an incorrect date (December 25) that contradicts 
+  [5/30] kk-biol-005: judge=2 The student answer correctly identifies chloroplasts as the site of ph
+  [6/30] kk-biol-006: judge=1 The student incorrectly stated there are 24 pairs of chromosomes inste
+  [7/30] kk-biol-007: judge=2 The student answer correctly lists all four nitrogenous bases found in
+  [8/30] kk-biol-008: judge=2 The student answer correctly identifies mitochondria as the energy pro
+  [9/30] kk-phys-009: judge=1 The student provided only the formula without the explanatory text def
+  [10/30] kk-phys-010: judge=2 The student answer is correct because it provides the approximate spee
+  [11/30] kk-phys-011: judge=0 The student provided the formula for total resistance in a series circ
+  [12/30] kk-phys-012: judge=2 The student answer is correct because it includes the reference value 
+  [13/30] ru-hist-013: judge=2 The student answer correctly identifies the date of adoption and match
+  [14/30] ru-hist-014: judge=2 The student correctly identified the year 1997, which matches the refe
+  [15/30] ru-hist-015: judge=0 The student answer incorrectly states that no major historical events 
+  [16/30] ru-biol-016: judge=2 The student correctly identified meiosis as the process of gamete form
+  [17/30] ru-biol-017: judge=2 The student answer correctly identifies the 3:1 phenotypic ratio in F2
+  [18/30] ru-biol-018: judge=2 The student correctly identified ribosomes as the site of protein synt
+  [19/30] ru-phys-019: judge=1 The student correctly identified the unit as the Newton (N) without co
+  [20/30] ru-phys-020: judge=2 The student provided the correct formula and definitions for mass and 
+  [21/30] ru-phys-021: judge=2 The student answer correctly defines the half-life as the time require
+  [22/30] en-hist-022: judge=2 The student answer correctly states the date of Kazakhstan's independe
+  [23/30] en-hist-023: judge=2 The student answer correctly identifies the Baikonur Cosmodrome and th
+  [24/30] en-hist-024: judge=1 The student answer is partially correct because it provides the correc
+  [25/30] en-biol-025: judge=2 The student's answer is identical to the reference and is factually co
+  [26/30] en-biol-026: judge=2 The student answer correctly identifies the primary function of hemogl
+  [27/30] en-biol-027: judge=2 The student correctly identified arteries as the vessels carrying bloo
+  [28/30] en-phys-028: judge=2 The student answer correctly identifies the ohm as the SI unit of elec
+  [29/30] en-phys-029: judge=2 The student answer correctly states that energy cannot be created or d
+  [30/30] en-phys-030: judge=2 The student answer correctly identifies the SI unit of power as the wa
+  → benchmark/scores_Qwen3.5-4B_2026-09-26.csv
+benchmark/results_Qwen3.5-4B_rag_2026-09-26.jsonl:
+  [1/30] kk-hist-001: judge=2 The student answer correctly identifies the founding year and the two 
+  [2/30] kk-hist-002: judge=0 The student answer is incorrect because it contradicts the reference b
+  [3/30] kk-hist-003: judge=2 The student answer correctly identifies the year, month, location (imp
+  [4/30] kk-hist-004: judge=0 The student provided the incorrect date (January 28, 1993) instead of 
+  [5/30] kk-biol-005: judge=2 The student correctly identified chloroplasts as the site of photosynt
+  [6/30] kk-biol-006: judge=2 The student answer correctly states the total number of chromosomes (4
+  [7/30] kk-biol-007: judge=2 The student correctly identified all four nitrogenous bases found in D
+  [8/30] kk-biol-008: judge=2 The student answer correctly identifies the synthesis of ATP as the ma
+  [9/30] kk-phys-009: judge=2 The student correctly provided the formula F=ma and explained the vari
+  [10/30] kk-phys-010: judge=2 The student answer correctly states the precise speed of light and pro
+  [11/30] kk-phys-011: judge=0 The student provided the formula for alternating current, whereas the 
+  [12/30] kk-phys-012: judge=2 The student answer correctly states the value 9.8 m/s² and adds a prec
+  [13/30] ru-hist-013: judge=0 The student's answer is factually incorrect because the current Consti
+  [14/30] ru-hist-014: judge=1 The student answer contains a factual error by stating the capital was
+  [15/30] ru-hist-015: judge=2 The student answer correctly identifies the event as Zheltoksan, the d
+  [16/30] ru-biol-016: judge=2 The student correctly identified meiosis as the process of gamete form
+  [17/30] ru-biol-017: judge=2 The student answer correctly identifies the 3:1 phenotypic ratio and p
+  [18/30] ru-biol-018: judge=2 The student answer correctly identifies ribosomes as the organelles re
+  [19/30] ru-phys-019: judge=2 The student correctly identifies the unit as the Newton (N) and provid
+  [20/30] ru-phys-020: judge=1 The student provided the general formula for the kinetic energy of a r
+  [21/30] ru-phys-021: judge=1 The student answer is partially correct because it correctly identifie
+  [22/30] en-hist-022: judge=2 The student answer correctly states the date of Kazakhstan's independe
+  [23/30] en-hist-023: judge=2 The student answer correctly identifies both the Baikonur Cosmodrome a
+  [24/30] en-hist-024: judge=2 The student answer correctly identifies the date and the event without
+  [25/30] en-biol-025: judge=2 The student's answer is identical to the reference and is factually co
+  [26/30] en-biol-026: judge=2 The student answer correctly identifies the main function as binding a
+  [27/30] en-biol-027: judge=2 The student's answer correctly identifies arteries as the vessels carr
+  [28/30] en-phys-028: judge=2 The student answer correctly identifies the SI unit of electrical resi
+  [29/30] en-phys-029: judge=2 The student's answer accurately restates the law of conservation of en
+  [30/30] en-phys-030: judge=2 The student correctly identified the SI unit of power as the watt (W) 
+  → benchmark/scores_Qwen3.5-4B_rag_2026-09-26.csv
+
+Средний балл, % от максимума (оценки судьи предварительные):
+| Прогон | kk | ru | en | всего | проверено вручную |
+|---|---:|---:|---:|---:|---:|
+| Qwen3.5-4B_2026-09-26 | 58% (n=12) | 83% (n=9) | 94% (n=9) | **77% (n=30)** | 0/30 |
+| Qwen3.5-4B_rag_2026-09-26 | 75% (n=12) | 72% (n=9) | 100% (n=9) | **82% (n=30)** | 0/30 |
