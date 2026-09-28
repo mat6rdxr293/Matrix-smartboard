@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/apiClient";
 import type { Stroke } from "@/app/board/boardEngine";
 import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
 
@@ -33,7 +34,7 @@ export function filterPendingBoardReplayOps(server: BoardReplayOp[], local: Boar
 }
 
 export async function loadBoardReplay(lessonId: string) {
-  const res = await fetch(`/api/lessons/${lessonId}/board`, { cache: "no-store", credentials: "same-origin" });
+  const res = await apiFetch(`/api/lessons/${lessonId}/board`, { cache: "no-store", credentials: "same-origin" });
   if (!res.ok) {
     throw new Error("board replay load failed");
   }
@@ -42,7 +43,7 @@ export async function loadBoardReplay(lessonId: string) {
 
 export async function appendBoardReplay(ops: BoardReplayOp[], lessonId: string) {
   if (!ops.length) return { ok: true };
-  const res = await fetch(`/api/lessons/${lessonId}/board/operations`, {
+  const res = await apiFetch(`/api/lessons/${lessonId}/board/operations`, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },

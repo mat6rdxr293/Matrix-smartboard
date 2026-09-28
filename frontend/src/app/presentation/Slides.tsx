@@ -1,3 +1,4 @@
+import { backendAssetUrl } from "@/lib/apiClient";
 ﻿import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -131,7 +132,7 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
                 height: BASE_H,
                 transform: `translate(-50%, -50%) scale(${stageScale})`,
                 transformOrigin: "top left",
-                backgroundImage: hasBackground ? `url(${slide.background})` : undefined,
+                backgroundImage: hasBackground ? `url(${backendAssetUrl(slide.background)})` : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
                 backgroundRepeat: "no-repeat",
@@ -168,7 +169,7 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
                 ) : el.type === "image" ? (
                   <img
                     key={el.id}
-                    src={el.src}
+                    src={backendAssetUrl(el.src)}
                     alt=""
                     className="absolute object-contain"
                     style={{

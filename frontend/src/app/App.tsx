@@ -1,4 +1,5 @@
-﻿import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { apiFetch, apiUrl, backendAssetUrl, isNativeApp } from "@/lib/apiClient";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import TopBar from "@/app/layout/TopBar";
 import Slides, { type Slide } from "@/app/presentation/Slides";
 import OfficePresentationFrame from "@/app/presentation/OfficePresentationFrame";
@@ -498,7 +499,17 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       try {
         persistBoardReplayQueue(boardReplayQueueRef.current);
         const body = JSON.stringify({ operations: boardReplayQueueRef.current.slice(0, 80) });
-        navigator.sendBeacon(`/api/lessons/${lesson.id}/board/operations`, new Blob([body], { type: "application/json" }));
+        const path = `/api/lessons/${lesson.id}/board/operations`;
+        if (isNativeApp()) {
+          void apiFetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            keepalive: true,
+          });
+        } else {
+          navigator.sendBeacon(apiUrl(path), new Blob([body], { type: "application/json" }));
+        }
       } catch {
         // keep the local backup; the server deduplicates retries by client operation id
       }
@@ -566,7 +577,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       let loadedSiteBackground = siteBackground;
       let loadedPresentationSource = presentationSource;
       try {
-        const res = await fetch(withSubjectApi("/api/storage"), { cache: "no-store" });
+        const res = await apiFetch(withSubjectApi("/api/storage"), { cache: "no-store" });
         if (res.ok) {
           const data = (await res.json()) as {
             tasks?: Task[];
@@ -690,7 +701,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       if (snapshot === lastServerSnapshotRef.current) return;
       autoSavingRef.current = true;
       try {
-        const res = await fetch(withSubjectApi("/api/storage"), {
+        const res = await apiFetch(withSubjectApi("/api/storage"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: snapshot,
@@ -1202,7 +1213,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const handleM365Fallback = async () => {
     if (presentationSource.type !== "m365" || !presentationSource.fileId) return;
     try {
-      const res = await fetch("/api/m365/presentation/fallback/pdf", {
+      const res = await apiFetch("/api/m365/presentation/fallback/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileId: presentationSource.fileId }),
@@ -1430,7 +1441,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                 height: SLIDE_BASE_H,
                 transform: `scale(${slideShowScale})`,
                 transformOrigin: "center",
-                backgroundImage: slideshowSlide.background ? `url(${slideshowSlide.background})` : undefined,
+                backgroundImage: slideshowSlide.background ? `url(${backendAssetUrl(slideshowSlide.background)})` : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
                 backgroundRepeat: "no-repeat",
@@ -1468,7 +1479,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                   ) : el.type === "image" ? (
                     <img
                       key={el.id}
-                      src={el.src}
+                      src={backendAssetUrl(el.src)}
                       alt=""
                       className="absolute object-contain"
                       style={{

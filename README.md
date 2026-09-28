@@ -57,6 +57,21 @@ chmod +x scripts/dev.sh
 scripts/dev.ps1
 ```
 
+### Android
+
+Android-приложение находится в `frontend/android` и собирается через Capacitor. При первом запуске приложение предлагает два варианта: подключиться к уже работающему Matrix Smartboard server или автоматически настроить новый Debian/Ubuntu server по SSH.
+
+В режиме автоматической настройки приложение проверяет SSH fingerprint, загружает проект из GitHub, создаёт Python-окружение, устанавливает backend как systemd-службу и проверяет `/api/status`. По желанию также устанавливаются Ollama, Qwen 2.5 7B и Qwen 2.5 VL 3B для локальных AI/OCR. SSH-пароль используется только во время настройки и не сохраняется.
+
+```bash
+cd frontend
+npm run android:sync
+cd android
+./gradlew assembleDebug
+```
+
+Готовый тестовый APK: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`.
+
 ### Локальный ИИ: Qwen 2.5 через Ollama
 
 Установите Ollama, загрузите модель и оставьте Ollama запущенным:

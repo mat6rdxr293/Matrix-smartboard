@@ -13,6 +13,8 @@ import type { Lesson, LessonSummary, Room, School } from "./session/types";
 import { inferBoardProfileForSubject, isBoardProfile, type BoardProfile } from "@/app/board/boardProfiles";
 import { useI18n } from "@/i18n";
 import { AnimatePresence, motion } from "framer-motion";
+import AndroidSetupWizard from "./setup/AndroidSetupWizard";
+import { needsAndroidSetup } from "./setup/androidSetup";
 
 type View = "loading" | "auth" | "roomSetup" | "grade" | "subject" | "boardProfile" | "history" | "lesson";
 
@@ -35,6 +37,7 @@ export default function AppRoot() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entryDirection, setEntryDirection] = useState<1 | -1>(1);
+  const [androidSetupReady, setAndroidSetupReady] = useState(() => !needsAndroidSetup());
 
   useEffect(() => {
     const preventBrowserZoomWheel = (event: WheelEvent) => {
@@ -81,6 +84,7 @@ export default function AppRoot() {
   }, []);
 
   useEffect(() => {
+    if (!androidSetupReady) return;
     let cancelled = false;
     const boot = async () => {
       try {
@@ -103,7 +107,7 @@ export default function AppRoot() {
     };
     void boot();
     return () => { cancelled = true; };
-  }, [enterRoom]);
+  }, [enterRoom, androidSetupReady]);
 
   const authenticate = async (mode: "login" | "register", schoolName: string, password: string) => {
     setBusy(true);
@@ -192,6 +196,10 @@ export default function AppRoot() {
     } catch (nextError) { setError(errorText(nextError)); }
     finally { setBusy(false); }
   };
+
+  if (!androidSetupReady) {
+    return <AndroidSetupWizard onDone={() => setAndroidSetupReady(true)} />;
+  }
 
   if (view === "loading") {
     return <main className="session-shell grid-overlay"><div className="text-sm font-semibold text-frost/60">{tl("loading_school_board")}</div></main>;

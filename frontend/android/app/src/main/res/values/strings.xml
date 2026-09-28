@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Matrix Smartboard</string>
+    <string name="title_activity_main">Matrix Smartboard</string>
+    <string name="package_name">ru.matrixhost.smartboard</string>
+    <string name="custom_url_scheme">ru.matrixhost.smartboard</string>
+</resources>

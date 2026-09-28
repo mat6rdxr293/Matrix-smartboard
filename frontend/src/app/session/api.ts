@@ -1,3 +1,4 @@
+import { apiFetch, setMobileSessionToken } from "@/lib/apiClient";
 import type { Grade, CurriculumSubjectId } from "./curriculum";
 import type { BoardOperation, ChatMessage, Lesson, LessonSummary, Room, School } from "./types";
 
@@ -12,10 +13,9 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...init,
-    credentials: "same-origin",
-    headers: init.body ? { "Content-Type": "application/json", ...init.headers } : init.headers,
+        headers: init.body ? { "Content-Type": "application/json", ...init.headers } : init.headers,
   });
   if (!response.ok) {
     let detail = `Запрос не выполнен (${response.status})`;
@@ -38,13 +38,27 @@ const post = <T>(path: string, body?: unknown) =>
 
 export const sessionApi = {
   async register(schoolName: string, password: string): Promise<School> {
-    return (await post<{ school: School }>("/api/auth/register-school", { school_name: schoolName, password })).school;
+    const result = await post<{ school: School; sessionToken?: string }>(
+      "/api/auth/register-school",
+      { school_name: schoolName, password },
+    );
+    if (result.sessionToken) setMobileSessionToken(result.sessionToken);
+    return result.school;
   },
   async login(schoolName: string, password: string): Promise<School> {
-    return (await post<{ school: School }>("/api/auth/login-school", { school_name: schoolName, password })).school;
+    const result = await post<{ school: School; sessionToken?: string }>(
+      "/api/auth/login-school",
+      { school_name: schoolName, password },
+    );
+    if (result.sessionToken) setMobileSessionToken(result.sessionToken);
+    return result.school;
   },
   async logout(): Promise<void> {
-    await post("/api/auth/logout");
+    try {
+      await post("/api/auth/logout");
+    } finally {
+      setMobileSessionToken(null);
+    }
   },
   async currentSchool(): Promise<School> {
     return (await request<{ school: School }>("/api/auth/session")).school;

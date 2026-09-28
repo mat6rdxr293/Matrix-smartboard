@@ -8,9 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:android": "CAPACITOR_BUILD=1 vite build",
+    "android:sync": "npm run build:android && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "clsx": "2.1.1",
     "framer-motion": "11.0.28",
     "html2canvas": "^1.4.1",
@@ -22,6 +28,7 @@
     "tailwind-merge": "2.5.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",

@@ -1,4 +1,5 @@
-﻿import type { AiBoardAction } from "@/app/board/aiBoardActions";
+import { apiFetch } from "@/lib/apiClient";
+import type { AiBoardAction } from "@/app/board/aiBoardActions";
 
 export type AiMode = "hint" | "check" | "solution";
 
@@ -16,7 +17,7 @@ export async function callAi(
   responseLocale?: "ru" | "kk" | "en",
   boardState?: Record<string, unknown>,
 ) {
-  const res = await fetch("/api/ai", {
+  const res = await apiFetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -59,7 +60,7 @@ export async function callAi(
 export async function callOcr(blob: Blob) {
   const form = new FormData();
   form.append("file", blob, "board.png");
-  const res = await fetch("/api/ocr", {
+  const res = await apiFetch("/api/ocr", {
     method: "POST",
     body: form,
   });
@@ -87,7 +88,7 @@ export async function callOcr(blob: Blob) {
 }
 
 export async function getStatus() {
-  const res = await fetch(`/api/status?t=${Date.now()}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/status?t=${Date.now()}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error("Status failed");
   }
@@ -95,7 +96,7 @@ export async function getStatus() {
 }
 
 export async function apiPost<T>(path: string, payload: unknown) {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

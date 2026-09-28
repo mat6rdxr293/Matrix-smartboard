@@ -43,6 +43,28 @@ def test_duplicate_registration_and_wrong_login(tmp_path):
     assert client.post("/api/auth/login-school", json=payload).status_code == 200
 
 
+def test_mobile_bearer_session_works_without_cookie(tmp_path):
+    client = make_client(tmp_path)
+    response = client.post(
+        "/api/auth/register-school",
+        headers={"X-Matrix-Mobile": "1"},
+        json={"school_name": "Mobile School", "password": "password11"},
+    )
+    assert response.status_code == 201
+    token = response.json().get("sessionToken")
+    assert token
+
+    # Simulate a packaged Android WebView that does not use the web session cookie.
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {token}", "X-Matrix-Mobile": "1"}
+    assert client.get("/api/auth/session", headers=headers).status_code == 200
+    assert client.post("/api/rooms", headers=headers, json={"name": "Android"}).status_code == 201
+    assert client.get("/api/rooms", headers=headers).json()["items"][0]["name"] == "Android"
+
+    assert client.post("/api/auth/logout", headers=headers).status_code == 200
+    assert client.get("/api/auth/session", headers=headers).status_code == 401
+
+
 def test_rooms_require_authentication_and_are_isolated(tmp_path):
     app.state.school_store = SchoolStore(tmp_path / "practice.db")
     school_11 = TestClient(app)

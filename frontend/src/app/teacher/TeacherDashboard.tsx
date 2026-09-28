@@ -1,3 +1,4 @@
+import { apiFetch, backendAssetUrl } from "@/lib/apiClient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Task } from "@/app/tasks/tasks";
 import type { Slide, SlideElement } from "@/app/presentation/Slides";
@@ -479,7 +480,7 @@ export default function TeacherDashboard({
           : pptxMode === "stickers"
             ? "mode=stickers"
             : `mode=editable&with_background=${pptxWithBackground ? "1" : "0"}`;
-      const res = await fetch(`/api/import/pptx?${params}`, { method: "POST", body: form });
+      const res = await apiFetch(`/api/import/pptx?${params}`, { method: "POST", body: form });
       if (!res.ok) {
         let detail = tl("failed_to_import_pptx");
         try {
@@ -506,7 +507,7 @@ export default function TeacherDashboard({
     setServerMessage(null);
     setServerLoading(true);
     try {
-      const res = await fetch(withSubjectApi("/api/storage"), {
+      const res = await apiFetch(withSubjectApi("/api/storage"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tasks, slides, siteBackground, presentationSource }),
@@ -523,7 +524,7 @@ export default function TeacherDashboard({
   const handleDownloadPptx = async () => {
     setExportLoading(true);
     try {
-      const res = await fetch("/api/export/pptx", {
+      const res = await apiFetch("/api/export/pptx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slides, filename: "presentation.pptx" }),
@@ -546,7 +547,7 @@ export default function TeacherDashboard({
   const handleSavePptxServer = async () => {
     setExportLoading(true);
     try {
-      const res = await fetch("/api/export/pptx/save", {
+      const res = await apiFetch("/api/export/pptx/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slides, filename: "presentation.pptx" }),
@@ -563,7 +564,7 @@ export default function TeacherDashboard({
   const fetchM365Status = async () => {
     setM365StatusLoading(true);
     try {
-      const res = await fetch("/api/m365/auth/status", { cache: "no-store" });
+      const res = await apiFetch("/api/m365/auth/status", { cache: "no-store" });
       if (!res.ok) throw new Error("status");
       const data = (await res.json()) as {
         configured?: boolean;
@@ -590,7 +591,7 @@ export default function TeacherDashboard({
     setServerMessage(null);
     setM365Loading(true);
     try {
-      const res = await fetch("/api/m365/auth/start", { cache: "no-store" });
+      const res = await apiFetch("/api/m365/auth/start", { cache: "no-store" });
       if (!res.ok) {
         let detail = "Не удалось начать OAuth Microsoft 365";
         try {
@@ -683,7 +684,7 @@ export default function TeacherDashboard({
     try {
       const form = new FormData();
       form.append("file", file, file.name);
-      const res = await fetch("/api/m365/pptx/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/m365/pptx/upload", { method: "POST", body: form });
       if (!res.ok) {
         let detail = "Не удалось загрузить PPTX в Microsoft 365";
         try {
@@ -725,7 +726,7 @@ export default function TeacherDashboard({
         nextAccess === "public"
           ? { fileId }
           : { fileId, mode: nextMode, access: nextAccess };
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -756,7 +757,7 @@ export default function TeacherDashboard({
     setM365Loading(true);
     setServerMessage(null);
     try {
-      const res = await fetch("/api/m365/presentation/disconnect", {
+      const res = await apiFetch("/api/m365/presentation/disconnect", {
         method: "POST",
       });
       if (!res.ok) throw new Error("Failed to disconnect Microsoft 365");
@@ -780,7 +781,7 @@ export default function TeacherDashboard({
     try {
       const form = new FormData();
       form.append("file", file, file.name);
-      const res = await fetch("/api/office/viewer/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/office/viewer/upload", { method: "POST", body: form });
       if (!res.ok) {
         let detail = "Failed to import presentation to Office Viewer";
         try {
@@ -814,7 +815,7 @@ export default function TeacherDashboard({
     setM365Loading(true);
     setServerMessage(null);
     try {
-      const res = await fetch("/api/office/viewer/link", {
+      const res = await apiFetch("/api/office/viewer/link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: raw }),
@@ -870,7 +871,7 @@ export default function TeacherDashboard({
   const fetchReplayItems = async () => {
     setReplaysLoading(true);
     try {
-      const res = await fetch(withSubjectApi("/api/board/replays?limit=200"), { cache: "no-store" });
+      const res = await apiFetch(withSubjectApi("/api/board/replays?limit=200"), { cache: "no-store" });
       if (!res.ok) throw new Error("failed");
       const data = (await res.json()) as { items?: ReplayItem[] };
       setReplayItems(Array.isArray(data.items) ? data.items : []);
@@ -884,7 +885,7 @@ export default function TeacherDashboard({
   const fetchReplayDetail = async (replayId: string) => {
     setReplaysLoading(true);
     try {
-      const res = await fetch(withSubjectApi(`/api/board/replays/${encodeURIComponent(replayId)}`), { cache: "no-store" });
+      const res = await apiFetch(withSubjectApi(`/api/board/replays/${encodeURIComponent(replayId)}`), { cache: "no-store" });
       if (!res.ok) throw new Error("failed");
       const data = (await res.json()) as { item?: ReplayDetail };
       if (!data.item) throw new Error("failed");
@@ -904,7 +905,7 @@ export default function TeacherDashboard({
   const fetchAiHistory = async () => {
     setAiHistoryLoading(true);
     try {
-      const res = await fetch(withSubjectApi("/api/ai/history?limit=200"), { cache: "no-store" });
+      const res = await apiFetch(withSubjectApi("/api/ai/history?limit=200"), { cache: "no-store" });
       if (!res.ok) throw new Error("failed");
       const data = (await res.json()) as { items?: AiHistoryItem[] };
       setAiHistory(Array.isArray(data.items) ? data.items : []);
@@ -1573,7 +1574,7 @@ export default function TeacherDashboard({
                   style={{
                     width: STAGE_W,
                     height: STAGE_H,
-                    backgroundImage: activeSlide?.background ? `url(${activeSlide.background})` : undefined,
+                    backgroundImage: activeSlide?.background ? `url(${backendAssetUrl(activeSlide.background)})` : undefined,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat",
@@ -1618,7 +1619,7 @@ export default function TeacherDashboard({
                         </div>
                       ) : el.type === "image" ? (
                         <img
-                          src={el.src}
+                          src={backendAssetUrl(el.src)}
                           alt=""
                           className="h-full w-full object-contain"
                           style={{

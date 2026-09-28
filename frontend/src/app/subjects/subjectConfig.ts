@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/apiClient";
 import type { Slide } from "@/app/presentation/Slides";
 import type { Task } from "@/app/tasks/tasks";
 
@@ -178,7 +179,7 @@ export const getPracticeTokenFromWindow = (): string | null => {
  */
 export const verifyPracticeToken = async (token: string): Promise<PortalRole | null> => {
   try {
-    const res = await fetch(`/api/auth/verify?token=${encodeURIComponent(token)}`);
+    const res = await apiFetch(`/api/auth/verify?token=${encodeURIComponent(token)}`);
     if (!res.ok) return null;
     const data = await res.json();
     const role = data?.role as string | undefined;

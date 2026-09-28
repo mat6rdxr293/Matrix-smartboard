@@ -69,8 +69,17 @@ def get_store(request: Request) -> SchoolStore:
     return store
 
 
+def _session_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "").strip()
+    if authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token:
+            return token
+    return request.cookies.get(SESSION_COOKIE)
+
+
 def require_school(request: Request) -> dict:
-    school = get_store(request).school_for_token(request.cookies.get(SESSION_COOKIE))
+    school = get_store(request).school_for_token(_session_token(request))
     if school is None:
         raise HTTPException(status_code=401, detail="Требуется вход школы")
     return school
@@ -78,7 +87,10 @@ def require_school(request: Request) -> dict:
 
 def _session_response(request: Request, school: dict, token: str, *, status_code: int) -> JSONResponse:
     store = get_store(request)
-    response = JSONResponse({"school": school}, status_code=status_code)
+    body = {"school": school}
+    if request.headers.get("x-matrix-mobile") == "1":
+        body["sessionToken"] = token
+    response = JSONResponse(body, status_code=status_code)
     response.set_cookie(
         SESSION_COOKIE,
         token,
@@ -117,7 +129,7 @@ def login_school(payload: SchoolCredentials, request: Request) -> JSONResponse:
 @router.post("/api/auth/logout")
 def logout_school(request: Request) -> JSONResponse:
     store = get_store(request)
-    store.delete_auth_session(request.cookies.get(SESSION_COOKIE))
+    store.delete_auth_session(_session_token(request))
     response = JSONResponse({"ok": True})
     response.delete_cookie(SESSION_COOKIE, path="/")
     return response
