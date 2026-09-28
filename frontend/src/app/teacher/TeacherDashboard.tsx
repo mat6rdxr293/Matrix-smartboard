@@ -9,7 +9,7 @@ import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import { withSubjectQuery } from "@/app/subjects/subjectConfig";
-import { Download, Pause, Play, RefreshCw } from "lucide-react";
+import { ChevronRight, Download, FileDown, History, Home, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Save, Settings2 } from "lucide-react";
 
 const STAGE_W = 960;
 const STAGE_H = 540;
@@ -171,7 +171,7 @@ export default function TeacherDashboard({
 }) {
   const { tl, locale } = useI18n();
   const withSubjectApi = (path: string) => withSubjectQuery(path, subjectId);
-  const [section, setSection] = useState<"tasks" | "slides" | "replays">("tasks");
+  const [section, setSection] = useState<"home" | "tasks" | "slides" | "replays">("home");
   const [taskIndex, setTaskIndex] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -1134,91 +1134,150 @@ export default function TeacherDashboard({
     <div
       className={cn(
         "flex flex-col overflow-hidden border border-white/10 bg-graphite/95",
-        fullPage ? "h-full rounded-none border-x-0 border-b-0" : "h-full max-h-[92vh] rounded-xl shadow-soft"
+        fullPage ? "h-full rounded-none border-x-0 border-b-0" : "h-full max-h-[92vh] rounded-2xl shadow-soft"
       )}
     >
       <div
         className={cn(
-          "modal-handle flex h-12 items-center justify-between border-b border-white/10 px-4",
+          "modal-handle flex min-h-[64px] items-center justify-between gap-4 border-b border-white/10 px-5",
           onDragHandlePointerDown ? "cursor-grab active:cursor-grabbing" : ""
         )}
         onPointerDown={onDragHandlePointerDown}
       >
-        <div className="text-[13px] font-semibold text-frost">{tl("teacher_dashboard")}</div>
-        <button
-          className="h-8 px-2 text-[12px] font-medium text-frost/55 transition hover:text-frost"
-          onClick={onClose}
-        >
-          {tl("close")}
-        </button>
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-frost">{tl("teacher_panel_title")}</div>
+          <div className="mt-0.5 truncate text-[11px] text-frost/40">{tl("teacher_panel_subtitle")}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-10 rounded-xl px-3 text-[12px]"
+            onClick={handleSaveServer}
+            disabled={serverLoading}
+          >
+            <Save size={15} className="mr-2" />
+            {serverLoading ? tl("teacher_saving") : tl("teacher_save")}
+          </Button>
+          <details className="group relative">
+            <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 text-frost/55 transition hover:bg-white/[0.05] hover:text-frost">
+              <MoreHorizontal size={18} />
+            </summary>
+            <div className="absolute right-0 top-12 z-50 w-[230px] overflow-hidden rounded-xl border border-white/10 bg-graphite p-1.5 shadow-soft">
+              <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleDownloadPptx} disabled={exportLoading}>
+                <Download size={15} className="mr-2.5" />{tl("teacher_download_powerpoint")}
+              </button>
+              <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleSavePptxServer} disabled={exportLoading}>
+                <FileDown size={15} className="mr-2.5" />{tl("teacher_save_pptx_server")}
+              </button>
+            </div>
+          </details>
+          <button
+            className="h-10 rounded-xl px-3 text-[12px] font-medium text-frost/55 transition hover:bg-white/[0.04] hover:text-frost"
+            onClick={onClose}
+          >
+            {tl("close")}
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-12 items-end justify-between gap-4 border-b border-white/10 px-4">
-          <div className="flex h-full items-end gap-5">
+        <div className="flex min-h-[64px] items-center justify-between gap-4 border-b border-white/10 px-5">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto py-2">
             {([
-              ["tasks", tl("tasks")],
-              ["slides", tl("presentation")],
-              ["replays", tl("replays")],
-            ] as const).map(([id, label]) => (
+              ["home", tl("teacher_home"), Home],
+              ["tasks", tl("tasks"), ListChecks],
+              ["slides", tl("presentation"), Presentation],
+              ["replays", tl("teacher_history"), History],
+            ] as const).map(([id, label, Icon]) => (
               <button
                 key={id}
                 className={cn(
-                  "relative h-11 px-0 text-[12px] font-medium transition",
-                  section === id ? "text-frost" : "text-frost/50 hover:text-frost/80"
+                  "flex h-10 shrink-0 items-center gap-2 rounded-xl px-3.5 text-[12px] font-medium transition",
+                  section === id
+                    ? "bg-white/[0.08] text-frost"
+                    : "text-frost/50 hover:bg-white/[0.04] hover:text-frost/80"
                 )}
                 onClick={() => setSection(id)}
               >
+                <Icon size={15} />
                 {label}
-                {section === id && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
               </button>
             ))}
           </div>
-
-          <div className="flex h-11 items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 rounded-md px-2.5 text-[11px]"
-              onClick={handleSaveServer}
-              disabled={serverLoading}
-            >
-              {tl("save_to_server")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 rounded-md px-2.5 text-[11px]"
-              onClick={handleDownloadPptx}
-              disabled={exportLoading}
-            >
-              {tl("download_pptx")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 rounded-md px-2.5 text-[11px]"
-              onClick={handleSavePptxServer}
-              disabled={exportLoading}
-            >
-              {tl("save_pptx")}
-            </Button>
-          </div>
+          {autosaveInfo && (
+            <div className="hidden shrink-0 text-right text-[10px] leading-4 text-frost/35 xl:block">
+              <div>{tl("teacher_autosave_every", { sec: autosaveInfo.intervalSec })}</div>
+              <div>{autosaveInfo.lastServerSaveAt ? tl("teacher_server_saved_at", { time: formatDateTime(autosaveInfo.lastServerSaveAt, locale) }) : tl("teacher_server_not_saved")}</div>
+            </div>
+          )}
         </div>
 
         {serverMessage && (
-          <div className="flex min-h-8 items-center border-b border-white/[0.06] px-4 text-[10px] text-frost/55">
+          <div className="flex min-h-9 items-center border-b border-white/[0.06] px-5 text-[11px] text-frost/55">
             {serverMessage}
           </div>
         )}
 
         <div className="min-h-0 flex-1 overflow-auto">
 
+        {section === "home" && (
+          <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-7 sm:py-9">
+            <div className="max-w-2xl">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">{tl("teacher_home_kicker")}</div>
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-frost">{tl("teacher_home_title")}</h2>
+              <p className="mt-2 text-[13px] leading-6 text-frost/45">{tl("teacher_home_description")}</p>
+            </div>
+
+            <div className="mt-7 grid gap-4 lg:grid-cols-3">
+              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><ListChecks size={21} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("tasks")}</div>
+                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_tasks_count", { count: tasks.length })}</div>
+                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
+              </button>
+
+              <button type="button" onClick={() => setSection("slides")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><Presentation size={21} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("presentation")}</div>
+                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_slides_count", { count: slides.length })}</div>
+                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
+              </button>
+
+              <button type="button" onClick={() => setSection("replays")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><History size={21} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("teacher_history")}</div>
+                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_history_subtitle")}</div>
+                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
+              </button>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.018] px-5 py-4">
+              <div className="flex items-start gap-3">
+                <Settings2 size={17} className="mt-0.5 shrink-0 text-frost/35" />
+                <div>
+                  <div className="text-[12px] font-medium text-frost/65">{tl("teacher_more_features_title")}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-frost/38">{tl("teacher_more_features_description")}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {section === "tasks" && (
-          <div className="grid min-h-full lg:grid-cols-[264px_minmax(0,1fr)]">
+          <div className="grid min-h-full lg:grid-cols-[288px_minmax(0,1fr)]">
             <aside className="border-r border-white/10">
-              <div className="flex h-12 items-center justify-between border-b border-white/[0.06] px-4">
-                <div className="text-[12px] font-medium text-frost/60">{tl("list")}</div>
+              <div className="flex h-14 items-center justify-between border-b border-white/[0.06] px-4">
+                <div className="text-[13px] font-medium text-frost/65">{tl("teacher_task_list")}</div>
                 <button
                   type="button"
                   className="text-[12px] font-medium text-accent transition hover:opacity-80"
@@ -1237,7 +1296,7 @@ export default function TeacherDashboard({
                       key={task.id}
                       type="button"
                       className={cn(
-                        "relative block w-full border-b border-white/[0.055] px-4 py-3 text-left transition",
+                        "relative block w-full border-b border-white/[0.055] px-4 py-4 text-left transition",
                         idx === taskIndex
                           ? "bg-white/[0.055] text-frost"
                           : "text-frost/75 hover:bg-white/[0.03]"
@@ -1245,7 +1304,7 @@ export default function TeacherDashboard({
                       onClick={() => setTaskIndex(idx)}
                     >
                       {idx === taskIndex && <span className="absolute inset-y-2 left-0 w-0.5 bg-accent" />}
-                      <div className="truncate text-[12px] font-semibold">
+                      <div className="truncate text-[13px] font-semibold">
                         #{task.id} {task.title}
                       </div>
                       {task.tags.length > 0 && (
@@ -1257,10 +1316,10 @@ export default function TeacherDashboard({
               </div>
             </aside>
 
-            <section className="min-w-0 px-6 py-5">
+            <section className="min-w-0 px-6 py-6">
               <div className="mx-auto max-w-[980px]">
                 <div className="mb-5 flex items-center justify-between border-b border-white/[0.07] pb-3">
-                  <div className="text-[13px] font-semibold text-frost">{tl("task_editor")}</div>
+                  <div className="text-[15px] font-semibold text-frost">{tl("teacher_task_editor_friendly")}</div>
                   <button
                     type="button"
                     className="text-[11px] font-medium text-frost/38 transition hover:text-ember disabled:cursor-default disabled:opacity-30"
@@ -1273,28 +1332,28 @@ export default function TeacherDashboard({
 
                 {activeTask ? (
                   <div className="grid gap-5">
-                    <label className="block text-[11px] font-medium text-frost/45">
+                    <label className="block text-[12px] font-medium text-frost/50">
                       {tl("heading")}
                       <input
-                        className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-transparent px-3 text-[13px] text-frost outline-none transition focus:border-white/25"
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.015] px-3.5 text-[14px] text-frost outline-none transition focus:border-accent/40"
                         value={activeTask.title}
                         onChange={(e) => updateTask({ title: e.target.value })}
                       />
                     </label>
 
-                    <label className="block text-[11px] font-medium text-frost/45">
+                    <label className="block text-[12px] font-medium text-frost/50">
                       {tl("condition_latex_support")}
                       <textarea
-                        className="mt-1.5 min-h-[150px] w-full resize-y rounded-md border border-white/10 bg-transparent px-3 py-2.5 text-[13px] leading-5 text-frost outline-none transition focus:border-white/25"
+                        className="mt-2 min-h-[180px] w-full resize-y rounded-xl border border-white/10 bg-white/[0.015] px-3.5 py-3 text-[14px] leading-6 text-frost outline-none transition focus:border-accent/40"
                         value={activeTask.problem}
                         onChange={(e) => updateTask({ problem: e.target.value })}
                       />
                     </label>
 
-                    <label className="block text-[11px] font-medium text-frost/45">
+                    <label className="block text-[12px] font-medium text-frost/50">
                       {tl("tags_separated_by_commas")}
                       <input
-                        className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-transparent px-3 text-[13px] text-frost outline-none transition focus:border-white/25"
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.015] px-3.5 text-[14px] text-frost outline-none transition focus:border-accent/40"
                         value={activeTask.tags.join(", ")}
                         onChange={(e) =>
                           updateTask({
@@ -1316,71 +1375,76 @@ export default function TeacherDashboard({
         )}
 
         {section === "slides" && (
-          <div className={cn("grid min-h-full", selectedElement || showSlideMeta ? "lg:grid-cols-[224px_minmax(0,1fr)_248px]" : "lg:grid-cols-[224px_minmax(0,1fr)]")}>
+          <div className={cn("grid min-h-full", selectedElement || showSlideMeta ? "lg:grid-cols-[252px_minmax(0,1fr)_272px]" : "lg:grid-cols-[252px_minmax(0,1fr)]")}>
             <aside className="border-r border-white/10">
-              <div className="flex h-12 items-center justify-between border-b border-white/[0.06] px-4">
-                <div className="text-[12px] font-medium text-frost/60">{tl("slides")}</div>
-                <div className="flex items-center gap-3">
+              <div className="border-b border-white/[0.06] px-3 py-3">
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-[13px] font-medium text-frost/65">Слайды</div>
                   <button
                     type="button"
-                    className="text-[11px] font-medium text-frost/45 transition hover:text-frost/75"
-                    onClick={() => setShowPresentationImport((prev) => !prev)}
-                  >
-                    {showPresentationImport ? "Скрыть импорт" : "Импорт"}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-[12px] font-medium text-accent transition hover:opacity-80"
+                    className="flex h-9 items-center rounded-lg px-2.5 text-[12px] font-medium text-accent transition hover:bg-accent/10"
                     onClick={addSlide}
                   >
-                    + {tl("add")}
+                    + {tl("teacher_new_slide")}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  className="mt-3 flex h-10 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[12px] font-medium text-frost/75 transition hover:bg-white/[0.05] hover:text-frost disabled:opacity-50"
+                  onClick={() => {
+                    setPptxMode("full");
+                    setPptxWithBackground(false);
+                    pptxInputRef.current?.click();
+                  }}
+                  disabled={pptxLoading}
+                >
+                  <FileDown size={15} className="mr-2" />
+                  {pptxLoading ? tl("teacher_uploading") : tl("teacher_upload_powerpoint")}
+                </button>
+                <button
+                  type="button"
+                  className="mt-1 flex h-8 w-full items-center justify-center rounded-lg text-[11px] text-frost/40 transition hover:bg-white/[0.03] hover:text-frost/65"
+                  onClick={() => setShowPresentationImport((prev) => !prev)}
+                >
+                  <Settings2 size={13} className="mr-1.5" />
+                  {showPresentationImport ? tl("teacher_hide_more_features") : tl("teacher_more_features")}
+                </button>
               </div>
 
               {showPresentationImport && (
                 <div className="border-b border-white/[0.07] px-3 py-3">
-                  <div className="grid gap-1">
-                    <button
-                      type="button"
-                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
-                      onClick={() => {
-                        setPptxMode("full");
-                        setPptxWithBackground(false);
-                        pptxInputRef.current?.click();
-                      }}
-                      disabled={pptxLoading}
-                    >
-                      {pptxLoading ? tl("import_menu") : tl("import_pptx_as_picture")}
-                    </button>
-                    <button
-                      type="button"
-                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
-                      onClick={() => {
-                        setPptxMode("editable");
-                        setPptxWithBackground(true);
-                        pptxInputRef.current?.click();
-                      }}
-                      disabled={pptxLoading}
-                    >
-                      {tl("import_background")}
-                    </button>
-                    <button
-                      type="button"
-                      className="h-8 rounded-md px-2 text-left text-[11px] text-frost/65 transition hover:bg-white/[0.04] hover:text-frost"
-                      onClick={() => {
-                        setPptxMode("stickers");
-                        setPptxWithBackground(false);
-                        pptxInputRef.current?.click();
-                      }}
-                      disabled={pptxLoading}
-                    >
-                      {tl("import_stickers_slow")}
-                    </button>
-                  </div>
+                  <details className="rounded-xl border border-white/[0.07] bg-white/[0.015] px-3 py-2">
+                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/55">{tl("teacher_other_imports")}</summary>
+                    <div className="mt-2 grid gap-1">
+                      <button
+                        type="button"
+                        className="min-h-9 rounded-lg px-2 text-left text-[11px] leading-4 text-frost/60 transition hover:bg-white/[0.04] hover:text-frost"
+                        onClick={() => {
+                          setPptxMode("editable");
+                          setPptxWithBackground(true);
+                          pptxInputRef.current?.click();
+                        }}
+                        disabled={pptxLoading}
+                      >
+                        {tl("teacher_import_editable")}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-9 rounded-lg px-2 text-left text-[11px] leading-4 text-frost/60 transition hover:bg-white/[0.04] hover:text-frost"
+                        onClick={() => {
+                          setPptxMode("stickers");
+                          setPptxWithBackground(false);
+                          pptxInputRef.current?.click();
+                        }}
+                        disabled={pptxLoading}
+                      >
+                        {tl("teacher_import_elements")}
+                      </button>
+                    </div>
+                  </details>
 
-                  <details className="mt-3 border-t border-white/[0.06] pt-2">
-                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/45">
+                  <details className="mt-2 rounded-xl border border-white/[0.07] bg-white/[0.015] px-3 py-2">
+                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/55">
                       Microsoft 365
                       <span className="ml-2 text-frost/30">
                         {m365StatusLoading
@@ -1393,114 +1457,50 @@ export default function TeacherDashboard({
                       </span>
                     </summary>
                     <div className="mt-2 grid gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 justify-start rounded-md px-2 text-[11px]"
-                        onClick={handleM365Connect}
-                        disabled={m365Loading || m365StatusLoading || !m365Status?.configured}
-                      >
-                        Подключить M365
+                      <Button size="sm" variant="ghost" className="h-9 justify-start rounded-lg px-2 text-[11px]" onClick={handleM365Connect} disabled={m365Loading || m365StatusLoading || !m365Status?.configured}>
+                        Подключить Microsoft 365
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 justify-start rounded-md px-2 text-[11px]"
-                        onClick={() => m365PptxInputRef.current?.click()}
-                        disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
-                      >
-                        Загрузить PPTX в M365
+                      <Button size="sm" variant="ghost" className="h-9 justify-start rounded-lg px-2 text-[11px]" onClick={() => m365PptxInputRef.current?.click()} disabled={m365Loading || m365StatusLoading || !m365Status?.connected}>
+                        Загрузить презентацию в Microsoft 365
                       </Button>
                       {!!presentationSource.fileId && (
-                        <div className="grid grid-cols-2 gap-1">
-                          <button
-                            type="button"
-                            className="h-8 rounded-md px-2 text-left text-[10px] text-frost/55 hover:bg-white/[0.04]"
-                            onClick={() =>
-                              void handleM365SessionUpdate({
-                                mode: presentationSource.mode === "edit" ? "view" : "edit",
-                                access: presentationSource.access,
-                              })
-                            }
-                            disabled={m365Loading || !m365Status?.connected}
-                          >
+                        <div className="grid gap-1">
+                          <button type="button" className="min-h-8 rounded-lg px-2 text-left text-[10px] text-frost/50 hover:bg-white/[0.04]" onClick={() => void handleM365SessionUpdate({ mode: presentationSource.mode === "edit" ? "view" : "edit", access: presentationSource.access })} disabled={m365Loading || !m365Status?.connected}>
                             {presentationSource.mode === "edit" ? "Режим: редактирование" : "Режим: просмотр"}
                           </button>
-                          <button
-                            type="button"
-                            className="h-8 rounded-md px-2 text-left text-[10px] text-frost/55 hover:bg-white/[0.04]"
-                            onClick={() =>
-                              void handleM365SessionUpdate({
-                                mode: presentationSource.mode,
-                                access: presentationSource.access === "public" ? "private" : "public",
-                              })
-                            }
-                            disabled={m365Loading || !m365Status?.connected}
-                          >
+                          <button type="button" className="min-h-8 rounded-lg px-2 text-left text-[10px] text-frost/50 hover:bg-white/[0.04]" onClick={() => void handleM365SessionUpdate({ mode: presentationSource.mode, access: presentationSource.access === "public" ? "private" : "public" })} disabled={m365Loading || !m365Status?.connected}>
                             {presentationSource.access === "public" ? "Доступ: публичный" : "Доступ: закрытый"}
                           </button>
                         </div>
                       )}
-                      <button
-                        type="button"
-                        className="h-8 px-2 text-left text-[10px] text-frost/38 transition hover:text-frost/65 disabled:opacity-30"
-                        onClick={handleM365Disconnect}
-                        disabled={m365Loading || m365StatusLoading || !m365Status?.connected}
-                      >
-                        Отключить M365
+                      <button type="button" className="h-8 px-2 text-left text-[10px] text-frost/35 transition hover:text-frost/60 disabled:opacity-30" onClick={handleM365Disconnect} disabled={m365Loading || m365StatusLoading || !m365Status?.connected}>
+                        Отключить Microsoft 365
                       </button>
                     </div>
                   </details>
 
-                  <details className="mt-2 border-t border-white/[0.06] pt-2">
-                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/45">
+                  <details className="mt-2 rounded-xl border border-white/[0.07] bg-white/[0.015] px-3 py-2">
+                    <summary className="cursor-pointer list-none py-1 text-[11px] font-medium text-frost/55">
                       Office Viewer
-                      <span className="ml-2 text-frost/30">
-                        {presentationSource.type === "office" ? "активен" : "неактивен"}
-                      </span>
+                      <span className="ml-2 text-frost/30">{presentationSource.type === "office" ? "активен" : "неактивен"}</span>
                     </summary>
                     <div className="mt-2 grid gap-1.5">
-                      <div className="flex gap-1">
-                        <input
-                          type="url"
-                          className="h-8 min-w-0 flex-1 rounded-md border border-white/10 bg-transparent px-2 text-[10px] outline-none focus:border-white/25"
-                          placeholder="Ссылка PPTX / OneDrive"
-                          value={officeViewerLink}
-                          onChange={(e) => setOfficeViewerLink(e.target.value)}
-                        />
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 rounded-md px-2 text-[10px]"
-                          onClick={() => void handleOfficeViewerLinkApply()}
-                          disabled={m365Loading}
-                        >
-                          Открыть
-                        </Button>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 justify-start rounded-md px-2 text-[11px]"
-                        onClick={() => officeViewerInputRef.current?.click()}
-                        disabled={m365Loading}
-                      >
-                        Импортировать файл
-                      </Button>
+                      <input
+                        type="url"
+                        className="h-9 min-w-0 rounded-lg border border-white/10 bg-transparent px-2.5 text-[10px] outline-none focus:border-accent/35"
+                        placeholder="Ссылка на PPTX или OneDrive"
+                        value={officeViewerLink}
+                        onChange={(e) => setOfficeViewerLink(e.target.value)}
+                      />
+                      <Button size="sm" variant="ghost" className="h-9 justify-start rounded-lg px-2 text-[11px]" onClick={() => void handleOfficeViewerLinkApply()} disabled={m365Loading}>Открыть ссылку</Button>
+                      <Button size="sm" variant="ghost" className="h-9 justify-start rounded-lg px-2 text-[11px]" onClick={() => officeViewerInputRef.current?.click()} disabled={m365Loading}>Импортировать файл</Button>
                       {presentationSource.type === "office" && (
-                        <button
-                          type="button"
-                          className="h-8 px-2 text-left text-[10px] text-frost/38 transition hover:text-frost/65"
-                          onClick={() => onChangePresentationSource(DEFAULT_PRESENTATION_SOURCE)}
-                          disabled={m365Loading}
-                        >
-                          Отключить Office Viewer
-                        </button>
+                        <button type="button" className="h-8 px-2 text-left text-[10px] text-frost/35 transition hover:text-frost/60" onClick={() => onChangePresentationSource(DEFAULT_PRESENTATION_SOURCE)} disabled={m365Loading}>Отключить Office Viewer</button>
                       )}
                     </div>
                   </details>
 
-                  {pptxError && <div className="mt-2 text-[10px] text-ember">{pptxError}</div>}
+                  {pptxError && <div className="mt-2 rounded-lg border border-ember/20 bg-ember/[0.05] px-3 py-2 text-[10px] leading-4 text-ember">{pptxError}</div>}
                 </div>
               )}
 
@@ -1564,7 +1564,7 @@ export default function TeacherDashboard({
                     setShowSlideMeta((prev) => !prev);
                   }}
                 >
-                  Слайд
+                  {tl("teacher_slide_settings")}
                 </button>
               </div>
 
@@ -2110,8 +2110,9 @@ export default function TeacherDashboard({
                 ))}
               </div>
 
-              <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3">
-                <div className="text-[12px] font-medium text-frost/55">{tl("ai_assistant_history")}</div>
+              <details className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                <summary className="cursor-pointer list-none text-[12px] font-medium text-frost/60">{tl("teacher_ai_history_friendly")}</summary>
+                <div className="mt-3">
                 <div className="max-h-[30vh] space-y-2 overflow-auto pr-1">
                   {aiHistoryLoading && aiHistory.length === 0 && (
                     <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-xs text-frost/60">
@@ -2141,11 +2142,12 @@ export default function TeacherDashboard({
                     </div>
                   ))}
                 </div>
-                <Button size="sm" variant="outline" onClick={() => void fetchAiHistory()} disabled={aiHistoryLoading}>
-                  <RefreshCw size={14} className="mr-2" />
-                  {tl("refresh")}
-                </Button>
-              </div>
+                  <Button size="sm" variant="outline" className="mt-2" onClick={() => void fetchAiHistory()} disabled={aiHistoryLoading}>
+                    <RefreshCw size={14} className="mr-2" />
+                    {tl("refresh")}
+                  </Button>
+                </div>
+              </details>
             </div>
 
             <div className="space-y-3">
