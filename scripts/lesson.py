@@ -107,8 +107,10 @@ def pick_text(pages, raw, vlm, max_chars):
 
 
 def detect_lang(pages, raw):
-    langs = [raw[p].get("lang_guess") for p in pages if p in raw and raw[p].get("lang_guess")]
-    return max(set(langs), key=langs.count) if langs else "ru"
+    # по всему параграфу сразу: на отдельной странице (формулы, рисунки) мало текста и много шума OCR
+    from extract_pdf import lang_guess
+    lang = lang_guess("\n".join(raw[p]["text"] for p in pages if p in raw))
+    return lang if lang in SYSTEM else "ru"
 
 
 def degenerate(obj):

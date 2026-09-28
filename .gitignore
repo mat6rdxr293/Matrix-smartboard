@@ -9,7 +9,7 @@ llama.cpp/
 unsloth_compiled_cache/
 __pycache__/
 *.pyc
-scripts/.llama_*.log
+scripts/.*.log
 
 # логи задач веб-интерфейса
 runs/

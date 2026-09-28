@@ -37,11 +37,17 @@ OCR_DPI = 300
 # буквы, которые есть в казахском, но нет в русском/узбекском (қ, ғ есть и в узбекском — их не берём)
 KK_LETTERS = set("әңөұүһіӘҢӨҰҮҺІ")
 UZ_LETTERS = set("ўҳЎҲ")  # узбекская кириллица: в Казахстане есть учебники для узбекских школ
+KK_MIN_SHARE = 0.04       # доля этих букв среди кириллицы, начиная с которой текст считаем казахским
 # В учебниках на kk/ru/en не бывает Latin-1/Latin Extended букв (Í, þ, µ...), U+FFFD и
 # private use — это признак шрифта без ToUnicode (кириллица, сохранённая как «кракозябры»).
 BAD_CHAR = re.compile(r"[\u0080-\u024f\ufffd\ue000-\uf8ff]")
 CYR = re.compile(r"[а-яёА-ЯЁ]")
-LAT = re.compile(r"[a-zA-Z]")
+# латиница для определения языка: только слова от 4 букв — переменные (F, ma), функции (cos)
+# и единицы (kg, Hz) в формулах без разметки словами не считаются
+LAT_WORD = re.compile(r"(?<![a-zA-Z])[a-zA-Z]{4,}")
+FORMULA = re.compile(r"\$\$.+?\$\$|\$[^$\n]+?\$|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
+TEX_CMD = re.compile(r"\\[a-zA-Z]+")  # LaTeX-команды вне формул: \alpha, \frac…
+MIN_CYR_VS_LAT = 0.3  # для kk/uz кириллицы должно быть не меньше 30% от латиницы
 
 
 def normalize(text):
@@ -52,16 +58,29 @@ def normalize(text):
     return text.strip()
 
 
+def strip_formulas(text):
+    """Убрать формулы: их латиница (B, S, \\cos\\alpha…) ничего не говорит о языке текста."""
+    text = FORMULA.sub(" ", text)
+    return TEX_CMD.sub(" ", text)
+
+
 def lang_guess(text):
+    # Tesseract с kaz+rus вставляет казахские буквы и в русский текст (і вместо i, Ә вместо д…),
+    # поэтому смотрим на долю: в русских учебниках её ≤ 2% по параграфу, в казахских ≥ 7%.
+    # Долю проверяем до сравнения с латиницей: в казахской физике много переменных и единиц,
+    # даже вне $…$ (у Tesseract формулы — простой текст).
     if not text:
         return None
+    text = strip_formulas(text)
     kk = sum(c in KK_LETTERS for c in text)
     uz = sum(c in UZ_LETTERS for c in text)
-    if kk or uz:
-        return "kk" if kk >= uz else "uz"
-    cyr, lat = len(CYR.findall(text)), len(LAT.findall(text))
+    cyr = len(CYR.findall(text)) + kk + uz
+    lat = sum(len(w) for w in LAT_WORD.findall(text))
     if cyr == lat == 0:
         return None
+    # кириллицы должно быть хотя бы заметно: иначе английский текст с казахским именем стал бы kk
+    if max(kk, uz) >= KK_MIN_SHARE * cyr and cyr >= MIN_CYR_VS_LAT * lat:
+        return "kk" if kk >= uz else "uz"
     return "ru" if cyr >= lat else "en"
 
 
