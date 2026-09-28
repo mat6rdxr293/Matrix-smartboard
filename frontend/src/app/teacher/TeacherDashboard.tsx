@@ -1224,8 +1224,7 @@ export default function TeacherDashboard({
         {section === "home" && (
           <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-7 sm:py-9">
             <div className="max-w-2xl">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">{tl("teacher_home_kicker")}</div>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-frost">{tl("teacher_home_title")}</h2>
+              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-frost">{tl("teacher_home_title")}</h2>
               <p className="mt-2 text-[13px] leading-6 text-frost/45">{tl("teacher_home_description")}</p>
             </div>
 
