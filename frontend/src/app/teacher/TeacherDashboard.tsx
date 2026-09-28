@@ -9,7 +9,7 @@ import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import { withSubjectQuery } from "@/app/subjects/subjectConfig";
-import { ChevronRight, Download, FileDown, History, Home, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Save, Settings2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Download, FileDown, History, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Save, Settings2 } from "lucide-react";
 
 const STAGE_W = 960;
 const STAGE_H = 540;
@@ -1145,8 +1145,21 @@ export default function TeacherDashboard({
         onPointerDown={onDragHandlePointerDown}
       >
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-frost">{tl("teacher_panel_title")}</div>
-          <div className="mt-0.5 truncate text-[11px] text-frost/40">{tl("teacher_panel_subtitle")}</div>
+          {section === "home" ? (
+            <div className="text-[15px] font-semibold text-frost">{tl("teacher_panel_title")}</div>
+          ) : (
+            <button
+              type="button"
+              aria-label={`${tl("back")}: ${section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}`}
+              className="flex h-10 items-center gap-2 rounded-xl pr-3 text-[14px] font-semibold text-frost transition hover:text-accent"
+              onClick={() => setSection("home")}
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/60">
+                <ArrowLeft size={17} />
+              </span>
+              {section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -1170,6 +1183,12 @@ export default function TeacherDashboard({
               <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleSavePptxServer} disabled={exportLoading}>
                 <FileDown size={15} className="mr-2.5" />{tl("teacher_save_pptx_server")}
               </button>
+              {autosaveInfo && (
+                <div className="mt-1 border-t border-white/[0.06] px-3 py-2 text-[10px] leading-4 text-frost/35">
+                  <div>{tl("teacher_autosave_every", { sec: autosaveInfo.intervalSec })}</div>
+                  <div>{autosaveInfo.lastServerSaveAt ? tl("teacher_server_saved_at", { time: formatDateTime(autosaveInfo.lastServerSaveAt, locale) }) : tl("teacher_server_not_saved")}</div>
+                </div>
+              )}
             </div>
           </details>
           <button
@@ -1182,36 +1201,6 @@ export default function TeacherDashboard({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-[64px] items-center justify-between gap-4 border-b border-white/10 px-5">
-          <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto py-2">
-            {([
-              ["home", tl("teacher_home"), Home],
-              ["tasks", tl("tasks"), ListChecks],
-              ["slides", tl("presentation"), Presentation],
-              ["replays", tl("teacher_history"), History],
-            ] as const).map(([id, label, Icon]) => (
-              <button
-                key={id}
-                className={cn(
-                  "flex h-10 shrink-0 items-center gap-2 rounded-xl px-3.5 text-[12px] font-medium transition",
-                  section === id
-                    ? "bg-white/[0.08] text-frost"
-                    : "text-frost/50 hover:bg-white/[0.04] hover:text-frost/80"
-                )}
-                onClick={() => setSection(id)}
-              >
-                <Icon size={15} />
-                {label}
-              </button>
-            ))}
-          </div>
-          {autosaveInfo && (
-            <div className="hidden shrink-0 text-right text-[10px] leading-4 text-frost/35 xl:block">
-              <div>{tl("teacher_autosave_every", { sec: autosaveInfo.intervalSec })}</div>
-              <div>{autosaveInfo.lastServerSaveAt ? tl("teacher_server_saved_at", { time: formatDateTime(autosaveInfo.lastServerSaveAt, locale) }) : tl("teacher_server_not_saved")}</div>
-            </div>
-          )}
-        </div>
 
         {serverMessage && (
           <div className="flex min-h-9 items-center border-b border-white/[0.06] px-5 text-[11px] text-frost/55">
@@ -1225,50 +1214,37 @@ export default function TeacherDashboard({
           <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-7 sm:py-9">
             <div className="max-w-2xl">
               <h2 className="text-2xl font-semibold tracking-[-0.02em] text-frost">{tl("teacher_home_title")}</h2>
-              <p className="mt-2 text-[13px] leading-6 text-frost/45">{tl("teacher_home_description")}</p>
             </div>
 
             <div className="mt-7 grid gap-4 lg:grid-cols-3">
-              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><ListChecks size={21} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
                 </div>
                 <div className="mt-5 text-[16px] font-semibold text-frost">{tl("tasks")}</div>
-                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_tasks_count", { count: tasks.length })}</div>
-                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
+                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
               </button>
 
-              <button type="button" onClick={() => setSection("slides")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => setSection("slides")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><Presentation size={21} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
                 </div>
                 <div className="mt-5 text-[16px] font-semibold text-frost">{tl("presentation")}</div>
-                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_slides_count", { count: slides.length })}</div>
-                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
+                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
               </button>
 
-              <button type="button" onClick={() => setSection("replays")} className="group min-h-[190px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+              <button type="button" onClick={() => setSection("replays")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
                 <div className="flex items-start justify-between">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><History size={21} /></div>
                   <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
                 </div>
                 <div className="mt-5 text-[16px] font-semibold text-frost">{tl("teacher_history")}</div>
-                <div className="mt-1 text-[12px] text-frost/40">{tl("teacher_history_subtitle")}</div>
-                <div className="mt-3 text-[12px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
+                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
               </button>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.018] px-5 py-4">
-              <div className="flex items-start gap-3">
-                <Settings2 size={17} className="mt-0.5 shrink-0 text-frost/35" />
-                <div>
-                  <div className="text-[12px] font-medium text-frost/65">{tl("teacher_more_features_title")}</div>
-                  <div className="mt-1 text-[11px] leading-5 text-frost/38">{tl("teacher_more_features_description")}</div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
