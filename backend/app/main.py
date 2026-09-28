@@ -30,6 +30,7 @@ from .settings import get_openai_key, is_ai_configured, is_ocr_configured, setti
 from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
 from .school_store import SchoolStore
+from .lesson_generation_contract import GeneratedLesson, contract_payload, resolved_lesson_payload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("practice-module")
@@ -692,6 +693,16 @@ async def import_pptx_endpoint(
         return {"slides": slides}
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Не удалось импортировать PPTX: {exc}") from exc
+
+
+@app.get("/api/lesson-generation/contract")
+async def lesson_generation_contract_endpoint() -> dict:
+    return contract_payload()
+
+
+@app.post("/api/lesson-generation/validate")
+async def validate_lesson_generation_endpoint(payload: GeneratedLesson) -> dict:
+    return {"ok": True, "lesson": resolved_lesson_payload(payload)}
 
 
 @app.get("/api/storage")
