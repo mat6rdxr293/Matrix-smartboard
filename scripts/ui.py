@@ -121,6 +121,203 @@ def elapsed(run):
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+# ───────────────────────── 0. Обзор и план ─────────────────────────
+
+DOCS = ROOT / "docs"
+STATUS_ICON = {"done": "✅", "progress": "🟡", "todo": "⬜"}
+STATUS_RU = {"done": "готово", "progress": "в работе", "todo": "не начато"}
+STATUS_COLOR = {"done": "#16a34a", "progress": "#d97706", "todo": "#9ca3af"}
+
+# Скорость на ноутбуке разработчика (i7-13650HX, 4 потока, Q4_K_M) — benchmark/board_speed.md
+BASE_SPEED = {"4B": {"gen": 11.0, "pp": 45.0}, "2B": {"gen": 24.0, "pp": 110.0}}
+# Процессоры доски: (множитель генерации, множитель чтения промпта) относительно ноутбука.
+# Кроме первой строки — грубые ориентиры по открытым замерам llama.cpp, НЕ наши замеры.
+BOARD_PRESETS = {
+    "Ноутбук разработчика, i7-13650HX (наш замер)": (1.0, 1.0),
+    "Современный x86: Core i5/i7 12–13 пок., 2 канала памяти": (0.8, 0.8),
+    "Бюджетный x86: Intel N100/N200, 1 канал памяти": (0.45, 0.35),
+    "ARM: Rockchip RK3588 (частый в Android-досках)": (0.4, 0.25),
+    "Старый ARM: RK3399 / Cortex-A73": (0.15, 0.1),
+}
+# Размер типичных задач в токенах: (прочитать, сгенерировать) — из наших прогонов
+WORKLOADS = [
+    ("Урок ru: 6 заданий + 6 слайдов", [(2271, 860), (498, 1054)], "алгебра §1"),
+    ("Урок kk: 6 заданий + 6 слайдов", [(2677, 889), (498, 1551)], "физика §7"),
+    ("Только 6 заданий (ru)", [(2271, 860)], "алгебра §1"),
+    ("Слайды в формате контракта v1 (6 шт., с координатами)", [(498, 2616)], "расчёт: 436 ток. на слайд"),
+    ("Короткий ответ на вопрос", [(50, 60)], "медиана бенчмарка"),
+    ("Ответ с поиском по учебнику (RAG)", [(1030, 70)], "медиана бенчмарка"),
+]
+TESSERACT_MIN = 13.7  # физика kk, 240 стр., 4 потока — самая долгая из трёх книг
+
+
+def fmt_time(s):
+    if s < 60:
+        return f"{s:.0f} с"
+    return f"{s / 60:.1f} мин".replace(".0 мин", " мин")
+
+
+def board_estimate(model, gen_f, pp_f):
+    gen, pp = BASE_SPEED[model]["gen"] * gen_f, BASE_SPEED[model]["pp"] * pp_f
+    rows = [f"**Модель {model}:** генерация ≈ **{gen:.1f} ток/с**, чтение промпта ≈ **{pp:.0f} ток/с**\n",
+            "| Операция | Время на доске | Откуда цифры |", "|---|---:|---|"]
+    for name, parts, src in WORKLOADS:
+        t = sum(p / pp + g / gen for p, g in parts)
+        first = parts[0][0] / pp  # до первого слова (при стриминге учитель видит текст с этого момента)
+        rows.append(f"| {name} | **{fmt_time(t)}** (первое слово через {fmt_time(first)}) | {src} |")
+    rows.append(f"| Загрузка учебника 240 стр. (Tesseract) | **~{fmt_time(TESSERACT_MIN * 60 / pp_f)}** | физика kk |")
+    verdict = sum(p / pp + g / gen for p, g in WORKLOADS[1][1]) / 60
+    if verdict <= 3:
+        rows.append("\n🟢 Урок можно генерировать прямо на уроке.")
+    elif verdict <= 8:
+        rows.append("\n🟡 Урок лучше готовить заранее или показывать текст по мере генерации (стриминг).")
+    else:
+        rows.append("\n🔴 Урок «при учителе» — слишком долго: только подготовка заранее в фоне "
+                    "(например, накануне) + стриминг. Для коротких ответов скорости хватает.")
+    rows.append("\n*Время = токены промпта ÷ скорость чтения + токены ответа ÷ скорость генерации. "
+                "Для всех процессоров, кроме первого, — оценка, не замер.*")
+    return "\n".join(rows)
+
+
+def apply_preset(name):
+    g, p = BOARD_PRESETS[name]
+    return g, p
+
+
+def load_plan():
+    try:
+        return json.loads((DOCS / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"stages": [], "next": [], "error": str(e)}
+
+
+def bar(percent, color):
+    return (f'<div style="background:var(--border-color-primary);border-radius:6px;height:10px;overflow:hidden">'
+            f'<div style="width:{percent}%;height:100%;background:{color}"></div></div>')
+
+
+def plan_html():
+    plan = load_plan()
+    if plan.get("error"):
+        return f"<p>⚠️ Не удалось прочитать docs/plan.json: {plan['error']}</p>"
+    stages = plan["stages"]
+    total = round(sum(s["percent"] for s in stages) / max(len(stages), 1))
+    counts = {k: sum(s["status"] == k for s in stages) for k in STATUS_RU}
+    out = [f'<div style="margin-bottom:14px"><b style="font-size:1.15em">Общий прогресс: {total}%</b> '
+           f'<span style="opacity:.75">— готово {counts["done"]}, в работе {counts["progress"]}, '
+           f'не начато {counts["todo"]} (план от {plan.get("updated", "?")})</span>{bar(total, "#3b82f6")}</div>']
+    for i, s in enumerate(stages, 1):
+        color = STATUS_COLOR[s["status"]]
+        items = "".join(f"<li>✔️ {x}</li>" for x in s.get("done", [])) + \
+            "".join(f"<li>▫️ {x}</li>" for x in s.get("todo", []))
+        blocker = (f'<div style="margin-top:6px;color:#dc2626">⛔ Нужно от команды: {s["blocker"]}</div>'
+                   if s.get("blocker") else "")
+        out.append(
+            f'<details style="border:1px solid var(--border-color-primary);border-left:4px solid {color};'
+            f'border-radius:8px;padding:8px 12px;margin:6px 0">'
+            f'<summary style="cursor:pointer"><b>{i}. {s["title"]}</b> — {STATUS_ICON[s["status"]]} '
+            f'{STATUS_RU[s["status"]]}, {s["percent"]}%{bar(s["percent"], color)}</summary>'
+            f'<ul style="margin:8px 0 0 0;padding-left:20px;list-style:none">{items}</ul>{blocker}</details>')
+    if plan.get("next"):
+        out.append('<h3 style="margin-top:18px">Следующие шаги</h3><ol>')
+        for n in sorted(plan["next"], key=lambda x: x["priority"]):
+            out.append(f'<li><b>{"🔥" * (4 - n["priority"])} {n["task"]}</b><br>'
+                       f'<span style="opacity:.75">{n["why"]}</span></li>')
+        out.append("</ol>")
+    return "".join(out)
+
+
+def count_lines(path):
+    try:
+        return sum(1 for l in path.open(encoding="utf-8") if l.strip())
+    except OSError:
+        return 0
+
+
+def overview_cards():
+    secs = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in (ROOT / "data" / "sections").glob("*.json")}
+    raw_pages = sum(count_lines(p) for p in (ROOT / "data" / "raw").glob("*.jsonl"))
+    vlm_pages = sum(count_lines(p) for p in (ROOT / "data" / "vlm").glob("*.jsonl"))
+    sft = {p.name: count_lines(p) for p in SFT.glob("*.jsonl")}
+    lessons = sorted((ROOT / "data" / "lessons").glob("*.json"), key=lambda p: p.stat().st_mtime)
+    last = ""
+    if lessons:
+        d = json.loads(lessons[-1].read_text(encoding="utf-8"))
+        t = sum(x["total_s"] for x in d.get("timings", {}).values())
+        last = f"последний: {d['title'][:40]}… за {fmt_time(t)}"
+    best = "—"
+    try:
+        df = results_table()
+        if "всего" in df:
+            vals = [int(v[:-1]) for v in df["всего"] if isinstance(v, str) and v.endswith("%")]
+            best = f"{max(vals)}%" if vals else "—"
+    except Exception:  # noqa: BLE001
+        pass
+    srv = server_run()
+    cards = [
+        ("📚", "Учебники", f"{len(secs)}", f"{sum(len(v) for v in secs.values())} параграфов, {raw_pages} стр. распознано"),
+        ("🔍", "Точный текст (зрение)", f"{vlm_pages} стр.", "формулы в LaTeX — для обучения"),
+        ("🗂", "Данные для обучения", f"{sum(sft.values())}",
+         "примеров" + (" — пока только тестовые" if sum(sft.values()) < 200 else "")),
+        ("📦", "Модели для доски", f"{len(ggufs())}", ", ".join(g.replace("-Q4_K_M.gguf", "") for g in ggufs())[:60]),
+        ("🎯", "Лучший балл бенчмарка", best, "30 вопросов kk/ru/en, оценка предварительная"),
+        ("✨", "Готовых уроков", f"{len(lessons)}", last),
+        ("🖥", "Сервер модели", "работает" if srv else "выключен",
+         srv["name"] if srv else "запуск — вкладка «5. Сервер и урок»"),
+    ]
+    html = ['<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">']
+    for icon, title, value, sub in cards:
+        html.append(f'<div style="border:1px solid var(--border-color-primary);border-radius:10px;padding:10px 12px;'
+                    f'background:var(--block-background-fill)"><div style="opacity:.75">{icon} {title}</div>'
+                    f'<div style="font-size:1.5em;font-weight:700;margin:2px 0">{value}</div>'
+                    f'<div style="font-size:.85em;opacity:.7">{sub}</div></div>')
+    html.append("</div>")
+    return "".join(html)
+
+
+def status_report():
+    try:
+        return (DOCS / "STATUS.md").read_text(encoding="utf-8")
+    except OSError:
+        return "Отчёт docs/STATUS.md не найден."
+
+
+SCENARIO_HTML = """
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:6px 0 4px">
+""" + "".join(
+    f'<div style="flex:1 1 150px;border:1px solid var(--border-color-primary);border-radius:10px;padding:10px">'
+    f'<div style="font-size:1.4em">{i}</div><b>{t}</b><div style="font-size:.85em;opacity:.75">{d}</div></div>'
+    for i, t, d in [
+        ("1️⃣", "Учитель загружает PDF", "один раз на учебник"),
+        ("2️⃣", "Доска распознаёт текст", "Tesseract, ~6–14 мин на ноутбуке"),
+        ("3️⃣", "Делит на параграфы", "§ ↔ страницы, автоматически"),
+        ("4️⃣", "Учитель выбирает §", "из списка"),
+        ("5️⃣", "ИИ готовит урок", "задания + слайды, 4–8 мин на ноутбуке"),
+    ]) + "</div>"
+
+GLOSSARY = """
+| Термин | Простыми словами |
+|---|---|
+| **Токен** | Кусочек слова, в котором модель считает текст. Русский: ~2.7 символа на токен, казахский: ~2 — поэтому казахский медленнее. |
+| **ток/с** | Скорость модели: сколько токенов в секунду она читает (промпт) или пишет (генерация). |
+| **Промпт** | Всё, что модель читает перед ответом: инструкция + текст параграфа. |
+| **GGUF, Q4_K_M** | Формат одного файла модели для доски. Q4 — сжатие до ~4 бит на число: 2.6 ГБ вместо ~8 ГБ, качество почти то же. |
+| **mmap** | Способ загрузки файла модели. На доске его выключаем: иначе в памяти две копии весов (+1.5 ГБ). |
+| **Дообучение (LoRA, QLoRA)** | Модель учится на наших примерах, меняя маленькую «надстройку» (~100 МБ), а не всю модель. |
+| **Loss** | Ошибка модели на обучающих примерах. Должна снижаться. |
+| **RAG** | Перед ответом модель ищет подходящие фрагменты учебника и отвечает по ним — меньше выдумок. |
+| **Бенчмарк** | Фиксированный набор вопросов с эталонами, чтобы сравнивать модели в цифрах. |
+| **LLM-судья** | Модель, которая сравнивает ответ с эталоном и ставит 0/1/2. Оценка предварительная — окончательную ставит человек. |
+| **Tesseract** | Бесплатная программа распознавания текста со сканов (OCR). Работает на процессоре доски. |
+"""
+
+
+def intro(what, do, get, when):
+    """Одинаковая подсказка вверху каждой вкладки: зачем, что делать, что получится, сколько ждать."""
+    return gr.Markdown(f"> **Зачем:** {what}  \n> **Что делать:** {do}  \n> **Что получится:** {get}  \n"
+                       f"> **Сколько ждать:** {when}")
+
+
 # ───────────────────────── 1. Данные ─────────────────────────
 
 def dataset_files():
@@ -512,16 +709,57 @@ HELP = {
 
 def build():
     with gr.Blocks(title="Matrix Smartboard — обучение модели") as app:
-        gr.Markdown("# 🧠 Matrix Smartboard — обучение и проверка модели\n"
-                    "Порядок работы: **1. Данные → 2. Обучение → 3. Экспорт → 4. Проверка → 5. Урок**. "
-                    "Задачи работают в фоне — страницу можно закрыть и открыть снова.")
+        gr.Markdown("# 🧠 Matrix Smartboard — ИИ-помощник учителя\n"
+                    "Здесь готовится модель для интерактивной доски: она работает **без интернета и видеокарты** "
+                    "и по параграфу учебника делает задания и слайды на казахском, русском и английском.  \n"
+                    "Начните с вкладки **🏠 Обзор и план**. Рабочий порядок: **1. Данные → 2. Обучение → "
+                    "3. Экспорт → 4. Проверка → 5. Урок**. Задачи работают в фоне: страницу можно закрыть.")
         gpu = gr.Markdown(gpu_status())
 
+        # 0. Обзор и план
+        with gr.Tab("🏠 Обзор и план"):
+            gr.Markdown("### Как это будет работать на доске")
+            gr.HTML(SCENARIO_HTML)
+            gr.Markdown("### Что готово сейчас")
+            o_cards = gr.HTML(overview_cards())
+            gr.Markdown("### План работ\nНажмите на этап, чтобы увидеть, что сделано (✔️) и что осталось (▫️). "
+                        "План хранится в `docs/plan.json`.")
+            o_plan = gr.HTML(plan_html())
+            gr.Markdown("### ⏱ Сколько это займёт на доске\n"
+                        "Процессор доски пока неизвестен. Выберите похожий — таблица пересчитается. "
+                        "Ползунками можно задать свой: 1.0 = как ноутбук разработчика, 0.5 = в 2 раза медленнее.")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    o_preset = gr.Dropdown(list(BOARD_PRESETS), value=list(BOARD_PRESETS)[3],
+                                           label="Процессор доски")
+                    o_model = gr.Radio(["4B", "2B"], value="4B", label="Модель",
+                                       info="4B — точнее; 2B — в 2 раза быстрее, но чаще выдумывает факты")
+                    o_gen = gr.Slider(0.05, 1.5, BOARD_PRESETS[list(BOARD_PRESETS)[3]][0], step=0.05,
+                                      label="Скорость генерации относительно ноутбука",
+                                      info="Зависит в основном от скорости памяти")
+                    o_pp = gr.Slider(0.05, 1.5, BOARD_PRESETS[list(BOARD_PRESETS)[3]][1], step=0.05,
+                                     label="Скорость чтения промпта относительно ноутбука",
+                                     info="Зависит в основном от мощности ядер")
+                with gr.Column(scale=2):
+                    o_est = gr.Markdown(board_estimate("4B", *BOARD_PRESETS[list(BOARD_PRESETS)[3]]))
+            with gr.Accordion("📄 Подробный отчёт: что сделано, тайминги, прогноз, что предстоит", open=False):
+                gr.Markdown(status_report())
+            with gr.Accordion("📖 Словарик терминов", open=False):
+                gr.Markdown(GLOSSARY)
+            o_refresh = gr.Button("🔄 Обновить состояние и план", size="sm")
+            o_preset.change(apply_preset, o_preset, [o_gen, o_pp])
+            for c in (o_model, o_gen, o_pp):
+                c.change(board_estimate, [o_model, o_gen, o_pp], o_est)
+            o_refresh.click(lambda: (overview_cards(), plan_html()), None, [o_cards, o_plan])
+            app.load(lambda: (overview_cards(), plan_html()), None, [o_cards, o_plan])
+
         # 1. Данные
-        with gr.Tab("1. Данные"):
-            gr.Markdown("Данные для обучения — пары «вопрос → ответ». Удобнее всего готовить в Excel или "
-                        "Google Таблицах: колонки **lang** (kk / ru / en), **question**, **answer**, "
-                        "сохранить как CSV и загрузить сюда.")
+        with gr.Tab("1. 📚 Данные"):
+            intro("модель учится на примерах «вопрос → ответ». Чем больше хороших примеров (особенно на казахском), "
+                  "тем лучше она отвечает.",
+                  "подготовьте таблицу в Excel или Google Таблицах с колонками **lang** (kk / ru / en), "
+                  "**question**, **answer**, сохраните как CSV и загрузите ниже.",
+                  "датасет, который можно выбрать на вкладке «Обучение».", "секунды.")
             with gr.Row():
                 ds = gr.Dropdown(dataset_files(), value=(dataset_files() or [None])[0], label="Датасет", scale=3)
                 ds_refresh = gr.Button("🔄", scale=0)
@@ -538,7 +776,11 @@ def build():
             app.load(show_dataset, ds, [ds_info, ds_table])
 
         # 2. Обучение
-        with gr.Tab("2. Обучение"):
+        with gr.Tab("2. 🎓 Обучение"):
+            intro("дообучить модель на ваших примерах, чтобы она лучше писала по-казахски и в нужном стиле.",
+                  "выберите датасет, придумайте имя и нажмите «Начать». Параметры можно не трогать.",
+                  "«адаптер» в папке models/ — небольшая надстройка над моделью. Дальше — вкладка «Экспорт».",
+                  "50 примеров — ~2 мин, 1000 примеров — ориентировочно 10–30 мин (видеокарта).")
             with gr.Row():
                 with gr.Column(scale=1):
                     t_base = gr.Dropdown(BASE_MODELS, value=BASE_MODELS[0], label="Базовая модель")
@@ -567,9 +809,11 @@ def build():
             up_btn.click(lambda: gr.Dropdown(choices=dataset_files()), None, t_ds)
 
         # 3. Экспорт
-        with gr.Tab("3. Экспорт"):
-            gr.Markdown("Превращает обученный адаптер в один файл **GGUF** для доски (llama.cpp / Ollama). "
-                        "Q4_K_M — основной вариант (~2.6 ГБ для 4B); Q5_K_M / Q8_0 — точнее, но больше и медленнее.")
+        with gr.Tab("3. 📦 Экспорт"):
+            intro("доске нужен один сжатый файл модели (GGUF), который работает без видеокарты.",
+                  "выберите обученный адаптер и нажмите «Экспортировать». Сжатие оставьте Q4_K_M.",
+                  "файл models/<имя>-Q4_K_M.gguf (~2.6 ГБ для 4B). Q5_K_M / Q8_0 — точнее, но больше и медленнее.",
+                  "около 5 минут.")
             with gr.Row():
                 e_adapter = gr.Dropdown(adapters(), label="Обученный адаптер", scale=3)
                 e_refresh = gr.Button("🔄", scale=0)
@@ -583,10 +827,14 @@ def build():
             e_start.click(start_export, [e_adapter, e_name, e_quant], e_msg)
 
         # 4. Проверка
-        with gr.Tab("4. Проверка"):
-            gr.Markdown("Бенчмарк — 30 вопросов по истории, биологии и физике (kk / ru / en). "
-                        "Оценка судьёй — предварительная; окончательную ставит человек в колонке **human_score** "
-                        "файла `benchmark/scores_*.csv`.")
+        with gr.Tab("4. 🧪 Проверка"):
+            intro("сравнить модели в цифрах: стало ли лучше после обучения, помогает ли поиск по текстам (RAG).",
+                  "выберите модель → «Запустить бенчмарк». Потом запустите сервер (вкладка 5) и нажмите "
+                  "«Оценить судьёй».",
+                  "процент правильных ответов по языкам и ответы модели рядом с эталоном. Оценка судьёй "
+                  "предварительная: окончательную ставит человек в колонке **human_score** файла "
+                  "`benchmark/scores_*.csv`.",
+                  "бенчмарк 3–5 мин, оценка ~3 мин.")
             with gr.Row():
                 b_model = gr.Dropdown(bench_models(), value=BASE_MODELS[0], label="Модель", scale=3)
                 b_refresh = gr.Button("🔄", scale=0)
@@ -608,7 +856,12 @@ def build():
             app.load(show_results, b_res, b_detail)  # та же история: первый прогон выбран без .change
 
         # 5. Сервер и урок
-        with gr.Tab("5. Сервер и урок"):
+        with gr.Tab("5. ✨ Сервер и урок"):
+            intro("проверить главный сценарий доски: учебник + параграф → задания и слайды.",
+                  "слева запустите сервер (модель на процессоре, как на доске), справа выберите учебник, "
+                  "параграф и нажмите «Сгенерировать».",
+                  "задания с ответами (⚠️ — проверьте) и текст слайдов с формулами.",
+                  "на ноутбуке 4–8 мин на урок (казахский дольше), на доске — см. калькулятор во вкладке «Обзор».")
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("### Сервер модели\nЗапускает модель на процессоре, 4 потока — как на доске.")
