@@ -57,6 +57,8 @@ describe("TeacherDashboard simplified navigation", () => {
     mount();
 
     expect(screen.getByRole("heading", { name: "Что хотите подготовить?" })).toBeInTheDocument();
+    expect(screen.queryByText("Панель учителя")).not.toBeInTheDocument();
+    expect(screen.getByText("Физика · заданий: 1 · слайдов: 1")).toBeInTheDocument();
     expect(screen.queryByText(/Основные функции находятся здесь/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Дополнительные возможности сохранены/)).not.toBeInTheDocument();
 

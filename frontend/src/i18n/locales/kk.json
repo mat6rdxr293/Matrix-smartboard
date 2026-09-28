@@ -203,7 +203,6 @@
     "tasks": "Тапсырмалар",
     "teacher": "Мұғалім",
     "teacher_dashboard": "Мұғалім панелі",
-    "teacher_panel_title": "Мұғалім панелі",
     "teacher_home": "Басты бет",
     "teacher_history": "Сабақ тарихы",
     "teacher_home_title": "Нені дайындағыңыз келеді?",
@@ -376,7 +375,8 @@
     "finish_lesson": "Аяқтау",
     "finish_lesson_title": "Сабақты аяқтау",
     "lines": "Сызықтар",
-    "teacher_presentation_actions": "Презентация әрекеттері"
+    "teacher_presentation_actions": "Презентация әрекеттері",
+    "teacher_home_summary": "{subject} · {tasks} тапсырма · {slides} слайд"
   },
   "defaults": {
     "slides": [

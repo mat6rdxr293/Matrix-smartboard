@@ -203,7 +203,6 @@
     "tasks": "Задания",
     "teacher": "Учитель",
     "teacher_dashboard": "Дешборд учителя",
-    "teacher_panel_title": "Панель учителя",
     "teacher_home": "Главная",
     "teacher_history": "История урока",
     "teacher_home_title": "Что хотите подготовить?",
@@ -376,7 +375,8 @@
     "finish_lesson": "Завершить",
     "finish_lesson_title": "Завершить урок",
     "lines": "Линии",
-    "teacher_presentation_actions": "Действия с презентацией"
+    "teacher_presentation_actions": "Действия с презентацией",
+    "teacher_home_summary": "{subject} · заданий: {tasks} · слайдов: {slides}"
   },
   "defaults": {
     "slides": [

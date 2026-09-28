@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import MathText from "@/components/MathText";
 import { useI18n } from "@/i18n";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
-import { withSubjectQuery } from "@/app/subjects/subjectConfig";
+import { getSubjectNameForLocale, withSubjectQuery } from "@/app/subjects/subjectConfig";
 import { ArrowLeft, ChevronRight, Download, FileDown, History, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Settings2 } from "lucide-react";
 
 const STAGE_W = 960;
@@ -168,6 +168,7 @@ export default function TeacherDashboard({
   fullPage?: boolean;
 }) {
   const { tl, locale } = useI18n();
+  const subjectName = getSubjectNameForLocale(subjectId, locale);
   const withSubjectApi = (path: string) => withSubjectQuery(path, subjectId);
   const [section, setSection] = useState<"home" | "tasks" | "slides" | "replays">("home");
   const [taskIndex, setTaskIndex] = useState(0);
@@ -1116,49 +1117,45 @@ export default function TeacherDashboard({
         fullPage ? "h-full rounded-none border-x-0 border-b-0" : "h-full max-h-[92vh] rounded-2xl shadow-soft"
       )}
     >
-      <div
-        className={cn(
-          "modal-handle flex min-h-[64px] items-center justify-between gap-4 border-b border-white/10 px-5",
-          onDragHandlePointerDown ? "cursor-grab active:cursor-grabbing" : ""
-        )}
-        onPointerDown={onDragHandlePointerDown}
-      >
-        <div className="min-w-0">
-          {section === "home" ? (
-            <div className="text-[15px] font-semibold text-frost">{tl("teacher_panel_title")}</div>
-          ) : (
-            <button
-              type="button"
-              aria-label={`${tl("back")}: ${section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}`}
-              className="flex h-10 items-center gap-2 rounded-xl pr-3 text-[14px] font-semibold text-frost transition hover:text-accent"
-              onClick={() => setSection("home")}
-            >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/60">
-                <ArrowLeft size={17} />
-              </span>
-              {section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}
-            </button>
+      {section !== "home" && (
+        <div
+          className={cn(
+            "modal-handle flex min-h-[64px] items-center justify-between gap-4 border-b border-white/10 px-5",
+            onDragHandlePointerDown ? "cursor-grab active:cursor-grabbing" : ""
+          )}
+          onPointerDown={onDragHandlePointerDown}
+        >
+          <button
+            type="button"
+            aria-label={`${tl("back")}: ${section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}`}
+            className="flex h-10 items-center gap-2 rounded-xl pr-3 text-[14px] font-semibold text-frost transition hover:text-accent"
+            onClick={() => setSection("home")}
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/60">
+              <ArrowLeft size={17} />
+            </span>
+            {section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}
+          </button>
+          {section === "slides" && (
+            <details className="group relative">
+              <summary
+                aria-label={tl("teacher_presentation_actions")}
+                className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 text-frost/55 transition hover:bg-white/[0.05] hover:text-frost"
+              >
+                <MoreHorizontal size={18} />
+              </summary>
+              <div className="absolute right-0 top-12 z-50 w-[230px] overflow-hidden rounded-xl border border-white/10 bg-graphite p-1.5 shadow-soft">
+                <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleDownloadPptx} disabled={exportLoading}>
+                  <Download size={15} className="mr-2.5" />{tl("teacher_download_powerpoint")}
+                </button>
+                <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleSavePptxServer} disabled={exportLoading}>
+                  <FileDown size={15} className="mr-2.5" />{tl("teacher_save_pptx_server")}
+                </button>
+              </div>
+            </details>
           )}
         </div>
-        {section === "slides" && (
-          <details className="group relative">
-            <summary
-              aria-label={tl("teacher_presentation_actions")}
-              className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 text-frost/55 transition hover:bg-white/[0.05] hover:text-frost"
-            >
-              <MoreHorizontal size={18} />
-            </summary>
-            <div className="absolute right-0 top-12 z-50 w-[230px] overflow-hidden rounded-xl border border-white/10 bg-graphite p-1.5 shadow-soft">
-              <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleDownloadPptx} disabled={exportLoading}>
-                <Download size={15} className="mr-2.5" />{tl("teacher_download_powerpoint")}
-              </button>
-              <button type="button" className="flex h-10 w-full items-center rounded-lg px-3 text-left text-[12px] text-frost/70 hover:bg-white/[0.05]" onClick={handleSavePptxServer} disabled={exportLoading}>
-                <FileDown size={15} className="mr-2.5" />{tl("teacher_save_pptx_server")}
-              </button>
-            </div>
-          </details>
-        )}
-      </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col">
 
@@ -1171,40 +1168,44 @@ export default function TeacherDashboard({
         <div className="min-h-0 flex-1 overflow-auto">
 
         {section === "home" && (
-          <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-7 sm:py-9">
-            <div className="max-w-2xl">
-              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-frost">{tl("teacher_home_title")}</h2>
+          <div className="flex min-h-full items-center justify-center px-5 py-10 sm:px-8">
+            <div className="w-full max-w-[1220px]">
+              <div className="text-center">
+                <h2 className="text-[30px] font-semibold tracking-[-0.025em] text-frost">{tl("teacher_home_title")}</h2>
+                <div className="mt-2 text-[13px] font-medium text-frost/38">
+                  {tl("teacher_home_summary", { subject: subjectName, tasks: tasks.length, slides: slides.length })}
+                </div>
+              </div>
+
+              <div className="mt-8 grid gap-5 lg:grid-cols-3">
+              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><ListChecks size={22} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-6 text-[17px] font-semibold text-frost">{tl("tasks")}</div>
+                <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
+              </button>
+
+              <button type="button" onClick={() => setSection("slides")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><Presentation size={22} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-6 text-[17px] font-semibold text-frost">{tl("presentation")}</div>
+                <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
+              </button>
+
+              <button type="button" onClick={() => setSection("replays")} className="group min-h-[190px] rounded-[20px] border border-white/10 bg-white/[0.025] p-6 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-accent/10 text-accent"><History size={22} /></div>
+                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
+                </div>
+                <div className="mt-6 text-[17px] font-semibold text-frost">{tl("teacher_history")}</div>
+                <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
+              </button>
+              </div>
             </div>
-
-            <div className="mt-7 grid gap-4 lg:grid-cols-3">
-              <button type="button" onClick={() => setSection("tasks")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
-                <div className="flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><ListChecks size={21} /></div>
-                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
-                </div>
-                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("tasks")}</div>
-                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_tasks_description")}</div>
-              </button>
-
-              <button type="button" onClick={() => setSection("slides")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
-                <div className="flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><Presentation size={21} /></div>
-                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
-                </div>
-                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("presentation")}</div>
-                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_slides_description")}</div>
-              </button>
-
-              <button type="button" onClick={() => setSection("replays")} className="group min-h-[165px] rounded-2xl border border-white/10 bg-white/[0.025] p-5 text-left transition hover:border-accent/30 hover:bg-white/[0.045]">
-                <div className="flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"><History size={21} /></div>
-                  <ChevronRight size={18} className="mt-1 text-frost/25 transition group-hover:translate-x-0.5 group-hover:text-frost/55" />
-                </div>
-                <div className="mt-5 text-[16px] font-semibold text-frost">{tl("teacher_history")}</div>
-                <div className="mt-2 text-[12px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
-              </button>
-            </div>
-
           </div>
         )}
 

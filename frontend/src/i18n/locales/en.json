@@ -204,7 +204,6 @@
     "tasks": "Tasks",
     "teacher": "Teacher",
     "teacher_dashboard": "Teacher dashboard",
-    "teacher_panel_title": "Teacher panel",
     "teacher_home": "Home",
     "teacher_history": "Lesson history",
     "teacher_home_title": "What would you like to prepare?",
@@ -376,7 +375,8 @@
     "finish_lesson": "Finish",
     "finish_lesson_title": "Finish lesson",
     "lines": "Lines",
-    "teacher_presentation_actions": "Presentation actions"
+    "teacher_presentation_actions": "Presentation actions",
+    "teacher_home_summary": "{subject} · {tasks} tasks · {slides} slides"
   },
   "defaults": {
     "slides": [
