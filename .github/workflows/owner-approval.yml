@@ -1,0 +1,29 @@
+name: Owner approval
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  owner-approval:
+    name: Owner approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require approval from repository owner for current HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          count="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews" --paginate --jq "[.[] | select(.user.login == \"mat6rdxr293\" and .state == \"APPROVED\" and .commit_id == \"${HEAD_SHA}\")] | length")"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::Approval from @mat6rdxr293 is required for the current PR head commit."
+            exit 1
+          fi
