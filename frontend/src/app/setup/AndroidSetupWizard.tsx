@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,8 @@ export default function AndroidSetupWizard({ onDone }: Props) {
   const [serverUrl, setServerUrl] = useState("");
   const [discovered, setDiscovered] = useState<DiscoveredServer[]>([]);
   const [discovering, setDiscovering] = useState(false);
+  const [manualFallbackVisible, setManualFallbackVisible] = useState(false);
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null);
   const [host, setHost] = useState("");
   const [sshPort, setSshPort] = useState("22");
@@ -40,23 +42,64 @@ export default function AndroidSetupWizard({ onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  const scanRunRef = useRef(0);
 
   const resetError = () => setError(null);
 
   const scanServers = async () => {
+    const runId = ++scanRunRef.current;
     setDiscovering(true);
     resetError();
+
+    const mergeDiscovered = (next: DiscoveredServer[]) => {
+      if (runId !== scanRunRef.current) return;
+      setDiscovered((current) => {
+        const merged = new Map(current.map((server) => [`${server.serverId}|${server.serverUrl}`, server]));
+        next.forEach((server) => merged.set(`${server.serverId}|${server.serverUrl}`, server));
+        return Array.from(merged.values());
+      });
+    };
+
     try {
-      setDiscovered(await discoverServers(2600));
-    } catch (next) {
-      setError(next instanceof Error ? next.message : String(next));
+      // Keep discovery alive for about 15 seconds. Three separate windows let
+      // a server appear after the first ~5 s instead of hiding results until
+      // the entire search has finished.
+      for (let pass = 0; pass < 3; pass += 1) {
+        if (runId !== scanRunRef.current) return;
+        try {
+          mergeDiscovered(await discoverServers(5000));
+        } catch {
+          // Restricted Wi-Fi may block multicast. Keep searching and expose
+          // manual entry separately instead of turning discovery into an error.
+        }
+        if (pass < 2 && runId === scanRunRef.current) {
+          // Give Android NSD a moment to fully stop the previous browser before
+          // starting the next discovery window.
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+        }
+      }
     } finally {
-      setDiscovering(false);
+      if (runId === scanRunRef.current) setDiscovering(false);
     }
   };
 
   useEffect(() => {
-    if (mode === "existing") void scanServers();
+    if (mode !== "existing") return;
+    setDiscovered([]);
+    setServerUrl("");
+    setPendingTrust(null);
+    setManualEntryOpen(false);
+    setManualFallbackVisible(false);
+    void scanServers();
+
+    const fallbackTimer = window.setTimeout(() => {
+      setManualFallbackVisible(true);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      scanRunRef.current += 1;
+    };
   }, [mode]);
 
   const finishConnection = (url: string) => {
@@ -190,39 +233,84 @@ export default function AndroidSetupWizard({ onDone }: Props) {
               <div className="mt-5 flex items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-semibold">Серверы в сети</h2>
-                  <p className="mt-1 text-xs text-frost/45">Поиск _matrixboard._tcp.local</p>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-frost/45">
+                    {discovering && <LoaderCircle size={13} className="animate-spin text-accent" />}
+                    <span>
+                      {discovering
+                        ? discovered.length > 0
+                          ? "Поиск продолжается…"
+                          : "Ищем Matrix Smartboard в локальной сети…"
+                        : discovered.length > 0
+                          ? `Найдено: ${discovered.length}`
+                          : "Автоматический поиск завершён"}
+                    </span>
+                  </div>
                 </div>
                 <Button variant="outline" className="h-9" disabled={discovering || busy} onClick={() => void scanServers()}>
-                  {discovering ? <LoaderCircle size={15} className="mr-2 animate-spin" /> : <Network size={15} className="mr-2" />}
-                  Обновить
+                  <Network size={15} className="mr-2" />
+                  Повторить поиск
                 </Button>
               </div>
 
-              <div className="mt-4 space-y-2">
+              <div className="mt-5 min-h-[78px] space-y-2">
                 {discovered.map((server) => (
                   <button
                     key={`${server.serverId}|${server.serverUrl}`}
                     type="button"
                     disabled={busy}
                     onClick={() => { setServerUrl(server.serverUrl); void connectExisting(server.serverUrl); }}
-                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-left transition hover:border-accent/30 hover:bg-white/[0.05]"
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-left transition hover:border-accent/30 hover:bg-white/[0.05] disabled:opacity-60"
                   >
-                    <span>
-                      <span className="block text-sm font-semibold text-frost">{server.name}</span>
-                      <span className="mt-1 block text-xs text-frost/45">{server.serverUrl}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-frost">{server.name}</span>
+                      <span className="mt-1 block truncate text-xs text-frost/45">{server.serverUrl}</span>
                     </span>
-                    <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
+                    <span className="ml-4 shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
                   </button>
                 ))}
+
+                {discovering && discovered.length === 0 && (
+                  <div className="flex h-[78px] items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.018]">
+                    <div className="text-center">
+                      <LoaderCircle size={20} className="mx-auto animate-spin text-accent/80" />
+                      <div className="mt-2 text-xs text-frost/40">Поиск может занять до 15 секунд</div>
+                    </div>
+                  </div>
+                )}
+
                 {!discovering && discovered.length === 0 && (
-                  <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs leading-5 text-frost/40">
-                    Серверы автоматически не найдены. Это нормально, если точка доступа блокирует multicast — используйте адрес вручную.
+                  <div className="flex h-[78px] items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.018] px-5 text-center text-xs leading-5 text-frost/40">
+                    Серверы в этой сети не найдены
                   </div>
                 )}
               </div>
 
-              <label className="mt-6 block text-xs font-medium text-frost/55">Адрес вручную</label>
-              <Input className="mt-2 h-12" placeholder="192.168.1.50 — HTTPS :8443 подставится автоматически" value={serverUrl} onChange={(event) => { setServerUrl(event.target.value); setPendingTrust(null); resetError(); }} />
+              {manualFallbackVisible && !manualEntryOpen && !pendingTrust && (
+                <button
+                  type="button"
+                  onClick={() => { setManualEntryOpen(true); resetError(); }}
+                  className="mt-5 h-11 w-full rounded-xl border border-white/10 bg-white/[0.025] text-sm font-medium text-frost/65 transition hover:border-white/20 hover:bg-white/[0.045] hover:text-frost"
+                >
+                  Ввести адрес сервера вручную
+                </button>
+              )}
+
+              {manualEntryOpen && !pendingTrust && (
+                <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                  <label className="block text-xs font-medium text-frost/55">Адрес сервера</label>
+                  <Input
+                    autoFocus
+                    className="mt-2 h-12"
+                    placeholder="192.168.1.50"
+                    value={serverUrl}
+                    onChange={(event) => { setServerUrl(event.target.value); setPendingTrust(null); resetError(); }}
+                  />
+                  <div className="mt-2 text-[11px] text-frost/35">HTTPS и порт 8443 подставятся автоматически</div>
+                  <Button variant="accent" className="mt-4 h-11 w-full" disabled={busy || !serverUrl.trim()} onClick={() => void connectExisting()}>
+                    {busy ? <><LoaderCircle size={16} className="mr-2 animate-spin" />Проверка...</> : "Подключиться"}
+                  </Button>
+                </div>
+              )}
 
               {pendingTrust && (
                 <div className="mt-4 rounded-xl border border-accent/25 bg-accent/[0.06] p-4">
@@ -239,11 +327,6 @@ export default function AndroidSetupWizard({ onDone }: Props) {
               )}
 
               {error && <ErrorBox text={error} />}
-              {!pendingTrust && (
-                <Button variant="accent" className="mt-6 h-11 w-full" disabled={busy || !serverUrl.trim()} onClick={() => void connectExisting()}>
-                  {busy ? <><LoaderCircle size={16} className="mr-2 animate-spin" />Проверка...</> : "Проверить и подключить"}
-                </Button>
-              )}
             </div>
           )}
 
