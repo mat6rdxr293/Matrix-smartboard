@@ -5,7 +5,7 @@ REPO_URL="https://github.com/mat6rdxr293/Matrix-smartboard.git"
 APP_DIR="/opt/matrix-smartboard"
 DATA_DIR="/var/lib/matrix-smartboard"
 SERVICE_USER="matrix-smartboard"
-PORT="${MATRIX_PORT:-8001}"
+PORT="${MATRIX_PORT:-8443}"
 PUBLIC_BASE_URL="${MATRIX_PUBLIC_BASE_URL:-}"
 INSTALL_OLLAMA="${MATRIX_INSTALL_OLLAMA:-1}"
 
@@ -86,6 +86,7 @@ AI_TOOLS_ENABLED=true
 PUBLIC_BASE_URL=$PUBLIC_BASE_URL
 PRACTICE_DB_PATH=$DATA_DIR/practice.db
 SCHOOL_SESSION_DAYS=30
+SERVER_IDENTITY_DIR=$DATA_DIR/identity
 ENV
 chmod 640 "$APP_DIR/backend/.env"
 chown root:"$SERVICE_USER" "$APP_DIR/backend/.env"
@@ -106,7 +107,7 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR/backend
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$APP_DIR/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+ExecStart=$APP_DIR/.venv/bin/python -m app.run_server --host 0.0.0.0 --port $PORT
 Restart=always
 RestartSec=3
 
@@ -118,12 +119,13 @@ systemctl daemon-reload
 systemctl enable --now matrix-smartboard
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-  ufw allow "$PORT/tcp" >/dev/null || true
+  ufw allow from any to any port "$PORT" proto tcp >/dev/null || true
+  ufw allow from 224.0.0.0/4 to any port 5353 proto udp >/dev/null || true
 fi
 
 echo "[7/7] Checking server"
 for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:$PORT/api/status"; then
+  if curl -kfsS "https://127.0.0.1:$PORT/api/status"; then
     echo
     echo "Matrix Smartboard server is ready"
     exit 0

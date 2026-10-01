@@ -1,22 +1,39 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { finishAndroidSetup, SshProvisioner, testServer } from "./androidSetup";
+import {
+  discoverServers,
+  finishAndroidSetup,
+  probeServerIdentity,
+  SshProvisioner,
+  testServer,
+  trustServerIdentity,
+  type DiscoveredServer,
+  type ServerStatus,
+} from "./androidSetup";
 
 type Mode = "choose" | "existing" | "ssh";
-
 type Props = { onDone: () => void };
+type PendingTrust = {
+  serverUrl: string;
+  serverId: string;
+  pin: string;
+  status: ServerStatus;
+};
 
 export default function AndroidSetupWizard({ onDone }: Props) {
   const [mode, setMode] = useState<Mode>("choose");
   const [serverUrl, setServerUrl] = useState("");
+  const [discovered, setDiscovered] = useState<DiscoveredServer[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null);
   const [host, setHost] = useState("");
   const [sshPort, setSshPort] = useState("22");
   const [username, setUsername] = useState("root");
   const [password, setPassword] = useState("");
   const [sudoPassword, setSudoPassword] = useState("");
-  const [backendPort, setBackendPort] = useState("8001");
+  const [backendPort, setBackendPort] = useState("8443");
   const [installLocalAi, setInstallLocalAi] = useState(true);
   const [fingerprint, setFingerprint] = useState("");
   const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
@@ -26,12 +43,61 @@ export default function AndroidSetupWizard({ onDone }: Props) {
 
   const resetError = () => setError(null);
 
-  const connectExisting = async () => {
-    setBusy(true); resetError();
+  const scanServers = async () => {
+    setDiscovering(true);
+    resetError();
     try {
-      const result = await testServer(serverUrl);
-      finishAndroidSetup(result.serverUrl);
-      onDone();
+      setDiscovered(await discoverServers(2600));
+    } catch (next) {
+      setError(next instanceof Error ? next.message : String(next));
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode === "existing") void scanServers();
+  }, [mode]);
+
+  const finishConnection = (url: string) => {
+    finishAndroidSetup(url);
+    setPendingTrust(null);
+    onDone();
+  };
+
+  const connectExisting = async (target = serverUrl) => {
+    setBusy(true);
+    resetError();
+    setPendingTrust(null);
+    try {
+      const result = await testServer(target);
+      setServerUrl(result.serverUrl);
+      if (result.needsTrust) {
+        setPendingTrust({
+          serverUrl: result.serverUrl,
+          serverId: result.serverId,
+          pin: result.pin,
+          status: result.status,
+        });
+        return;
+      }
+      finishConnection(result.serverUrl);
+    } catch (next) {
+      setError(next instanceof Error ? next.message : String(next));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmServerTrust = async () => {
+    if (!pendingTrust) return;
+    setBusy(true);
+    resetError();
+    try {
+      await trustServerIdentity(pendingTrust.serverUrl, pendingTrust.serverId, pendingTrust.pin);
+      const checked = await testServer(pendingTrust.serverUrl);
+      if (checked.needsTrust) throw new Error("Не удалось сохранить ключ сервера");
+      finishConnection(checked.serverUrl);
     } catch (next) {
       setError(next instanceof Error ? next.message : String(next));
     } finally {
@@ -74,11 +140,17 @@ export default function AndroidSetupWizard({ onDone }: Props) {
         backendPort: Number(backendPort),
         installLocalAi,
       });
-      const checked = await testServer(result.serverUrl);
-      finishAndroidSetup(checked.serverUrl);
+
+      // SSH fingerprint was explicitly verified before installation, so the
+      // freshly installed TLS identity can be pinned without a second prompt.
+      const probe = await probeServerIdentity(result.serverUrl);
+      await trustServerIdentity(probe.serverUrl, probe.serverId, probe.pin);
+      const checked = await testServer(probe.serverUrl);
+      if (checked.needsTrust) throw new Error("Не удалось закрепить TLS-ключ установленного сервера");
+
       setPassword("");
       setSudoPassword("");
-      onDone();
+      finishConnection(checked.serverUrl);
     } catch (next) {
       setError(next instanceof Error ? next.message : String(next));
     } finally {
@@ -93,7 +165,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
         <div className="border-b border-white/10 px-7 py-6 sm:px-9">
           <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-accent">Matrix Smartboard</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">Первая настройка</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-frost/50">Подключите приложение к существующему серверу или установите сервер автоматически по SSH.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-frost/50">Сервер можно найти автоматически в локальной сети или установить на Debian/Ubuntu по SSH.</p>
         </div>
 
         <div className="p-7 sm:p-9">
@@ -101,27 +173,77 @@ export default function AndroidSetupWizard({ onDone }: Props) {
             <div className="grid gap-4 md:grid-cols-2">
               <button type="button" onClick={() => setMode("existing")} className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-left transition hover:border-accent/35 hover:bg-white/[0.055]">
                 <Network size={28} className="text-accent" />
-                <div className="mt-5 text-lg font-semibold text-frost">Подключиться к серверу</div>
-                <div className="mt-2 text-sm leading-6 text-frost/45">Сервер Matrix Smartboard уже установлен. Достаточно указать его адрес.</div>
+                <div className="mt-5 text-lg font-semibold text-frost">Найти сервер</div>
+                <div className="mt-2 text-sm leading-6 text-frost/45">Matrix Smartboard попробует обнаружить сервер через mDNS. IP можно ввести вручную как резервный вариант.</div>
               </button>
               <button type="button" onClick={() => setMode("ssh")} className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-left transition hover:border-accent/35 hover:bg-white/[0.055]">
                 <ServerCog size={28} className="text-accent" />
                 <div className="mt-5 text-lg font-semibold text-frost">Настроить сервер по SSH</div>
-                <div className="mt-2 text-sm leading-6 text-frost/45">Приложение подключится к серверу Debian/Ubuntu, установит Matrix Smartboard из GitHub и запустит его как системную службу.</div>
+                <div className="mt-2 text-sm leading-6 text-frost/45">Приложение установит backend как системную службу и закрепит его TLS-идентичность.</div>
               </button>
             </div>
           )}
 
           {mode === "existing" && (
             <div className="mx-auto max-w-xl">
-              <Back onClick={() => setMode("choose")} />
-              <h2 className="mt-5 text-xl font-semibold">Готовый сервер</h2>
-              <label className="mt-6 block text-xs font-medium text-frost/55">Адрес сервера</label>
-              <Input className="mt-2 h-12" placeholder="192.168.1.50:8001" value={serverUrl} onChange={(event) => { setServerUrl(event.target.value); resetError(); }} />
+              <Back onClick={() => { setPendingTrust(null); setMode("choose"); }} />
+              <div className="mt-5 flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-semibold">Серверы в сети</h2>
+                  <p className="mt-1 text-xs text-frost/45">Поиск _matrixboard._tcp.local</p>
+                </div>
+                <Button variant="outline" className="h-9" disabled={discovering || busy} onClick={() => void scanServers()}>
+                  {discovering ? <LoaderCircle size={15} className="mr-2 animate-spin" /> : <Network size={15} className="mr-2" />}
+                  Обновить
+                </Button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {discovered.map((server) => (
+                  <button
+                    key={`${server.serverId}|${server.serverUrl}`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { setServerUrl(server.serverUrl); void connectExisting(server.serverUrl); }}
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-left transition hover:border-accent/30 hover:bg-white/[0.05]"
+                  >
+                    <span>
+                      <span className="block text-sm font-semibold text-frost">{server.name}</span>
+                      <span className="mt-1 block text-xs text-frost/45">{server.serverUrl}</span>
+                    </span>
+                    <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
+                  </button>
+                ))}
+                {!discovering && discovered.length === 0 && (
+                  <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs leading-5 text-frost/40">
+                    Серверы автоматически не найдены. Это нормально, если точка доступа блокирует multicast — используйте адрес вручную.
+                  </div>
+                )}
+              </div>
+
+              <label className="mt-6 block text-xs font-medium text-frost/55">Адрес вручную</label>
+              <Input className="mt-2 h-12" placeholder="192.168.1.50 — HTTPS :8443 подставится автоматически" value={serverUrl} onChange={(event) => { setServerUrl(event.target.value); setPendingTrust(null); resetError(); }} />
+
+              {pendingTrust && (
+                <div className="mt-4 rounded-xl border border-accent/25 bg-accent/[0.06] p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />Подтверждение сервера</div>
+                  <div className="mt-2 text-xs leading-5 text-frost/55">Первое подключение. Сверьте отпечаток с сервером перед подтверждением.</div>
+                  <div className="mt-3 text-[10px] uppercase tracking-[0.12em] text-frost/35">Server ID</div>
+                  <code className="mt-1 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{pendingTrust.serverId}</code>
+                  <div className="mt-3 text-[10px] uppercase tracking-[0.12em] text-frost/35">Public key pin</div>
+                  <code className="mt-1 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{pendingTrust.pin}</code>
+                  <Button variant="accent" className="mt-4 h-11 w-full" disabled={busy} onClick={() => void confirmServerTrust()}>
+                    Подтвердить и закрепить сервер
+                  </Button>
+                </div>
+              )}
+
               {error && <ErrorBox text={error} />}
-              <Button variant="accent" className="mt-6 h-11 w-full" disabled={busy || !serverUrl.trim()} onClick={() => void connectExisting()}>
-                {busy ? <><LoaderCircle size={16} className="mr-2 animate-spin" />Проверка...</> : "Проверить и подключить"}
-              </Button>
+              {!pendingTrust && (
+                <Button variant="accent" className="mt-6 h-11 w-full" disabled={busy || !serverUrl.trim()} onClick={() => void connectExisting()}>
+                  {busy ? <><LoaderCircle size={16} className="mr-2 animate-spin" />Проверка...</> : "Проверить и подключить"}
+                </Button>
+              )}
             </div>
           )}
 
@@ -140,11 +262,11 @@ export default function AndroidSetupWizard({ onDone }: Props) {
                     <Field label="SSH пароль"><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setFingerprint(""); }} /></Field>
                   </div>
                   {username !== "root" && <div className="mt-4"><Field label="Пароль sudo (если отличается)"><Input type="password" value={sudoPassword} onChange={(e) => setSudoPassword(e.target.value)} placeholder="По умолчанию используется SSH пароль" /></Field></div>}
-                  <div className="mt-4"><Field label="Порт Matrix Smartboard"><Input inputMode="numeric" value={backendPort} onChange={(e) => setBackendPort(e.target.value)} /></Field></div>
+                  <div className="mt-4"><Field label="HTTPS порт Matrix Smartboard"><Input inputMode="numeric" value={backendPort} onChange={(e) => setBackendPort(e.target.value)} /></Field></div>
 
                   <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-4">
                     <input type="checkbox" className="mt-1" checked={installLocalAi} onChange={(e) => setInstallLocalAi(e.target.checked)} />
-                    <span><span className="block text-sm font-medium">Установить локальный ИИ</span><span className="mt-1 block text-xs leading-5 text-frost/40">Установит Ollama, Qwen 2.5 7B и Qwen 2.5 VL 3B. Загрузка займёт больше времени и требует достаточно памяти на сервере.</span></span>
+                    <span><span className="block text-sm font-medium">Установить локальный ИИ</span><span className="mt-1 block text-xs leading-5 text-frost/40">Ollama, Qwen 2.5 7B и Qwen 2.5 VL 3B. Интернет нужен только для установки и загрузки моделей.</span></span>
                   </label>
 
                   {!fingerprint ? (
@@ -153,7 +275,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
                     </Button>
                   ) : (
                     <div className="mt-6 rounded-xl border border-accent/20 bg-accent/[0.06] p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />Ключ сервера</div>
+                      <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />SSH host key</div>
                       <code className="mt-3 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{fingerprint}</code>
                       <label className="mt-3 flex items-center gap-2 text-xs text-frost/60"><input type="checkbox" checked={fingerprintConfirmed} onChange={(e) => setFingerprintConfirmed(e.target.checked)} />Подтверждаю этот SSH-сервер</label>
                       <Button variant="accent" className="mt-4 h-11 w-full" disabled={busy || !fingerprintConfirmed} onClick={() => void provision()}>

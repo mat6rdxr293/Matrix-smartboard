@@ -12,7 +12,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(SshProvisionerPlugin.class);
+        registerPlugin(ServerDiscoveryPlugin.class);
+        registerPlugin(ServerSecurityPlugin.class);
         super.onCreate(savedInstanceState);
+        bridge.setWebViewClient(new PinnedBridgeWebViewClient(bridge, this));
         hideSystemBars();
     }
 

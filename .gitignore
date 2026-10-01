@@ -28,6 +28,7 @@ backend/app/data/board_replay.json
 backend/app/data/presentation.pptx
 backend/app/data/presentation_source.json
 backend/app/data/practice.db*
+backend/app/data/server-identity/
 backend/app/data/subjects/*/board_replay.json
 backend/app/data/subjects/*/board_replay.ndjson
 
