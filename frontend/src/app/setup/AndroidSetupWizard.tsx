@@ -230,23 +230,14 @@ export default function AndroidSetupWizard({ onDone }: Props) {
           {mode === "existing" && (
             <div className="mx-auto max-w-xl">
               <Back onClick={() => { setPendingTrust(null); setMode("choose"); }} />
-              <div className="mt-5 flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-semibold">Серверы в сети</h2>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-frost/45">
-                    {discovering && <LoaderCircle size={13} className="animate-spin text-accent" />}
-                    <span>
-                      {discovering
-                        ? discovered.length > 0
-                          ? "Поиск продолжается…"
-                          : "Ищем Matrix Smartboard в локальной сети…"
-                        : discovered.length > 0
-                          ? `Найдено: ${discovered.length}`
-                          : "Автоматический поиск завершён"}
-                    </span>
-                  </div>
-                </div>
-                <Button variant="outline" className="h-9" disabled={discovering || busy} onClick={() => void scanServers()}>
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-xl font-semibold">Серверы в сети</h2>
+                <Button
+                  variant="outline"
+                  className="h-10 w-full shrink-0 sm:w-auto"
+                  disabled={discovering || busy}
+                  onClick={() => void scanServers()}
+                >
                   <Network size={15} className="mr-2" />
                   Повторить поиск
                 </Button>
