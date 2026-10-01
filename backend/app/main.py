@@ -26,7 +26,7 @@ from .ratelimit import RateLimiter
 from .pptx_import import import_pptx, import_pptx_full, import_pptx_stickers
 from .pptx_export import export_pptx
 from .m365 import M365Client, M365Error
-from .settings import get_openai_key, is_ai_configured, is_ocr_configured, settings
+from .settings import get_openai_key, get_server_name, is_ai_configured, is_ocr_configured, settings
 from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
 from .school_store import SchoolStore
@@ -544,6 +544,7 @@ def _status_payload(request: Request | None = None) -> dict:
         "apiVersion": API_VERSION,
         "minClientApiVersion": MIN_CLIENT_API_VERSION,
         "serverId": server_identity.server_id(),
+        "serverName": get_server_name(),
         "publicKeyPin": server_identity.public_key_pin(),
         "tls": bool(request is not None and request.url.scheme == "https"),
         "ai": is_ai_configured(),
@@ -569,7 +570,7 @@ async def discovery_status(request: Request) -> dict:
     payload = _status_payload(request)
     return {
         key: payload[key]
-        for key in ("ok", "product", "serverVersion", "apiVersion", "minClientApiVersion", "serverId", "publicKeyPin", "tls")
+        for key in ("ok", "product", "serverVersion", "apiVersion", "minClientApiVersion", "serverId", "serverName", "publicKeyPin", "tls")
     }
 
 

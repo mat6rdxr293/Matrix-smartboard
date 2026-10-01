@@ -16,7 +16,7 @@ import {
 } from "./androidSetup";
 
 type Mode = "language" | "choose" | "existing" | "ssh";
-type Props = { onDone: () => void };
+type Props = { onDone: () => void; skipLanguage?: boolean };
 type PendingTrust = {
   serverUrl: string;
   serverId: string;
@@ -32,9 +32,9 @@ const SETUP_LANGUAGES: Array<{ code: LocaleCode; label: string; badge: string }>
 
 const LANGUAGE_PROMPTS = ["Выберите язык", "Тілді таңдаңыз", "Choose language"] as const;
 
-export default function AndroidSetupWizard({ onDone }: Props) {
+export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Props) {
   const { setLocale, tl } = useI18n();
-  const [mode, setMode] = useState<Mode>("language");
+  const [mode, setMode] = useState<Mode>(() => skipLanguage ? "choose" : "language");
   const [serverUrl, setServerUrl] = useState("");
   const [discovered, setDiscovered] = useState<DiscoveredServer[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -47,6 +47,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
   const [password, setPassword] = useState("");
   const [sudoPassword, setSudoPassword] = useState("");
   const [backendPort, setBackendPort] = useState("8443");
+  const [serverName, setServerName] = useState("");
   const [installLocalAi, setInstallLocalAi] = useState(true);
   const [fingerprint, setFingerprint] = useState("");
   const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
@@ -221,6 +222,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
         sudoPassword: sudoPassword || password,
         expectedFingerprint: fingerprint,
         backendPort: Number(backendPort),
+        serverName: serverName.trim(),
         installLocalAi,
       });
 
@@ -404,7 +406,18 @@ export default function AndroidSetupWizard({ onDone }: Props) {
               <div className="mt-5 grid gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
                 <div>
                   <h2 className="text-xl font-semibold">{tl("setup_ssh_server")}</h2>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_120px]">
+                  <div className="mt-5">
+                    <Field label={tl("setup_server_name")}>
+                      <Input
+                        value={serverName}
+                        maxLength={48}
+                        placeholder={tl("setup_server_name_placeholder")}
+                        onChange={(e) => setServerName(e.target.value)}
+                      />
+                    </Field>
+                    <div className="mt-2 text-[11px] text-frost/35">{tl("setup_server_name_hint")}</div>
+                  </div>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_120px]">
                     <Field label={tl("setup_ip_or_domain")}><Input placeholder="192.168.1.10" value={host} onChange={(e) => { setHost(e.target.value); setFingerprint(""); resetError(); }} /></Field>
                     <Field label={tl("setup_ssh_port")}><Input inputMode="numeric" value={sshPort} onChange={(e) => setSshPort(e.target.value)} /></Field>
                   </div>

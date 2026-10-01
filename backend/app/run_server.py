@@ -7,7 +7,7 @@ import uvicorn
 from .discovery import DiscoveryMetadata, MdnsAdvertiser
 from .main import API_VERSION, SERVER_VERSION
 from .server_identity import ServerIdentity
-from .settings import settings
+from .settings import get_server_name, settings
 
 
 def main() -> None:
@@ -24,6 +24,7 @@ def main() -> None:
     advertiser = MdnsAdvertiser(
         DiscoveryMetadata(
             server_id=identity.server_id(),
+            server_name=get_server_name(),
             port=args.port,
             tls=tls,
             api_version=API_VERSION,

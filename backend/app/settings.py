@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 from pathlib import Path
 
 from pydantic import Field, field_validator
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
         default=BASE_DIR / "app" / "data" / "server-identity",
         validation_alias="SERVER_IDENTITY_DIR",
     )
+    server_name: str | None = Field(default=None, validation_alias="SERVER_NAME")
 
     # В .env.example эти строки стоят пустыми. Pydantic читает их как "",
     # и для пути к базе это давало Path("") → «unable to open database file» на старте,
@@ -67,6 +69,14 @@ class Settings(BaseSettings):
             return BASE_DIR / "app" / "data" / "server-identity"
         return value
 
+    @field_validator("server_name", mode="before")
+    @classmethod
+    def _empty_server_name_means_unset(cls, value):
+        if isinstance(value, str):
+            cleaned = " ".join(value.split()).strip()
+            return cleaned[:48] or None
+        return value
+
     @field_validator("ai_base_url", "ocr_base_url", mode="before")
     @classmethod
     def _empty_url_means_unset(cls, value):
@@ -82,6 +92,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_server_name() -> str:
+    configured = (settings.server_name or "").strip()
+    if configured:
+        return configured[:48]
+    hostname = socket.gethostname().split(".", 1)[0].strip()
+    if not hostname:
+        return "Matrix Smartboard"
+    readable = hostname.replace("_", " ").replace("-", " ")
+    readable = " ".join(readable.split())
+    return readable[:48] or "Matrix Smartboard"
 
 
 def _read_openai_key_from_env_file(path: Path) -> str | None:

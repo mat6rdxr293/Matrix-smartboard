@@ -423,7 +423,26 @@
     "setup_error_app_outdated": "Эта версия приложения устарела. Обновите Matrix Smartboard.",
     "setup_error_tls_identity": "TLS-идентичность сервера не совпадает с ожидаемой",
     "setup_error_https_required": "Для Android требуется защищённое HTTPS-соединение",
-    "setup_error_invalid_address": "Некорректный адрес сервера"
+    "setup_error_invalid_address": "Некорректный адрес сервера",
+    "setup_server_name": "Имя сервера",
+    "setup_server_name_placeholder": "Главный сервер",
+    "setup_server_name_hint": "Например: Главный сервер или Сервер №1",
+    "server_connecting_title": "Подключение к серверу",
+    "server_connecting_description": "Проверяем сохранённый адрес и локальную сеть",
+    "server_offline_title": "Сервер недоступен",
+    "server_offline_description": "Не удалось подключиться к сохранённому серверу.",
+    "server_check_saved_address": "Сохранённый адрес",
+    "server_check_discovery": "Поиск в локальной сети",
+    "server_check_identity": "Идентичность сервера",
+    "server_check_backend": "Защищённое соединение",
+    "server_retry": "Повторить",
+    "server_reconfigure": "Настроить подключение",
+    "server_reason_not_found": "Сервер не найден в локальной сети.",
+    "server_reason_found_unreachable": "Сервер найден, но прямое соединение заблокировано или недоступно.",
+    "server_reason_identity_changed": "Идентичность сервера изменилась. Автоподключение остановлено.",
+    "server_reason_incompatible": "Версии приложения и сервера несовместимы.",
+    "server_reason_discovery_unavailable": "Автоматический поиск серверов недоступен в этой сети.",
+    "server_reason_not_configured": "Сервер ещё не настроен."
   },
   "defaults": {
     "slides": [

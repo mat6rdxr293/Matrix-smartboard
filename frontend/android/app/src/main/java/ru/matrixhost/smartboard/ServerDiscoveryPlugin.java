@@ -138,7 +138,8 @@ public class ServerDiscoveryPlugin extends Plugin {
             if (!seen.add(dedupe)) return;
 
             JSObject server = new JSObject();
-            server.put("name", info.getServiceName());
+            String friendlyName = attr(attrs, "friendlyName");
+            server.put("name", friendlyName.isBlank() ? info.getServiceName() : friendlyName);
             server.put("serverId", serverId);
             server.put("serverUrl", url);
             server.put("host", hostValue);

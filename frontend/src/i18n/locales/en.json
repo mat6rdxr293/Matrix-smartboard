@@ -423,7 +423,26 @@
     "setup_error_app_outdated": "This app version is outdated. Update Matrix Smartboard.",
     "setup_error_tls_identity": "The server TLS identity does not match the expected identity",
     "setup_error_https_required": "Android requires a secure HTTPS connection",
-    "setup_error_invalid_address": "Invalid server address"
+    "setup_error_invalid_address": "Invalid server address",
+    "setup_server_name": "Server name",
+    "setup_server_name_placeholder": "Main server",
+    "setup_server_name_hint": "For example: Main server or Server #1",
+    "server_connecting_title": "Connecting to server",
+    "server_connecting_description": "Checking the saved address and local network",
+    "server_offline_title": "Server unavailable",
+    "server_offline_description": "Could not connect to the saved server.",
+    "server_check_saved_address": "Saved address",
+    "server_check_discovery": "Local network search",
+    "server_check_identity": "Server identity",
+    "server_check_backend": "Secure connection",
+    "server_retry": "Retry",
+    "server_reconfigure": "Configure connection",
+    "server_reason_not_found": "The server was not found on the local network.",
+    "server_reason_found_unreachable": "The server was found, but the direct connection is blocked or unavailable.",
+    "server_reason_identity_changed": "The server identity changed. Automatic connection was stopped.",
+    "server_reason_incompatible": "The app and server versions are incompatible.",
+    "server_reason_discovery_unavailable": "Automatic server discovery is unavailable on this network.",
+    "server_reason_not_configured": "The server has not been configured yet."
   },
   "defaults": {
     "slides": [

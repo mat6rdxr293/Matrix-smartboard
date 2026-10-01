@@ -34,12 +34,14 @@ def test_server_identity_survives_ip_change(tmp_path, monkeypatch):
 def test_status_exposes_versioned_server_identity(tmp_path, monkeypatch):
     identity = ServerIdentity(tmp_path / "identity")
     monkeypatch.setattr(main_module, "server_identity", identity)
+    monkeypatch.setattr(main_module, "get_server_name", lambda: "Главный сервер")
 
     with TestClient(main_module.app) as client:
         payload = client.get("/api/status").json()
 
     assert payload["ok"] is True
     assert payload["product"] == "matrix-smartboard"
+    assert payload["serverName"] == "Главный сервер"
     assert payload["apiVersion"] >= payload["minClientApiVersion"] >= 1
     assert payload["serverId"]
     assert payload["publicKeyPin"].startswith("sha256/")
