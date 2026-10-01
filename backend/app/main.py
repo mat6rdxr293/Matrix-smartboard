@@ -29,6 +29,7 @@ from .m365 import M365Client, M365Error
 from .settings import get_openai_key, get_server_name, is_ai_configured, is_ocr_configured, settings
 from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
+from .server_ops import router as server_ops_router
 from .school_store import SchoolStore
 from .server_identity import ServerIdentity
 from .lesson_generation_contract import GeneratedLesson, contract_payload, resolved_lesson_payload
@@ -36,7 +37,7 @@ from .lesson_generation_contract import GeneratedLesson, contract_payload, resol
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("practice-module")
 
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 API_VERSION = 2
 MIN_CLIENT_API_VERSION = 2
 server_identity = ServerIdentity(settings.server_identity_dir)
@@ -44,6 +45,7 @@ server_identity = ServerIdentity(settings.server_identity_dir)
 app = FastAPI()
 app.state.school_store = SchoolStore(settings.practice_db_path, session_days=settings.school_session_days)
 app.include_router(school_router)
+app.include_router(server_ops_router)
 
 app.add_middleware(
     CORSMiddleware,

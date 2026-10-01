@@ -154,6 +154,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [aiBoardContext, setAiBoardContext] = useState("");
   const [presenterMode, setPresenterMode] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; ai: boolean; ocr: boolean } | null>(null);
+  const [connectionState, setConnectionState] = useState<"online" | "offline" | "syncing">("online");
+  const [pendingOperations, setPendingOperations] = useState(0);
   const [tab, setTab] = useState<TabId>("tasks");
   useEffect(() => {
     if (tab !== "teacher") setTeacherUnlocked(false);
@@ -260,6 +262,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   };
 
   const persistBoardReplayQueue = (queue: BoardReplayOp[]) => {
+    setPendingOperations(queue.length);
     if (typeof window === "undefined") return;
     if (!queue.length) {
       window.localStorage.removeItem(boardReplayBackupKey);
@@ -277,6 +280,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (!boardReplayQueueRef.current.length) return Promise.resolve();
     const run = (async () => {
       try {
+        if (boardReplayQueueRef.current.length) setConnectionState("syncing");
         while (boardReplayQueueRef.current.length) {
           const chunk = boardReplayQueueRef.current.slice(0, 80);
           await appendBoardReplay(chunk, lesson.id);
@@ -289,7 +293,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           });
           persistBoardReplayQueue(boardReplayQueueRef.current);
         }
+        setConnectionState("online");
       } catch {
+        setConnectionState("offline");
         // offline/server unavailable: keep queue for next retry
       }
     })();
@@ -304,6 +310,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setBoardHistory((previous) => replayBoardOperations(previous, [op]));
     boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
+    if (connectionState === "online") setConnectionState("syncing");
     if (boardReplayLoadedRef.current && boardReplayQueueRef.current.length >= 24) {
       void flushBoardReplay();
     }
@@ -428,10 +435,19 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     const load = () =>
       getStatus()
         .then((res) => {
-          if (alive) setApiStatus(res);
+          if (!alive) return;
+          setApiStatus(res);
+          if (boardReplayQueueRef.current.length) {
+            setConnectionState("syncing");
+            void flushBoardReplay();
+          } else {
+            setConnectionState("online");
+          }
         })
         .catch(() => {
-          if (alive) setApiStatus({ ok: false, ai: false, ocr: false });
+          if (!alive) return;
+          setApiStatus({ ok: false, ai: false, ocr: false });
+          setConnectionState("offline");
         });
     load();
     const id = setInterval(load, ultraLite ? 30000 : 10000);
@@ -459,6 +475,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         }
       }
       boardReplayQueueRef.current = queue;
+      persistBoardReplayQueue(queue);
       try {
         const data = await loadBoardReplay(lesson.id);
         if (!alive) return;
@@ -492,6 +509,25 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     }, ultraLite ? 5000 : 2000);
     return () => window.clearInterval(id);
   }, [ultraLite]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setConnectionState(boardReplayQueueRef.current.length ? "syncing" : "online");
+      void getStatus()
+        .then((res) => {
+          setApiStatus(res);
+          return flushBoardReplay();
+        })
+        .catch(() => setConnectionState("offline"));
+    };
+    const handleOffline = () => setConnectionState("offline");
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     const onPageHide = () => {
@@ -709,8 +745,12 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         if (res.ok) {
           lastServerSnapshotRef.current = snapshot;
           setLastServerSaveAt(Date.now());
+          if (!boardReplayQueueRef.current.length) setConnectionState("online");
+        } else {
+          setConnectionState("offline");
         }
       } catch {
+        setConnectionState("offline");
         // сервер недоступен, остаемся на аварийном локальном бэкапе
       } finally {
         autoSavingRef.current = false;
@@ -1560,6 +1600,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           onCompleteLesson={() => void leaveLesson(onComplete)}
           onOpenHistory={() => void leaveLesson(onOpenHistory)}
           onChangeRoom={() => void leaveLesson(onChangeRoom)}
+          connectionState={connectionState}
+          pendingOperations={pendingOperations}
         />
         <div className="relative min-h-0 flex-1">
           {tab === "tasks" && (

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Settings2, SquareCheckBig, Sun, Tv } from "lucide-react";
+import { CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
+import ServerManagementPanel from "@/app/server/ServerManagementPanel";
 
 export type ApiStatus = {
   ok: boolean;
@@ -39,6 +40,8 @@ type TopBarProps = {
   onCompleteLesson: () => void;
   onOpenHistory: () => void;
   onChangeRoom: () => void;
+  connectionState?: "online" | "offline" | "syncing";
+  pendingOperations?: number;
 };
 
 function formatTime(seconds: number) {
@@ -75,10 +78,13 @@ export default function TopBar({
   onCompleteLesson,
   onOpenHistory,
   onChangeRoom,
+  connectionState = "online",
+  pendingOperations = 0,
 }: TopBarProps) {
   const { locale, setLocale, tl } = useI18n();
   const { theme, setTheme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [serverPanelOpen, setServerPanelOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
   const isSlidesTab = currentTab === "slides";
@@ -177,6 +183,22 @@ export default function TopBar({
             </Button>
             {officeManaged && <Badge className="bg-white/10">{m365BadgeLabel}</Badge>}
           </>
+        )}
+
+        {connectionState !== "online" && (
+          <div
+            className={cn(
+              "hidden h-9 items-center gap-1.5 rounded-xl border px-2.5 text-[10px] font-semibold sm:flex",
+              connectionState === "offline"
+                ? "border-red-500/20 bg-red-500/10 text-red-200"
+                : "border-amber-500/20 bg-amber-500/10 text-amber-100"
+            )}
+            title={pendingOperations > 0 ? tl("server_pending_ops", { count: pendingOperations }) : undefined}
+          >
+            {connectionState === "offline" ? <WifiOff size={13} /> : <CloudUpload size={13} className="animate-pulse" />}
+            <span>{connectionState === "offline" ? tl("server_connection_offline") : tl("server_connection_syncing")}</span>
+            {pendingOperations > 0 && <span className="tabular-nums opacity-70">{pendingOperations}</span>}
+          </div>
         )}
 
         <Button
@@ -362,6 +384,27 @@ export default function TopBar({
                     </span>
                   </div>
                 </div>
+                <div className="h-px bg-white/10" />
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[11px] font-medium text-frost/70 transition hover:bg-white/[0.035] hover:text-frost"
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setServerPanelOpen(true);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Server size={14} />
+                    {tl("server_panel_title")}
+                  </span>
+                  <span className="text-[10px] text-frost/35">
+                    {connectionState === "offline"
+                      ? tl("server_connection_offline")
+                      : connectionState === "syncing"
+                        ? tl("server_connection_syncing")
+                        : tl("server_connection_online")}
+                  </span>
+                </button>
               </div>
 
               <div>
@@ -390,6 +433,13 @@ export default function TopBar({
           )}
         </div>
       </div>
+
+      <ServerManagementPanel
+        open={serverPanelOpen}
+        onClose={() => setServerPanelOpen(false)}
+        connectionState={connectionState}
+        pendingOperations={pendingOperations}
+      />
     </div>
   );
 }
