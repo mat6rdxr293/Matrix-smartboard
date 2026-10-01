@@ -55,8 +55,10 @@ type ProvisionOptions = InspectHostOptions & {
   installLocalAi: boolean;
 };
 
+export type RemoteSshPlatform = "unix" | "windows";
+
 type SshProvisionerPlugin = {
-  inspectHost(options: InspectHostOptions): Promise<{ fingerprint: string }>;
+  inspectHost(options: InspectHostOptions): Promise<{ fingerprint: string; platform: RemoteSshPlatform }>;
   provisionServer(options: ProvisionOptions): Promise<{ serverUrl: string; exitCode: number }>;
   addListener(eventName: "provisionProgress", listener: (event: { line: string }) => void): Promise<PluginListenerHandle>;
 };

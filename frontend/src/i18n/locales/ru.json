@@ -378,13 +378,13 @@
     "teacher_presentation_actions": "Действия с презентацией",
     "teacher_home_summary": "{subject} · заданий: {tasks} · слайдов: {slides}",
     "setup_title": "Первая настройка",
-    "setup_description": "Сервер можно найти автоматически в локальной сети или установить на Debian/Ubuntu по SSH.",
+    "setup_description": "Сервер можно найти автоматически в локальной сети или установить по SSH на Windows, macOS или Debian/Ubuntu.",
     "setup_error_save_server_key": "Не удалось сохранить ключ сервера",
     "setup_error_pin_installed_server": "Не удалось закрепить TLS-ключ установленного сервера",
     "setup_find_server": "Найти сервер",
     "setup_find_server_description": "Matrix Smartboard попробует обнаружить сервер через mDNS. IP можно ввести вручную как резервный вариант.",
     "setup_ssh_setup": "Настроить сервер по SSH",
-    "setup_ssh_setup_description": "Приложение установит backend как системную службу и закрепит его TLS-идентичность.",
+    "setup_ssh_setup_description": "Приложение определит ОС, установит backend с автозапуском и закрепит его TLS-идентичность.",
     "setup_servers_in_network": "Серверы в сети",
     "setup_search_again": "Повторить поиск",
     "setup_search_up_to_15_seconds": "Поиск может занять до 15 секунд",
@@ -442,7 +442,8 @@
     "server_reason_identity_changed": "Идентичность сервера изменилась. Автоподключение остановлено.",
     "server_reason_incompatible": "Версии приложения и сервера несовместимы.",
     "server_reason_discovery_unavailable": "Автоматический поиск серверов недоступен в этой сети.",
-    "server_reason_not_configured": "Сервер ещё не настроен."
+    "server_reason_not_configured": "Сервер ещё не настроен.",
+    "setup_windows_admin_hint": "Для установки на Windows SSH-пользователь должен входить в локальную группу «Администраторы». Пароль sudo не нужен."
   },
   "defaults": {
     "slides": [

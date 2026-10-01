@@ -378,13 +378,13 @@
     "teacher_presentation_actions": "Презентация әрекеттері",
     "teacher_home_summary": "{subject} · {tasks} тапсырма · {slides} слайд",
     "setup_title": "Алғашқы баптау",
-    "setup_description": "Серверді жергілікті желіден автоматты түрде табуға немесе Debian/Ubuntu жүйесіне SSH арқылы орнатуға болады.",
+    "setup_description": "Серверді жергілікті желіден автоматты түрде табуға немесе Windows, macOS не Debian/Ubuntu жүйесіне SSH арқылы орнатуға болады.",
     "setup_error_save_server_key": "Сервер кілтін сақтау мүмкін болмады",
     "setup_error_pin_installed_server": "Орнатылған сервердің TLS кілтін бекіту мүмкін болмады",
     "setup_find_server": "Серверді табу",
     "setup_find_server_description": "Matrix Smartboard серверді mDNS арқылы іздейді. Қажет болса, IP мекенжайын қолмен енгізуге болады.",
     "setup_ssh_setup": "Серверді SSH арқылы баптау",
-    "setup_ssh_setup_description": "Қолданба backend-ті жүйелік қызмет ретінде орнатып, оның TLS сәйкестендіруін бекітеді.",
+    "setup_ssh_setup_description": "Қолданба операциялық жүйені анықтап, backend-ті автожүктеумен орнатады және TLS сәйкестендіруін бекітеді.",
     "setup_servers_in_network": "Желідегі серверлер",
     "setup_search_again": "Қайта іздеу",
     "setup_search_up_to_15_seconds": "Іздеу 15 секундқа дейін созылуы мүмкін",
@@ -442,7 +442,8 @@
     "server_reason_identity_changed": "Сервер сәйкестендіруі өзгерді. Автоматты қосылу тоқтатылды.",
     "server_reason_incompatible": "Қолданба мен сервер нұсқалары үйлеспейді.",
     "server_reason_discovery_unavailable": "Бұл желіде серверлерді автоматты іздеу қолжетімсіз.",
-    "server_reason_not_configured": "Сервер әлі бапталмаған."
+    "server_reason_not_configured": "Сервер әлі бапталмаған.",
+    "setup_windows_admin_hint": "Windows жүйесіне орнату үшін SSH пайдаланушысы жергілікті «Administrators» тобына кіруі керек. sudo құпиясөзі қажет емес."
   },
   "defaults": {
     "slides": [

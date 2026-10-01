@@ -22,7 +22,8 @@ import java.util.concurrent.Executors;
 
 @CapacitorPlugin(name = "SshProvisioner")
 public class SshProvisionerPlugin extends Plugin {
-    private static final String INSTALLER_URL = "https://raw.githubusercontent.com/mat6rdxr293/Matrix-smartboard/main/deploy/install-server.sh";
+    private static final String UNIX_INSTALLER_URL = "https://raw.githubusercontent.com/mat6rdxr293/Matrix-smartboard/main/deploy/install-server.sh";
+    private static final String WINDOWS_INSTALLER_URL = "https://raw.githubusercontent.com/mat6rdxr293/Matrix-smartboard/main/deploy/install-server.ps1";
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     @PluginMethod
@@ -32,8 +33,10 @@ public class SshProvisionerPlugin extends Plugin {
             try {
                 ConnectionOptions options = readConnection(call);
                 session = connect(options);
+                RemotePlatform platform = detectPlatform(session);
                 JSObject result = new JSObject();
                 result.put("fingerprint", fingerprint(session.getHostKey()));
+                result.put("platform", platform.id);
                 call.resolve(result);
             } catch (Exception error) {
                 call.reject(cleanMessage(error));
@@ -64,20 +67,25 @@ public class SshProvisionerPlugin extends Plugin {
                 }
 
                 String serverUrl = buildServerUrl(options.host, backendPort);
-                String body = "set -e; "
-                    + "export MATRIX_PORT=" + shellQuote(Integer.toString(backendPort)) + "; "
-                    + "export MATRIX_PUBLIC_BASE_URL=" + shellQuote(serverUrl) + "; "
-                    + "export MATRIX_INSTALL_OLLAMA=" + shellQuote(installLocalAi ? "1" : "0") + "; "
-                    + "export MATRIX_SERVER_NAME=" + shellQuote(serverName) + "; "
-                    + "tmp=/tmp/matrix-smartboard-install.sh; "
-                    + "if command -v curl >/dev/null 2>&1; then curl -fsSL " + shellQuote(INSTALLER_URL) + " -o \"$tmp\"; "
-                    + "elif command -v wget >/dev/null 2>&1; then wget -qO \"$tmp\" " + shellQuote(INSTALLER_URL) + "; "
-                    + "else apt-get update -y && apt-get install -y curl && curl -fsSL " + shellQuote(INSTALLER_URL) + " -o \"$tmp\"; fi; "
-                    + "chmod 700 \"$tmp\"; bash \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc";
-
-                String command = "root".equals(options.username)
-                    ? "sh -c " + shellQuote(body)
-                    : "sudo -S -p '' sh -c " + shellQuote(body);
+                RemotePlatform platform = detectPlatform(session);
+                String command;
+                if (platform == RemotePlatform.WINDOWS) {
+                    command = windowsInstallCommand(serverUrl, backendPort, installLocalAi, serverName);
+                } else {
+                    String body = "set -e; "
+                        + "export MATRIX_PORT=" + shellQuote(Integer.toString(backendPort)) + "; "
+                        + "export MATRIX_PUBLIC_BASE_URL=" + shellQuote(serverUrl) + "; "
+                        + "export MATRIX_INSTALL_OLLAMA=" + shellQuote(installLocalAi ? "1" : "0") + "; "
+                        + "export MATRIX_SERVER_NAME=" + shellQuote(serverName) + "; "
+                        + "tmp=/tmp/matrix-smartboard-install.sh; "
+                        + "if command -v curl >/dev/null 2>&1; then curl -fsSL " + shellQuote(UNIX_INSTALLER_URL) + " -o \"$tmp\"; "
+                        + "elif command -v wget >/dev/null 2>&1; then wget -qO \"$tmp\" " + shellQuote(UNIX_INSTALLER_URL) + "; "
+                        + "else apt-get update -y && apt-get install -y curl && curl -fsSL " + shellQuote(UNIX_INSTALLER_URL) + " -o \"$tmp\"; fi; "
+                        + "chmod 700 \"$tmp\"; bash \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc";
+                    command = "root".equals(options.username)
+                        ? "sh -c " + shellQuote(body)
+                        : "sudo -S -p '' sh -c " + shellQuote(body);
+                }
 
                 channel = (ChannelExec) session.openChannel("exec");
                 channel.setCommand(command + " 2>&1");
@@ -86,7 +94,7 @@ public class SshProvisionerPlugin extends Plugin {
                 OutputStream stdin = channel.getOutputStream();
                 channel.connect(15_000);
 
-                if (!"root".equals(options.username)) {
+                if (platform == RemotePlatform.UNIX && !"root".equals(options.username)) {
                     stdin.write(((sudoPassword == null ? "" : sudoPassword) + "\n").getBytes(StandardCharsets.UTF_8));
                     stdin.flush();
                 }
@@ -147,7 +155,7 @@ public class SshProvisionerPlugin extends Plugin {
         String password = requireString(call, "password");
         int port = readPort(call, "port", 22);
         if (!host.matches("^[A-Za-z0-9._:-]+$")) throw new IllegalArgumentException("Некорректный адрес SSH-сервера");
-        if (!username.matches("^[A-Za-z0-9._-]+$")) throw new IllegalArgumentException("Некорректное имя пользователя");
+        if (!username.matches("^[A-Za-z0-9._@\\\\-]+$")) throw new IllegalArgumentException("Некорректное имя пользователя");
         return new ConnectionOptions(host, port, username, password);
     }
 
@@ -177,6 +185,53 @@ public class SshProvisionerPlugin extends Plugin {
 
     private static String shellQuote(String value) {
         return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private static String powershellQuote(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private static String windowsInstallCommand(String serverUrl, int backendPort, boolean installLocalAi, String serverName) {
+        String script = "$ErrorActionPreference='Stop'; "
+            + "$env:MATRIX_PORT=" + powershellQuote(Integer.toString(backendPort)) + "; "
+            + "$env:MATRIX_PUBLIC_BASE_URL=" + powershellQuote(serverUrl) + "; "
+            + "$env:MATRIX_INSTALL_OLLAMA=" + powershellQuote(installLocalAi ? "1" : "0") + "; "
+            + "$env:MATRIX_SERVER_NAME=" + powershellQuote(serverName) + "; "
+            + "$tmp=Join-Path $env:TEMP 'matrix-smartboard-install.ps1'; "
+            + "Invoke-WebRequest -UseBasicParsing -Uri " + powershellQuote(WINDOWS_INSTALLER_URL) + " -OutFile $tmp; "
+            + "& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp; "
+            + "$rc=$LASTEXITCODE; Remove-Item -Force $tmp -ErrorAction SilentlyContinue; exit $rc";
+        String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_16LE), Base64.NO_WRAP);
+        return "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded;
+    }
+
+    private static RemotePlatform detectPlatform(Session session) throws Exception {
+        ChannelExec channel = null;
+        try {
+            channel = (ChannelExec) session.openChannel("exec");
+            channel.setCommand("powershell.exe -NoProfile -NonInteractive -Command \"exit 0\"");
+            channel.setInputStream(null);
+            channel.setErrStream(null);
+            channel.connect(5_000);
+            long deadline = System.currentTimeMillis() + 5_000;
+            while (!channel.isClosed() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+            if (!channel.isClosed()) throw new IllegalStateException("Не удалось определить ОС SSH-сервера");
+            return channel.getExitStatus() == 0 ? RemotePlatform.WINDOWS : RemotePlatform.UNIX;
+        } finally {
+            if (channel != null) channel.disconnect();
+        }
+    }
+
+    private enum RemotePlatform {
+        UNIX("unix"),
+        WINDOWS("windows");
+
+        final String id;
+        RemotePlatform(String id) {
+            this.id = id;
+        }
     }
 
     private static String cleanMessage(Exception error) {
