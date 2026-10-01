@@ -140,6 +140,7 @@ ENV
   mkdir -p "$APP_DIR/backend/app/data/media"
   chown -R "$run_user:$run_group" "$APP_DIR/backend/app/data" "$DATA_DIR"
 
+  mkdir -p /usr/local/sbin
   install -m 755 "$APP_DIR/deploy/update-server.sh" /usr/local/sbin/matrix-smartboard-update
   install -m 755 "$APP_DIR/deploy/server-control.sh" /usr/local/sbin/matrix-smartboard-service-control
   cat > /etc/matrix-smartboard-server.conf <<CONF
@@ -281,6 +282,7 @@ chown "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/backend/.env"
 mkdir -p "$APP_DIR/backend/app/data/media"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/backend/app/data" "$DATA_DIR"
 
+mkdir -p /usr/local/sbin
 install -m 755 "$APP_DIR/deploy/update-server.sh" /usr/local/sbin/matrix-smartboard-update
 install -m 755 "$APP_DIR/deploy/server-control.sh" /usr/local/sbin/matrix-smartboard-service-control
 cat > /etc/matrix-smartboard-server.conf <<CONF
