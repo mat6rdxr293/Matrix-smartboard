@@ -62,6 +62,7 @@ install_macos() {
   "$python_bin" -m venv "$APP_DIR/.venv"
   "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip wheel
   "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+  git -C "$APP_DIR" rev-parse HEAD > "$APP_DIR/.matrix-version"
 
   local ai_base_url="" ocr_base_url=""
   local ai_model="qwen2.5:7b" ocr_model="qwen2.5vl:3b"
@@ -138,6 +139,20 @@ ENV
   chown "$run_user:$run_group" "$APP_DIR/backend/.env"
   mkdir -p "$APP_DIR/backend/app/data/media"
   chown -R "$run_user:$run_group" "$APP_DIR/backend/app/data" "$DATA_DIR"
+
+  install -m 755 "$APP_DIR/deploy/update-server.sh" /usr/local/sbin/matrix-smartboard-update
+  install -m 755 "$APP_DIR/deploy/server-control.sh" /usr/local/sbin/matrix-smartboard-service-control
+  cat > /etc/matrix-smartboard-server.conf <<CONF
+MATRIX_PORT=$PORT
+CONF
+  chmod 644 /etc/matrix-smartboard-server.conf
+  mkdir -p /etc/sudoers.d
+  cat > /etc/sudoers.d/matrix-smartboard <<SUDOERS
+$run_user ALL=(root) NOPASSWD: /usr/local/sbin/matrix-smartboard-update
+$run_user ALL=(root) NOPASSWD: /usr/local/sbin/matrix-smartboard-service-control restart-ollama
+SUDOERS
+  chmod 440 /etc/sudoers.d/matrix-smartboard
+  visudo -cf /etc/sudoers.d/matrix-smartboard >/dev/null
 
   echo "[6/7] Configuring launchd"
   cat > /Library/LaunchDaemons/ru.matrixhost.smartboard.plist <<PLIST
@@ -219,6 +234,7 @@ echo "[4/7] Installing Python backend"
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip wheel
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+git -C "$APP_DIR" rev-parse HEAD > "$APP_DIR/.matrix-version"
 
 AI_BASE_URL=""
 OCR_BASE_URL=""
@@ -259,11 +275,25 @@ SERVER_IDENTITY_DIR=$DATA_DIR/identity
 ENV
 SERVER_NAME_ESCAPED="$(printf '%s' "$SERVER_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 printf 'SERVER_NAME="%s"\n' "$SERVER_NAME_ESCAPED" >> "$APP_DIR/backend/.env"
-chmod 640 "$APP_DIR/backend/.env"
-chown root:"$SERVICE_USER" "$APP_DIR/backend/.env"
+chmod 600 "$APP_DIR/backend/.env"
+chown "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/backend/.env"
 
 mkdir -p "$APP_DIR/backend/app/data/media"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/backend/app/data" "$DATA_DIR"
+
+install -m 755 "$APP_DIR/deploy/update-server.sh" /usr/local/sbin/matrix-smartboard-update
+install -m 755 "$APP_DIR/deploy/server-control.sh" /usr/local/sbin/matrix-smartboard-service-control
+cat > /etc/matrix-smartboard-server.conf <<CONF
+MATRIX_PORT=$PORT
+CONF
+chmod 644 /etc/matrix-smartboard-server.conf
+mkdir -p /etc/sudoers.d
+cat > /etc/sudoers.d/matrix-smartboard <<SUDOERS
+$SERVICE_USER ALL=(root) NOPASSWD: /usr/local/sbin/matrix-smartboard-update
+$SERVICE_USER ALL=(root) NOPASSWD: /usr/local/sbin/matrix-smartboard-service-control restart-ollama
+SUDOERS
+chmod 440 /etc/sudoers.d/matrix-smartboard
+visudo -cf /etc/sudoers.d/matrix-smartboard >/dev/null
 
 echo "[6/7] Configuring systemd"
 cat > /etc/systemd/system/matrix-smartboard.service <<UNIT

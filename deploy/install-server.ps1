@@ -175,7 +175,7 @@ if ($InstallOllama) {
     $OllamaAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$RunOllama`""
     $StartupTrigger = New-ScheduledTaskTrigger -AtStartup
     $SystemPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 5)
     Register-ScheduledTask -TaskName $OllamaTaskName -Action $OllamaAction -Trigger $StartupTrigger -Principal $SystemPrincipal -Settings $TaskSettings -Force | Out-Null
     Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
@@ -243,8 +243,21 @@ Set-Location "$($BackendDir.Replace('"','""'))"
 $BackendAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$RunBackend`""
 $BackendTrigger = New-ScheduledTaskTrigger -AtStartup
 $BackendPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$BackendSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+$BackendSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 5)
 Register-ScheduledTask -TaskName $BackendTaskName -Action $BackendAction -Trigger $BackendTrigger -Principal $BackendPrincipal -Settings $BackendSettings -Force | Out-Null
+
+@{
+    port = $Port
+    installedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+} | ConvertTo-Json | Set-Content -Path (Join-Path $RootDir "server.json") -Encoding UTF8
+
+try {
+    $headers = @{ "User-Agent" = "Matrix-Smartboard-Installer"; "Accept" = "application/vnd.github+json" }
+    $latest = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "https://api.github.com/repos/mat6rdxr293/Matrix-smartboard/commits/main" -TimeoutSec 10
+    if ($latest.sha) {
+        Set-Content -Path (Join-Path $AppDir ".matrix-version") -Value ([string]$latest.sha) -Encoding ASCII
+    }
+} catch {}
 
 Get-NetFirewallRule -DisplayName "Matrix Smartboard HTTPS" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName "Matrix Smartboard HTTPS" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Any | Out-Null
