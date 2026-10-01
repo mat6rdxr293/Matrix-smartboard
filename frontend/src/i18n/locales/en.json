@@ -378,13 +378,13 @@
     "teacher_presentation_actions": "Presentation actions",
     "teacher_home_summary": "{subject} · {tasks} tasks · {slides} slides",
     "setup_title": "First setup",
-    "setup_description": "Find a server automatically on the local network or install one on Debian/Ubuntu over SSH.",
+    "setup_description": "Find a server automatically on the local network or install one over SSH on Windows, macOS, or Debian/Ubuntu.",
     "setup_error_save_server_key": "Could not save the server key",
     "setup_error_pin_installed_server": "Could not pin the installed server TLS key",
     "setup_find_server": "Find server",
     "setup_find_server_description": "Matrix Smartboard will look for a server over mDNS. You can enter an IP address manually as a fallback.",
     "setup_ssh_setup": "Set up server over SSH",
-    "setup_ssh_setup_description": "The app will install the backend as a system service and pin its TLS identity.",
+    "setup_ssh_setup_description": "The app detects the OS, installs the backend with automatic startup, and pins its TLS identity.",
     "setup_servers_in_network": "Servers on the network",
     "setup_search_again": "Search again",
     "setup_search_up_to_15_seconds": "Search may take up to 15 seconds",
@@ -442,7 +442,8 @@
     "server_reason_identity_changed": "The server identity changed. Automatic connection was stopped.",
     "server_reason_incompatible": "The app and server versions are incompatible.",
     "server_reason_discovery_unavailable": "Automatic server discovery is unavailable on this network.",
-    "server_reason_not_configured": "The server has not been configured yet."
+    "server_reason_not_configured": "The server has not been configured yet.",
+    "setup_windows_admin_hint": "For Windows setup, the SSH account must be a member of the local Administrators group. No sudo password is required."
   },
   "defaults": {
     "slides": [

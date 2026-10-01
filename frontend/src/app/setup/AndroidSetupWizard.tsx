@@ -12,6 +12,7 @@ import {
   testServer,
   trustServerIdentity,
   type DiscoveredServer,
+  type RemoteSshPlatform,
   type ServerStatus,
 } from "./androidSetup";
 
@@ -50,6 +51,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   const [serverName, setServerName] = useState("");
   const [installLocalAi, setInstallLocalAi] = useState(true);
   const [fingerprint, setFingerprint] = useState("");
+  const [remotePlatform, setRemotePlatform] = useState<RemoteSshPlatform | null>(null);
   const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -190,7 +192,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   };
 
   const inspectSsh = async () => {
-    setBusy(true); resetError(); setFingerprint(""); setFingerprintConfirmed(false);
+    setBusy(true); resetError(); setFingerprint(""); setRemotePlatform(null); setFingerprintConfirmed(false);
     try {
       const result = await SshProvisioner.inspectHost({
         host: host.trim(),
@@ -199,6 +201,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
         password,
       });
       setFingerprint(result.fingerprint);
+      setRemotePlatform(result.platform);
     } catch (next) {
       setError(localizedError(next));
     } finally {
@@ -418,14 +421,14 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
                     <div className="mt-2 text-[11px] text-frost/35">{tl("setup_server_name_hint")}</div>
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_120px]">
-                    <Field label={tl("setup_ip_or_domain")}><Input placeholder="192.168.1.10" value={host} onChange={(e) => { setHost(e.target.value); setFingerprint(""); resetError(); }} /></Field>
+                    <Field label={tl("setup_ip_or_domain")}><Input placeholder="192.168.1.10" value={host} onChange={(e) => { setHost(e.target.value); setFingerprint(""); setRemotePlatform(null); resetError(); }} /></Field>
                     <Field label={tl("setup_ssh_port")}><Input inputMode="numeric" value={sshPort} onChange={(e) => setSshPort(e.target.value)} /></Field>
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <Field label={tl("setup_username")}><Input value={username} onChange={(e) => { setUsername(e.target.value); setFingerprint(""); }} /></Field>
-                    <Field label={tl("setup_ssh_password")}><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setFingerprint(""); }} /></Field>
+                    <Field label={tl("setup_username")}><Input value={username} onChange={(e) => { setUsername(e.target.value); setFingerprint(""); setRemotePlatform(null); }} /></Field>
+                    <Field label={tl("setup_ssh_password")}><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setFingerprint(""); setRemotePlatform(null); }} /></Field>
                   </div>
-                  {username !== "root" && <div className="mt-4"><Field label={tl("setup_sudo_password")}><Input type="password" value={sudoPassword} onChange={(e) => setSudoPassword(e.target.value)} placeholder={tl("setup_sudo_password_hint")} /></Field></div>}
+                  {remotePlatform === "unix" && username !== "root" && <div className="mt-4"><Field label={tl("setup_sudo_password")}><Input type="password" value={sudoPassword} onChange={(e) => setSudoPassword(e.target.value)} placeholder={tl("setup_sudo_password_hint")} /></Field></div>}
                   <div className="mt-4"><Field label={tl("setup_https_port")}><Input inputMode="numeric" value={backendPort} onChange={(e) => setBackendPort(e.target.value)} /></Field></div>
 
                   <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-4">
@@ -439,8 +442,20 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
                     </Button>
                   ) : (
                     <div className="mt-6 rounded-xl border border-accent/20 bg-accent/[0.06] p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />{tl("setup_ssh_host_key")}</div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />{tl("setup_ssh_host_key")}</div>
+                        {remotePlatform && (
+                          <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-frost/45">
+                            {remotePlatform === "windows" ? "Windows" : "macOS / Linux"}
+                          </span>
+                        )}
+                      </div>
                       <code className="mt-3 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{fingerprint}</code>
+                      {remotePlatform === "windows" && (
+                        <div className="mt-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2 text-[11px] leading-5 text-frost/45">
+                          {tl("setup_windows_admin_hint")}
+                        </div>
+                      )}
                       <label className="mt-3 flex items-center gap-2 text-xs text-frost/60"><input type="checkbox" checked={fingerprintConfirmed} onChange={(e) => setFingerprintConfirmed(e.target.checked)} />{tl("setup_confirm_ssh_server")}</label>
                       <Button variant="accent" className="mt-4 h-11 w-full" disabled={busy || !fingerprintConfirmed} onClick={() => void provision()}>
                         {busy ? <><LoaderCircle size={16} className="mr-2 animate-spin" />{tl("setup_installing")}</> : tl("setup_install_matrix_smartboard")}
