@@ -51,7 +51,7 @@ public class SshProvisionerPlugin extends Plugin {
             try {
                 ConnectionOptions options = readConnection(call);
                 String expectedFingerprint = requireString(call, "expectedFingerprint");
-                int backendPort = readPort(call, "backendPort", 8001);
+                int backendPort = readPort(call, "backendPort", 8443);
                 boolean installLocalAi = Boolean.TRUE.equals(call.getBoolean("installLocalAi", true));
                 String sudoPassword = call.getString("sudoPassword", options.password);
 
@@ -169,7 +169,7 @@ public class SshProvisionerPlugin extends Plugin {
 
     private static String buildServerUrl(String host, int port) {
         String value = host.contains(":") && !host.startsWith("[") ? "[" + host + "]" : host;
-        return "http://" + value + ":" + port;
+        return "https://" + value + ":" + port;
     }
 
     private static String shellQuote(String value) {

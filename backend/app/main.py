@@ -30,10 +30,16 @@ from .settings import get_openai_key, is_ai_configured, is_ocr_configured, setti
 from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
 from .school_store import SchoolStore
+from .server_identity import ServerIdentity
 from .lesson_generation_contract import GeneratedLesson, contract_payload, resolved_lesson_payload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("practice-module")
+
+SERVER_VERSION = "0.2.0"
+API_VERSION = 2
+MIN_CLIENT_API_VERSION = 2
+server_identity = ServerIdentity(settings.server_identity_dir)
 
 app = FastAPI()
 app.state.school_store = SchoolStore(settings.practice_db_path, session_days=settings.school_session_days)
@@ -106,6 +112,7 @@ def _subject_ai_history_file(subject: Optional[str]) -> Path:
 
 @app.on_event("startup")
 async def _startup_log() -> None:
+    server_identity.ensure()
     has_key = bool(get_openai_key())
     logger.info("AI backend configured: %s", "yes" if is_ai_configured() else "no")
     logger.info("OPENAI_API_KEY loaded: %s", "yes" if has_key else "no")
@@ -528,12 +535,41 @@ async def auth_verify(token: str) -> dict:
     return {"ok": True, "role": role}
 
 
-@app.get("/api/status")
-async def status() -> dict:
+def _status_payload(request: Request | None = None) -> dict:
+    server_identity.ensure()
     return {
         "ok": True,
+        "product": "matrix-smartboard",
+        "serverVersion": SERVER_VERSION,
+        "apiVersion": API_VERSION,
+        "minClientApiVersion": MIN_CLIENT_API_VERSION,
+        "serverId": server_identity.server_id(),
+        "publicKeyPin": server_identity.public_key_pin(),
+        "tls": bool(request is not None and request.url.scheme == "https"),
         "ai": is_ai_configured(),
         "ocr": is_ocr_configured(),
+        "features": {
+            "ai": is_ai_configured(),
+            "ocr": is_ocr_configured(),
+            "lessons": True,
+            "boardOperations": True,
+            "pptx": True,
+            "mdns": True,
+        },
+    }
+
+
+@app.get("/api/status")
+async def status(request: Request = None) -> dict:
+    return _status_payload(request)
+
+
+@app.get("/api/discovery")
+async def discovery_status(request: Request) -> dict:
+    payload = _status_payload(request)
+    return {
+        key: payload[key]
+        for key in ("ok", "product", "serverVersion", "apiVersion", "minClientApiVersion", "serverId", "publicKeyPin", "tls")
     }
 
 

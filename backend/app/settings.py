@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         validation_alias="PRACTICE_DB_PATH",
     )
     school_session_days: int = Field(default=30, validation_alias="SCHOOL_SESSION_DAYS")
+    server_identity_dir: Path = Field(
+        default=BASE_DIR / "app" / "data" / "server-identity",
+        validation_alias="SERVER_IDENTITY_DIR",
+    )
 
     # В .env.example эти строки стоят пустыми. Pydantic читает их как "",
     # и для пути к базе это давало Path("") → «unable to open database file» на старте,
@@ -54,6 +58,13 @@ class Settings(BaseSettings):
     def _empty_db_path_means_default(cls, value):
         if value is None or (isinstance(value, str) and not value.strip()):
             return BASE_DIR / "app" / "data" / "practice.db"
+        return value
+
+    @field_validator("server_identity_dir", mode="before")
+    @classmethod
+    def _empty_identity_path_means_default(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return BASE_DIR / "app" / "data" / "server-identity"
         return value
 
     @field_validator("ai_base_url", "ocr_base_url", mode="before")
