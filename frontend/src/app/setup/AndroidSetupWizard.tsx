@@ -82,7 +82,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
     if (mode !== "language") return;
     const timer = window.setInterval(() => {
       setLanguagePromptIndex((current) => (current + 1) % LANGUAGE_PROMPTS.length);
-    }, 1800);
+    }, 3500);
     return () => window.clearInterval(timer);
   }, [mode]);
 
