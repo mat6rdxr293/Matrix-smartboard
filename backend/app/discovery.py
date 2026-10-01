@@ -16,6 +16,7 @@ SERVICE_TYPE = "_matrixboard._tcp.local."
 @dataclass(frozen=True)
 class DiscoveryMetadata:
     server_id: str
+    server_name: str
     port: int
     tls: bool
     api_version: int
@@ -69,6 +70,7 @@ class MdnsAdvertiser:
         properties = {
             b"product": b"matrix-smartboard",
             b"serverId": self.metadata.server_id.encode(),
+            b"friendlyName": self.metadata.server_name.encode("utf-8"),
             b"apiVersion": str(self.metadata.api_version).encode(),
             b"serverVersion": self.metadata.server_version.encode(),
             b"tls": b"1" if self.metadata.tls else b"0",

@@ -97,7 +97,7 @@ async function recoverTrustedServerUrl(): Promise<string | null> {
 
   recoveryInFlight = (async () => {
     try {
-      const found = await NativeDiscovery.discover({ timeoutMs: 2200 });
+      const found = await NativeDiscovery.discover({ timeoutMs: 5000 });
       for (const candidate of found.servers ?? []) {
         if (candidate.serverId !== serverId || !candidate.serverUrl?.startsWith("https://")) continue;
         try {

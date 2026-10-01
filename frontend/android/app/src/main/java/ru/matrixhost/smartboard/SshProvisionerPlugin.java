@@ -53,6 +53,8 @@ public class SshProvisionerPlugin extends Plugin {
                 String expectedFingerprint = requireString(call, "expectedFingerprint");
                 int backendPort = readPort(call, "backendPort", 8443);
                 boolean installLocalAi = Boolean.TRUE.equals(call.getBoolean("installLocalAi", true));
+                String serverName = call.getString("serverName", "").replaceAll("[\\r\\n\\t]+", " ").trim();
+                if (serverName.length() > 48) serverName = serverName.substring(0, 48);
                 String sudoPassword = call.getString("sudoPassword", options.password);
 
                 session = connect(options);
@@ -66,6 +68,7 @@ public class SshProvisionerPlugin extends Plugin {
                     + "export MATRIX_PORT=" + shellQuote(Integer.toString(backendPort)) + "; "
                     + "export MATRIX_PUBLIC_BASE_URL=" + shellQuote(serverUrl) + "; "
                     + "export MATRIX_INSTALL_OLLAMA=" + shellQuote(installLocalAi ? "1" : "0") + "; "
+                    + "export MATRIX_SERVER_NAME=" + shellQuote(serverName) + "; "
                     + "tmp=/tmp/matrix-smartboard-install.sh; "
                     + "if command -v curl >/dev/null 2>&1; then curl -fsSL " + shellQuote(INSTALLER_URL) + " -o \"$tmp\"; "
                     + "elif command -v wget >/dev/null 2>&1; then wget -qO \"$tmp\" " + shellQuote(INSTALLER_URL) + "; "

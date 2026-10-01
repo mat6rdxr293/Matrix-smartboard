@@ -7,16 +7,19 @@ import ResumeLessonModal from "./session/ResumeLessonModal";
 import RoomSetupScreen from "./session/RoomSetupScreen";
 import SubjectPicker from "./session/SubjectPicker";
 import BoardProfilePicker from "./session/BoardProfilePicker";
-import { sessionApi } from "./session/api";
+import { ApiError, sessionApi } from "./session/api";
 import type { CurriculumSubjectId, Grade } from "./session/curriculum";
 import type { Lesson, LessonSummary, Room, School } from "./session/types";
 import { inferBoardProfileForSubject, isBoardProfile, type BoardProfile } from "@/app/board/boardProfiles";
 import { useI18n } from "@/i18n";
 import { AnimatePresence, motion } from "framer-motion";
 import AndroidSetupWizard from "./setup/AndroidSetupWizard";
-import { needsAndroidSetup } from "./setup/androidSetup";
+import ServerConnectionGate from "./setup/ServerConnectionGate";
+import { currentServerName, needsAndroidSetup, reconnectSavedServer, type SavedServerConnectionResult } from "./setup/androidSetup";
+import { isNativeApp } from "@/lib/apiClient";
 
 type View = "loading" | "auth" | "roomSetup" | "grade" | "subject" | "boardProfile" | "history" | "lesson";
+type AndroidConnectionPhase = "setup" | "repair" | "checking" | "offline" | "ready";
 
 const roomBindingKey = (schoolId: string) => `practice.room.${schoolId}`;
 const boardProfileKey = (lessonId: string) => `practice.lesson.${lessonId}.boardProfile`;
@@ -37,7 +40,11 @@ export default function AppRoot() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entryDirection, setEntryDirection] = useState<1 | -1>(1);
-  const [androidSetupReady, setAndroidSetupReady] = useState(() => !needsAndroidSetup());
+  const [androidConnectionPhase, setAndroidConnectionPhase] = useState<AndroidConnectionPhase>(() => {
+    if (needsAndroidSetup()) return "setup";
+    return isNativeApp() ? "checking" : "ready";
+  });
+  const [serverConnectionResult, setServerConnectionResult] = useState<SavedServerConnectionResult | null>(null);
 
   useEffect(() => {
     const preventBrowserZoomWheel = (event: WheelEvent) => {
@@ -84,7 +91,44 @@ export default function AppRoot() {
   }, []);
 
   useEffect(() => {
-    if (!androidSetupReady) return;
+    if (androidConnectionPhase !== "checking") return;
+    if (!isNativeApp()) {
+      setAndroidConnectionPhase("ready");
+      return;
+    }
+
+    let cancelled = false;
+    setServerConnectionResult(null);
+    setView("loading");
+
+    void reconnectSavedServer(6500)
+      .then((result) => {
+        if (cancelled) return;
+        setServerConnectionResult(result);
+        setAndroidConnectionPhase(result.ok ? "ready" : "offline");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setServerConnectionResult({
+          ok: false,
+          reason: "discovery-unavailable",
+          serverName: currentServerName() || "Matrix Smartboard",
+          serverUrl: "",
+          checks: {
+            savedAddress: "failed",
+            discovery: "failed",
+            identity: "skipped",
+            backend: "skipped",
+          },
+        });
+        setAndroidConnectionPhase("offline");
+      });
+
+    return () => { cancelled = true; };
+  }, [androidConnectionPhase]);
+
+  useEffect(() => {
+    if (androidConnectionPhase !== "ready") return;
     let cancelled = false;
     const boot = async () => {
       try {
@@ -101,13 +145,18 @@ export default function AppRoot() {
           return;
         }
         await enterRoom(currentSchool, savedRoom);
-      } catch {
-        if (!cancelled) setView("auth");
+      } catch (nextError) {
+        if (cancelled) return;
+        if (isNativeApp() && !(nextError instanceof ApiError)) {
+          setAndroidConnectionPhase("checking");
+          return;
+        }
+        setView("auth");
       }
     };
     void boot();
     return () => { cancelled = true; };
-  }, [enterRoom, androidSetupReady]);
+  }, [enterRoom, androidConnectionPhase]);
 
   const authenticate = async (mode: "login" | "register", schoolName: string, password: string) => {
     setBusy(true);
@@ -197,8 +246,24 @@ export default function AppRoot() {
     finally { setBusy(false); }
   };
 
-  if (!androidSetupReady) {
-    return <AndroidSetupWizard onDone={() => setAndroidSetupReady(true)} />;
+  if (androidConnectionPhase === "setup") {
+    return <AndroidSetupWizard onDone={() => setAndroidConnectionPhase("checking")} />;
+  }
+
+  if (androidConnectionPhase === "repair") {
+    return <AndroidSetupWizard skipLanguage onDone={() => setAndroidConnectionPhase("checking")} />;
+  }
+
+  if (androidConnectionPhase === "checking" || androidConnectionPhase === "offline") {
+    return (
+      <ServerConnectionGate
+        checking={androidConnectionPhase === "checking"}
+        serverName={currentServerName()}
+        result={serverConnectionResult}
+        onRetry={() => setAndroidConnectionPhase("checking")}
+        onConfigure={() => setAndroidConnectionPhase("repair")}
+      />
+    );
   }
 
   if (view === "loading") {

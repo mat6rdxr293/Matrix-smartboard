@@ -8,6 +8,8 @@ SERVICE_USER="matrix-smartboard"
 PORT="${MATRIX_PORT:-8443}"
 PUBLIC_BASE_URL="${MATRIX_PUBLIC_BASE_URL:-}"
 INSTALL_OLLAMA="${MATRIX_INSTALL_OLLAMA:-1}"
+SERVER_NAME="${MATRIX_SERVER_NAME:-}"
+SERVER_NAME="$(printf '%s' "$SERVER_NAME" | tr '\r\n\t' '   ')"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "ERROR: installer must run as root (use sudo)" >&2
@@ -88,6 +90,8 @@ PRACTICE_DB_PATH=$DATA_DIR/practice.db
 SCHOOL_SESSION_DAYS=30
 SERVER_IDENTITY_DIR=$DATA_DIR/identity
 ENV
+SERVER_NAME_ESCAPED="$(printf '%s' "$SERVER_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+printf 'SERVER_NAME="%s"\n' "$SERVER_NAME_ESCAPED" >> "$APP_DIR/backend/.env"
 chmod 640 "$APP_DIR/backend/.env"
 chown root:"$SERVICE_USER" "$APP_DIR/backend/.env"
 

@@ -423,7 +423,26 @@
     "setup_error_app_outdated": "Қолданбаның бұл нұсқасы ескірген. Matrix Smartboard жаңартыңыз.",
     "setup_error_tls_identity": "Сервердің TLS сәйкестендіруі күтілген мәнмен сәйкес емес",
     "setup_error_https_required": "Android үшін қорғалған HTTPS қосылымы қажет",
-    "setup_error_invalid_address": "Сервер мекенжайы қате"
+    "setup_error_invalid_address": "Сервер мекенжайы қате",
+    "setup_server_name": "Сервер атауы",
+    "setup_server_name_placeholder": "Негізгі сервер",
+    "setup_server_name_hint": "Мысалы: Негізгі сервер немесе Сервер №1",
+    "server_connecting_title": "Серверге қосылу",
+    "server_connecting_description": "Сақталған мекенжай мен жергілікті желіні тексеріп жатырмыз",
+    "server_offline_title": "Сервер қолжетімсіз",
+    "server_offline_description": "Сақталған серверге қосылу мүмкін болмады.",
+    "server_check_saved_address": "Сақталған мекенжай",
+    "server_check_discovery": "Жергілікті желіден іздеу",
+    "server_check_identity": "Сервер сәйкестендіруі",
+    "server_check_backend": "Қорғалған қосылым",
+    "server_retry": "Қайталау",
+    "server_reconfigure": "Қосылымды баптау",
+    "server_reason_not_found": "Сервер жергілікті желіден табылмады.",
+    "server_reason_found_unreachable": "Сервер табылды, бірақ тікелей қосылым бұғатталған немесе қолжетімсіз.",
+    "server_reason_identity_changed": "Сервер сәйкестендіруі өзгерді. Автоматты қосылу тоқтатылды.",
+    "server_reason_incompatible": "Қолданба мен сервер нұсқалары үйлеспейді.",
+    "server_reason_discovery_unavailable": "Бұл желіде серверлерді автоматты іздеу қолжетімсіз.",
+    "server_reason_not_configured": "Сервер әлі бапталмаған."
   },
   "defaults": {
     "slides": [
