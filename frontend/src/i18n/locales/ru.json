@@ -443,7 +443,8 @@
     "server_reason_incompatible": "Версии приложения и сервера несовместимы.",
     "server_reason_discovery_unavailable": "Автоматический поиск серверов недоступен в этой сети.",
     "server_reason_not_configured": "Сервер ещё не настроен.",
-    "setup_windows_admin_hint": "Для установки на Windows SSH-пользователь должен входить в локальную группу «Администраторы». Пароль sudo не нужен."
+    "setup_windows_admin_hint": "Для установки на Windows SSH-пользователь должен входить в локальную группу «Администраторы». Пароль sudo не нужен.",
+    "setup_error_ssh_refused": "SSH недоступен. Включите «Удалённый вход» (Remote Login) и проверьте порт 22."
   },
   "defaults": {
     "slides": [
