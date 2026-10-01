@@ -63,6 +63,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
 
   const localizedError = (next: unknown) => {
     const raw = next instanceof Error ? next.message : String(next);
+    if (/SSH: соединение отклонено|ECONNREFUSED|Connection refused|failed to connect/i.test(raw)) return tl("setup_error_ssh_refused");
     if (/Failed to fetch|NetworkError|Load failed|сервер не отвечает/i.test(raw)) return tl("setup_error_connection");
     if (/неверный пользователь или пароль|Auth fail/i.test(raw)) return tl("setup_error_ssh_auth");
     if (/fingerprint изменился/i.test(raw)) return tl("setup_error_ssh_fingerprint_changed");

@@ -443,7 +443,8 @@
     "server_reason_incompatible": "Қолданба мен сервер нұсқалары үйлеспейді.",
     "server_reason_discovery_unavailable": "Бұл желіде серверлерді автоматты іздеу қолжетімсіз.",
     "server_reason_not_configured": "Сервер әлі бапталмаған.",
-    "setup_windows_admin_hint": "Windows жүйесіне орнату үшін SSH пайдаланушысы жергілікті «Administrators» тобына кіруі керек. sudo құпиясөзі қажет емес."
+    "setup_windows_admin_hint": "Windows жүйесіне орнату үшін SSH пайдаланушысы жергілікті «Administrators» тобына кіруі керек. sudo құпиясөзі қажет емес.",
+    "setup_error_ssh_refused": "SSH қолжетімсіз. «Remote Login» қызметін қосып, 22-портты тексеріңіз."
   },
   "defaults": {
     "slides": [

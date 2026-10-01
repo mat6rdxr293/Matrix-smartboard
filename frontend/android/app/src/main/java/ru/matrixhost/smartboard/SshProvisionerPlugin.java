@@ -238,6 +238,9 @@ public class SshProvisionerPlugin extends Plugin {
         String message = error.getMessage();
         if (message == null || message.trim().isEmpty()) return error.getClass().getSimpleName();
         if (message.contains("Auth fail")) return "SSH: неверный пользователь или пароль";
+        if (message.contains("ECONNREFUSED") || message.contains("Connection refused") || message.contains("failed to connect")) {
+            return "SSH: соединение отклонено";
+        }
         if (message.contains("timeout") || message.contains("timed out")) return "SSH: сервер не отвечает";
         return message;
     }
