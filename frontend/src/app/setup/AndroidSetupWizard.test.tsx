@@ -14,6 +14,7 @@ describe("Android first setup language", () => {
       </I18nProvider>,
     );
 
+    expect(screen.getByText("Выберите язык")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Русский/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Қазақша/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /English/ })).toBeInTheDocument();

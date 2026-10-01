@@ -3,6 +3,7 @@ import { ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n, type LocaleCode } from "@/i18n";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   discoverServers,
   finishAndroidSetup,
@@ -29,6 +30,8 @@ const SETUP_LANGUAGES: Array<{ code: LocaleCode; label: string; badge: string }>
   { code: "en", label: "English", badge: "EN" },
 ];
 
+const LANGUAGE_PROMPTS = ["Выберите язык", "Тілді таңдаңыз", "Choose language"] as const;
+
 export default function AndroidSetupWizard({ onDone }: Props) {
   const { setLocale, tl } = useI18n();
   const [mode, setMode] = useState<Mode>("language");
@@ -50,6 +53,7 @@ export default function AndroidSetupWizard({ onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  const [languagePromptIndex, setLanguagePromptIndex] = useState(0);
   const scanRunRef = useRef(0);
 
   const resetError = () => setError(null);
@@ -73,6 +77,14 @@ export default function AndroidSetupWizard({ onDone }: Props) {
     setMode("choose");
     resetError();
   };
+
+  useEffect(() => {
+    if (mode !== "language") return;
+    const timer = window.setInterval(() => {
+      setLanguagePromptIndex((current) => (current + 1) % LANGUAGE_PROMPTS.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [mode]);
 
   const scanServers = async () => {
     const runId = ++scanRunRef.current;
@@ -236,7 +248,20 @@ export default function AndroidSetupWizard({ onDone }: Props) {
         <div className="border-b border-white/10 px-7 py-6 sm:px-9">
           <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-accent">Matrix Smartboard</div>
           {mode === "language" ? (
-            <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">Язык · Тіл · Language</h1>
+            <h1 className="mt-2 min-h-[2.6rem] overflow-hidden text-3xl font-bold tracking-[-0.03em] text-frost">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={LANGUAGE_PROMPTS[languagePromptIndex]}
+                  className="block"
+                  initial={{ opacity: 0, y: 7 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -7 }}
+                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  {LANGUAGE_PROMPTS[languagePromptIndex]}
+                </motion.span>
+              </AnimatePresence>
+            </h1>
           ) : (
             <>
               <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">{tl("setup_title")}</h1>
