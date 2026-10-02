@@ -45,6 +45,12 @@ export default function AppRoot() {
     return isNativeApp() ? "checking" : "ready";
   });
   const [serverConnectionResult, setServerConnectionResult] = useState<SavedServerConnectionResult | null>(null);
+  const nativeNavigation = isNativeApp();
+
+  useEffect(() => {
+    document.body.classList.toggle("native-app", nativeNavigation);
+    return () => document.body.classList.remove("native-app");
+  }, [nativeNavigation]);
 
   useEffect(() => {
     const preventBrowserZoomWheel = (event: WheelEvent) => {
@@ -282,12 +288,20 @@ export default function AppRoot() {
     return <LessonWorkspace school={school} room={room} lesson={lesson} boardProfile={boardProfile} onComplete={() => void finishLesson()} onOpenHistory={() => void openHistory()} onChangeRoom={() => { setLesson(null); setView("roomSetup"); }} />;
   }
 
-  const entryTransition = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
-  const entryVariants = {
-    enter: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? 56 : -56 }),
-    center: { opacity: 1, x: 0 },
-    exit: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? -56 : 56 }),
-  };
+  const entryTransition = nativeNavigation
+    ? { duration: 0.1, ease: "easeOut" as const }
+    : { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
+  const entryVariants = nativeNavigation
+    ? {
+        enter: () => ({ opacity: 0 }),
+        center: { opacity: 1 },
+        exit: () => ({ opacity: 1, transition: { duration: 0 } }),
+      }
+    : {
+        enter: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? 32 : -32 }),
+        center: { opacity: 1, x: 0 },
+        exit: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? -32 : 32 }),
+      };
 
   return (
     <div className="relative h-full overflow-hidden">
@@ -300,7 +314,7 @@ export default function AppRoot() {
             className="h-full"
             initial="enter"
             animate="center"
-            exit="exit"
+            exit={nativeNavigation ? undefined : "exit"}
             transition={entryTransition}
           >
             <BoardProfilePicker
@@ -316,7 +330,7 @@ export default function AppRoot() {
             className="h-full"
             initial="enter"
             animate="center"
-            exit="exit"
+            exit={nativeNavigation ? undefined : "exit"}
             transition={entryTransition}
           >
             <SubjectPicker
@@ -341,7 +355,7 @@ export default function AppRoot() {
             className="h-full"
             initial="enter"
             animate="center"
-            exit="exit"
+            exit={nativeNavigation ? undefined : "exit"}
             transition={entryTransition}
           >
             <GradePicker

@@ -1,6 +1,5 @@
 import { BookOpenText, ChevronRight, Shapes, Sigma } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
 import { BOARD_PROFILES, type BoardProfile } from "@/app/board/boardProfiles";
 import { useI18n } from "@/i18n";
 
@@ -54,21 +53,8 @@ export default function BoardProfilePicker({ onSelectProfile, onBack }: BoardPro
             <div className="mb-4 flex items-center justify-center gap-2.5 text-[11px] font-semibold text-frost/35">
               <span className="h-1.5 w-12 rounded-full bg-accent" />
               <span className="h-1.5 w-12 rounded-full bg-accent" />
-              <span className="h-1.5 w-12 overflow-hidden rounded-full bg-white/10">
-                <motion.span
-                  className="block h-full w-full origin-left rounded-full bg-accent"
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
-                />
-              </span>
-              <motion.span
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.24, delay: 0.2 }}
-              >
-                3 / 3
-              </motion.span>
+              <span className="h-1.5 w-12 rounded-full bg-accent" />
+              <span>3 / 3</span>
             </div>
 
             <h1 className="text-4xl font-bold tracking-[-0.035em] text-frost sm:text-5xl">{tl("board_profile_choose")}</h1>

@@ -1,6 +1,5 @@
 import { ChevronRight, Expand, History, LogOut, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { GRADES, type Grade } from "./curriculum";
@@ -99,23 +98,10 @@ export default function GradePicker({ school, room, onSelectGrade, onOpenHistory
         <div className="mx-auto mt-10 w-full max-w-[1320px] lg:mt-14">
           <div className="mx-auto max-w-[720px] text-center">
             <div className="mb-4 flex items-center justify-center gap-2.5 text-[11px] font-semibold text-frost/35">
-              <span className="h-1.5 w-12 overflow-hidden rounded-full bg-white/10">
-                <motion.span
-                  className="block h-full w-full origin-left rounded-full bg-accent"
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
-                />
-              </span>
+              <span className="h-1.5 w-12 rounded-full bg-accent" />
               <span className="h-1.5 w-12 rounded-full bg-white/10" />
               <span className="h-1.5 w-12 rounded-full bg-white/10" />
-              <motion.span
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.24, delay: 0.18 }}
-              >
-                1 / 3
-              </motion.span>
+              <span>1 / 3</span>
             </div>
 
             <h1 className="text-4xl font-bold tracking-[-0.035em] text-frost sm:text-5xl">{tl("home_choose_grade")}</h1>

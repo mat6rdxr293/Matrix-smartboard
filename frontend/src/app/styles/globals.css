@@ -446,6 +446,40 @@ body.lite-mode .thinking-shimmer {
   box-shadow: 0 14px 34px rgb(0 0 0 / 0.09);
 }
 
+/* Android/interactive-board WebView: keep navigation visually clean without
+   repainting large gradients, shadows and hover transforms on every screen change. */
+body.native-app .session-shell {
+  background: var(--app-background);
+}
+
+body.native-app .session-topbar,
+body.native-app .session-grade-card,
+body.native-app .session-subject-card,
+body.native-app .session-board-profile {
+  box-shadow: none;
+}
+
+body.native-app .session-grade-card,
+body.native-app .session-subject-card,
+body.native-app .session-board-profile {
+  transition:
+    border-color 100ms ease,
+    background-color 100ms ease;
+}
+
+body.native-app .session-grade-card:hover,
+body.native-app .session-subject-card:hover,
+body.native-app .session-board-profile:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+body.native-app .session-grade-card svg,
+body.native-app .session-subject-card svg,
+body.native-app .session-board-profile svg {
+  transition-duration: 100ms;
+}
+
 .board-profile-grid {
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
