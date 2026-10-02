@@ -1,6 +1,5 @@
 import { ArrowLeft, BookOpen, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
 import { useI18n, type LocaleCode } from "@/i18n";
 import { getSubjectsForGrade, type CurriculumSubjectId, type Grade } from "./curriculum";
 
@@ -35,22 +34,9 @@ export default function SubjectPicker({ grade, locale, loading = false, error, o
           <div className="mx-auto max-w-[720px] text-center">
             <div className="mb-4 flex items-center justify-center gap-2.5 text-[11px] font-semibold text-frost/35">
               <span className="h-1.5 w-12 rounded-full bg-accent" />
-              <span className="h-1.5 w-12 overflow-hidden rounded-full bg-white/10">
-                <motion.span
-                  className="block h-full w-full origin-left rounded-full bg-accent"
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
-                />
-              </span>
+              <span className="h-1.5 w-12 rounded-full bg-accent" />
               <span className="h-1.5 w-12 rounded-full bg-white/10" />
-              <motion.span
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.24, delay: 0.2 }}
-              >
-                2 / 3
-              </motion.span>
+              <span>2 / 3</span>
             </div>
 
             <h1 className="text-4xl font-bold tracking-[-0.035em] text-frost sm:text-5xl">{tl("subject_choose")}</h1>

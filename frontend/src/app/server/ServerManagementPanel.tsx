@@ -253,27 +253,27 @@ export default function ServerManagementPanel({
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-6" onMouseDown={(event) => {
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-2 backdrop-blur-sm sm:p-4" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <div className="glass flex max-h-[94vh] w-full max-w-[980px] flex-col overflow-hidden rounded-[26px] border border-white/10 shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
+      <div className="glass flex max-h-[92vh] w-full max-w-[820px] flex-col overflow-hidden rounded-[20px] border border-white/10 shadow-[0_18px_48px_rgba(0,0,0,0.32)]">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <ServerCog size={19} className="text-accent" />
-              <h2 className="truncate text-lg font-semibold">{tl("server_panel_title")}</h2>
+              <ServerCog size={17} className="text-accent" />
+              <h2 className="truncate text-base font-semibold">{tl("server_panel_title")}</h2>
             </div>
-            <div className="mt-1 truncate text-xs text-frost/45">
+            <div className="mt-0.5 truncate text-[11px] text-frost/45">
               {status?.serverName || tl("server_loading")} · {currentServerUrl()}
             </div>
           </div>
-          <Button variant="ghost" className="h-9 w-9 shrink-0 rounded-xl p-0" onClick={onClose} aria-label={tl("close")}>
-            <X size={18} />
+          <Button variant="ghost" className="h-8 w-8 shrink-0 rounded-lg p-0" onClick={onClose} aria-label={tl("close")}>
+            <X size={16} />
           </Button>
         </div>
 
-        <div className="scrollbar-hide overflow-y-auto p-5 sm:p-6">
-          <div className="grid gap-3 md:grid-cols-4">
+        <div className="scrollbar-hide overflow-y-auto p-4 sm:p-4">
+          <div className="grid gap-2.5 md:grid-cols-4">
             <StatCard
               icon={<Activity size={16} />}
               label={tl("server_connection")}
@@ -301,8 +301,8 @@ export default function ServerManagementPanel({
             />
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1.08fr_.92fr]">
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1.08fr_.92fr]">
+            <section className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold">{tl("server_info")}</div>
@@ -322,7 +322,7 @@ export default function ServerManagementPanel({
                 </Button>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3">
+              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-[11px] sm:grid-cols-3">
                 <Info label={tl("server_platform")} value={status?.platform || "—"} />
                 <Info label={tl("server_uptime")} value={status ? formatUptime(status.uptimeSeconds, locale) : "—"} />
                 <Info label="Python" value={status?.python || "—"} />
@@ -331,7 +331,7 @@ export default function ServerManagementPanel({
                 <Info label="GPU" value={status?.gpu?.name || "—"} />
               </div>
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <ServiceRow
                   label="Matrix backend"
                   online={!!status?.services.backend}
@@ -359,7 +359,7 @@ export default function ServerManagementPanel({
               </div>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+            <section className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
               <div className="text-sm font-semibold">{tl("server_update")}</div>
               <div className="mt-2 text-xs leading-5 text-frost/45">
                 {status?.update.updateAvailable
@@ -368,13 +368,13 @@ export default function ServerManagementPanel({
                     ? tl("server_up_to_date")
                     : tl("server_update_unknown")}
               </div>
-              <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/10 px-3 py-2 text-[11px] text-frost/45">
+              <div className="mt-2.5 rounded-lg border border-white/[0.07] bg-black/10 px-2.5 py-2 text-[10px] leading-4 text-frost/45">
                 {tl("server_rollback_note")}
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"
-                  className="h-10"
+                  className="h-9 text-xs"
                   disabled={busyAction === "refresh-update"}
                   onClick={() => void runAction(
                     "refresh-update",
@@ -386,7 +386,7 @@ export default function ServerManagementPanel({
                 </Button>
                 <Button
                   variant="accent"
-                  className="h-10"
+                  className="h-9 text-xs"
                   disabled={!status?.update.canUpdate || updating || busyAction === "update" || !status?.update.updateAvailable}
                   onClick={() => void startUpdate()}
                 >
@@ -400,7 +400,7 @@ export default function ServerManagementPanel({
             </section>
           </div>
 
-          <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+          <section className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold">{tl("server_models")}</div>
@@ -413,7 +413,7 @@ export default function ServerManagementPanel({
                 const job = jobs.jobs[model];
                 const pulling = job?.state === "running";
                 return (
-                  <div key={model} className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-black/10 px-3 py-3">
+                  <div key={model} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2.5">
                     <div className="min-w-0">
                       <div className="truncate font-mono text-xs text-frost/75">{model}</div>
                       <div className="mt-1 text-[10px] text-frost/35">
@@ -445,13 +445,13 @@ export default function ServerManagementPanel({
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+          <section className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
             <div className="text-sm font-semibold">{tl("server_backup_restore")}</div>
             <div className="mt-1 text-[11px] leading-5 text-frost/40">{tl("server_backup_description")}</div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <Button
                 variant="outline"
-                className="h-10"
+                className="h-9 text-xs"
                 disabled={busyAction === "backup"}
                 onClick={() => void downloadBackup()}
               >
@@ -460,7 +460,7 @@ export default function ServerManagementPanel({
               </Button>
               <Button
                 variant="outline"
-                className="h-10"
+                className="h-9 text-xs"
                 disabled={busyAction === "restore"}
                 onClick={() => restoreInputRef.current?.click()}
               >
@@ -480,7 +480,7 @@ export default function ServerManagementPanel({
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+          <section className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
             <details
               onToggle={(event) => {
                 if ((event.currentTarget as HTMLDetailsElement).open) void refreshLogs();
@@ -549,12 +549,12 @@ function StatCard({
   good?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-3.5">
+    <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-frost/35">
         <span className={good ? "text-emerald-500" : "text-frost/45"}>{icon}</span>
         {label}
       </div>
-      <div className="mt-2 text-lg font-semibold text-frost">{value}</div>
+      <div className="mt-1.5 text-base font-semibold text-frost">{value}</div>
       {detail && <div className="mt-1 truncate text-[10px] text-frost/35">{detail}</div>}
     </div>
   );

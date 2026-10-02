@@ -23,7 +23,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={cn(
-          "rounded-lg font-semibold transition",
+          "inline-flex items-center justify-center whitespace-nowrap rounded-lg font-semibold transition [&>svg]:shrink-0",
           variants[variant],
           sizes[size],
           className
