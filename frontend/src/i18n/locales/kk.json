@@ -495,7 +495,22 @@
     "server_restore_done": "Резервтік көшірме қалпына келтірілді",
     "server_restore_done_restart": "Резервтік көшірме қалпына келтірілді. Identity мен баптауларды қолдану үшін backend-ті қайта іске қосыңыз.",
     "server_detailed_logs": "Толық журнал",
-    "server_no_logs": "Журнал әзірге бос."
+    "server_no_logs": "Журнал әзірге бос.",
+    "math_visual_mode": "Көркем көрініс",
+    "math_edit_latex": "LaTeX өңдеу",
+    "math_invalid_latex_hint": "LaTeX ішінде қате бар, сондықтан кәдімгі мәтіндік редактор ашылды.",
+    "math_visual_formula": "Танылған формула",
+    "math_click_part_hint": "Шекке, дәрежеге, индекске, бөлшекке немесе түбірге басып, тек сол бөлікті өзгертіңіз.",
+    "math_formula_preview_hint": "Формула LaTeX түрінде көрсетілді. Күрделі түзету үшін бастапқы кодты ашыңыз.",
+    "math_edit_integral_lower": "Интегралдың төменгі шегі",
+    "math_edit_integral_upper": "Интегралдың жоғарғы шегі",
+    "math_edit_exponent": "Дәреже",
+    "math_edit_subscript": "Индекс",
+    "math_edit_numerator": "Алым",
+    "math_edit_denominator": "Бөлім",
+    "math_edit_radicand": "Түбір астындағы өрнек",
+    "math_edit_root_index": "Түбір көрсеткіші",
+    "math_apply": "Қолдану"
   },
   "defaults": {
     "slides": [

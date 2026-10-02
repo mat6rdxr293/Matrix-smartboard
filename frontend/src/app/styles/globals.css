@@ -501,3 +501,26 @@ body.native-app .session-board-profile svg {
     min-height: 104px;
   }
 }
+
+.structured-math-preview .katex-display {
+  margin: 0.2rem 0;
+  text-align: left;
+}
+
+.structured-math-preview [data-edit-id] {
+  cursor: pointer;
+  border-radius: 5px;
+  transition:
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.structured-math-preview [data-edit-id]:hover,
+.structured-math-preview [data-edit-id]:active {
+  background: rgb(var(--color-accent) / 0.12);
+  box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.16);
+}
+
+body.native-app .structured-math-preview [data-edit-id] {
+  transition: none;
+}

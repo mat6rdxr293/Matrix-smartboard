@@ -495,7 +495,22 @@
     "server_restore_done": "Резервная копия восстановлена",
     "server_restore_done_restart": "Резервная копия восстановлена. Перезапустите backend, чтобы применить identity и настройки.",
     "server_detailed_logs": "Подробный журнал",
-    "server_no_logs": "Журнал пока пуст."
+    "server_no_logs": "Журнал пока пуст.",
+    "math_visual_mode": "Красивый вид",
+    "math_edit_latex": "Редактировать LaTeX",
+    "math_invalid_latex_hint": "LaTeX сейчас содержит ошибку, поэтому открыт обычный текстовый редактор.",
+    "math_visual_formula": "Распознанная формула",
+    "math_click_part_hint": "Нажмите на предел, степень, индекс, дробь или корень, чтобы изменить только его.",
+    "math_formula_preview_hint": "Формула отображается в LaTeX. Для сложной правки откройте исходный код.",
+    "math_edit_integral_lower": "Нижний предел интеграла",
+    "math_edit_integral_upper": "Верхний предел интеграла",
+    "math_edit_exponent": "Степень",
+    "math_edit_subscript": "Индекс",
+    "math_edit_numerator": "Числитель",
+    "math_edit_denominator": "Знаменатель",
+    "math_edit_radicand": "Подкоренное выражение",
+    "math_edit_root_index": "Показатель корня",
+    "math_apply": "Применить"
   },
   "defaults": {
     "slides": [

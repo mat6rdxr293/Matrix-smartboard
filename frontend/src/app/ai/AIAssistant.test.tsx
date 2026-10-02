@@ -40,6 +40,8 @@ describe("AIAssistant board recognition flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /подсказка|кеңес/i }));
 
     await waitFor(() => expect(recognize).toHaveBeenCalledTimes(1));
+    await screen.findByTestId("structured-math-editor");
+    fireEvent.click(screen.getByRole("button", { name: /редактировать latex|latex өңдеу/i }));
     const recognized = await screen.findByRole("textbox", { name: /распознано с доски|тақтадан танылған/i });
     expect(recognized).toHaveValue("x^2 = 4\nx = 2");
     expect(submit).not.toHaveBeenCalled();
@@ -64,6 +66,8 @@ describe("AIAssistant board recognition flow", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /проверить решение|шешімді тексеру/i }));
+    await screen.findByTestId("structured-math-editor");
+    fireEvent.click(screen.getByRole("button", { name: /редактировать latex|latex өңдеу/i }));
     const recognized = await screen.findByRole("textbox", { name: /распознано с доски|тақтадан танылған/i });
     fireEvent.change(recognized, { target: { value: "x = 5" } });
     fireEvent.click(screen.getByRole("button", { name: /верно, отправить|дұрыс, жіберу/i }));
@@ -88,9 +92,11 @@ describe("AIAssistant board recognition flow", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /полное решение|толық шешім/i }));
-    await screen.findByDisplayValue("x=2");
+    await screen.findByTestId("structured-math-editor");
     fireEvent.click(screen.getByRole("button", { name: /нет, распознать снова|жоқ, қайта тану/i }));
 
+    await waitFor(() => expect(recognize).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: /редактировать latex|latex өңдеу/i }));
     await screen.findByDisplayValue("x=4");
     expect(recognize).toHaveBeenCalledTimes(2);
   });
