@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import MathText from "@/components/MathText";
+import StructuredMathEditor from "./StructuredMathEditor";
 import { useI18n } from "@/i18n";
 import { MessageSquareText } from "lucide-react";
 import type { AiMode } from "./api";
@@ -40,6 +41,7 @@ export default function AIAssistant({
   const [recognitionError, setRecognitionError] = useState<string | null>(null);
   const [pendingMode, setPendingMode] = useState<AiMode | null>(null);
   const [recognizedText, setRecognizedText] = useState("");
+  const [recognitionRevision, setRecognitionRevision] = useState(0);
   const historyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -73,6 +75,7 @@ export default function AIAssistant({
       if (!text) throw new Error(tl("ocr_not_available"));
       setPendingMode(mode);
       setRecognizedText(text);
+      setRecognitionRevision((current) => current + 1);
     } catch (error) {
       setRecognitionError(error instanceof Error ? error.message : tl("ocr_not_available"));
     } finally {
@@ -182,12 +185,7 @@ export default function AIAssistant({
         <div className="mt-3 border-t border-white/10 pt-3">
           <div className="text-[12px] font-medium text-frost/70">{tl("recognized_board_title")}</div>
           <div className="mt-1 text-[11px] text-frost/45">{tl("recognized_board_question")}</div>
-          <textarea
-            value={recognizedText}
-            onChange={(event) => setRecognizedText(event.target.value)}
-            className="mt-2 min-h-[112px] w-full resize-none rounded-xl border border-white/10 bg-white/[0.025] p-3 text-[12px] leading-5 text-frost outline-none focus:border-accent/55"
-            aria-label={tl("recognized_board_title")}
-          />
+          <StructuredMathEditor key={recognitionRevision} value={recognizedText} onChange={setRecognizedText} />
           <div className="mt-2 grid grid-cols-[1fr_1.25fr_auto] gap-2">
             <Button data-testid="ocr-confirm" size="sm" onClick={confirmRecognition} disabled={!recognizedText.trim() || loading || recognizing}>
               {tl("recognized_correct")}

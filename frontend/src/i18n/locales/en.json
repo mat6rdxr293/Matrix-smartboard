@@ -495,7 +495,22 @@
     "server_restore_done": "Backup restored",
     "server_restore_done_restart": "Backup restored. Restart the backend to apply the identity and settings.",
     "server_detailed_logs": "Detailed logs",
-    "server_no_logs": "No log entries yet."
+    "server_no_logs": "No log entries yet.",
+    "math_visual_mode": "Visual view",
+    "math_edit_latex": "Edit LaTeX",
+    "math_invalid_latex_hint": "The LaTeX currently contains an error, so the plain text editor is shown.",
+    "math_visual_formula": "Recognized formula",
+    "math_click_part_hint": "Tap a limit, exponent, subscript, fraction, or root to edit only that part.",
+    "math_formula_preview_hint": "The formula is rendered as LaTeX. Open source editing for advanced changes.",
+    "math_edit_integral_lower": "Lower integral limit",
+    "math_edit_integral_upper": "Upper integral limit",
+    "math_edit_exponent": "Exponent",
+    "math_edit_subscript": "Subscript",
+    "math_edit_numerator": "Numerator",
+    "math_edit_denominator": "Denominator",
+    "math_edit_radicand": "Radicand",
+    "math_edit_root_index": "Root index",
+    "math_apply": "Apply"
   },
   "defaults": {
     "slides": [
