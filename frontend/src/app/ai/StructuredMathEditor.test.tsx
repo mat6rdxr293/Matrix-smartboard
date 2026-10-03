@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n";
 import StructuredMathEditor from "./StructuredMathEditor";
@@ -21,52 +22,115 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("StructuredMathEditor", () => {
-  it("renders valid LaTeX with KaTeX and lets the user edit the upper integral limit directly", () => {
-    const onChange = vi.fn();
+function Harness({
+  initial,
+  onValue,
+}: {
+  initial: string;
+  onValue?: (value: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <I18nProvider>
+      <StructuredMathEditor
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          onValue?.(next);
+        }}
+      />
+    </I18nProvider>
+  );
+}
+
+describe("StructuredMathEditor visual keyboard", () => {
+  it("edits an integral upper limit without opening the system keyboard", () => {
+    const values: string[] = [];
     const formula = String.raw`\int_{1}^{\sqrt{3}} (x^3 + \frac{2x^2}{3})\,dx`;
+    const { container } = render(<Harness initial={formula} onValue={(value) => values.push(value)} />);
 
-    const { container } = render(
-      <I18nProvider>
-        <StructuredMathEditor value={formula} onChange={onChange} />
-      </I18nProvider>,
-    );
-
+    expect(screen.getByTestId("math-keyboard")).toBeInTheDocument();
     expect(container.querySelector(".katex")).toBeInTheDocument();
+
     const upper = container.querySelector<HTMLElement>('[data-edit-id="edit-1"]');
     expect(upper).toBeInTheDocument();
-
     fireEvent.click(upper!);
-    const input = screen.getByRole("textbox", { name: /верхний предел интеграла|интегралдың жоғарғы шегі/i });
-    expect(input).toHaveValue(String.raw`\sqrt{3}`);
-    fireEvent.change(input, { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: /применить|қолдану/i }));
 
-    expect(onChange).toHaveBeenCalledWith(
-      String.raw`\int_{1}^{4} (x^3 + \frac{2x^2}{3})\,dx`,
-    );
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText(/верхний предел интеграла/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /очистить/i }));
+    fireEvent.click(screen.getByRole("button", { name: "4" }));
+
+    expect(values.at(-1)).toBe(String.raw`\int_{1}^{4} (x^3 + \frac{2x^2}{3})\,dx`);
   });
 
-  it("turns a bare exponent into a braced exponent when editing it", () => {
-    const onChange = vi.fn();
-    const { container } = render(
-      <I18nProvider>
-        <StructuredMathEditor value="x^3 + 1" onChange={onChange} />
-      </I18nProvider>,
-    );
+  it("creates a power template and immediately edits the exponent", () => {
+    const values: string[] = [];
+    render(<Harness initial="x" onValue={(value) => values.push(value)} />);
 
-    const exponent = container.querySelector<HTMLElement>('[data-edit-id="edit-0"]');
-    expect(exponent).toBeInTheDocument();
-    fireEvent.click(exponent!);
+    fireEvent.click(screen.getByRole("button", { name: /структуры/i }));
+    fireEvent.click(screen.getByRole("button", { name: "xⁿ" }));
+    expect(screen.getByText(/^Степень$/i)).toBeInTheDocument();
 
-    const input = screen.getByRole("textbox", { name: /степень|дәреже/i });
-    fireEvent.change(input, { target: { value: "12" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /основная/i }));
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
 
-    expect(onChange).toHaveBeenCalledWith("x^{12} + 1");
+    expect(values.at(-1)).toBe("x^{2}");
   });
 
-  it("falls back to raw text editing when LaTeX is invalid", () => {
+  it("builds a bounded integral by moving through structural fields", () => {
+    const values: string[] = [];
+    render(<Harness initial="" onValue={(value) => values.push(value)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /структуры/i }));
+    fireEvent.click(screen.getByRole("button", { name: "∫ₐᵇ" }));
+    expect(screen.getByText(/нижний предел интеграла/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /основная/i }));
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: /далее/i }));
+    expect(screen.getByText(/верхний предел интеграла/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "3" }));
+    fireEvent.click(screen.getByRole("button", { name: /далее/i }));
+    expect(screen.getByText(/подынтегральное выражение/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "x" }));
+    expect(values.at(-1)).toBe(String.raw`\int_{1}^{3} {x}\,dx`);
+  });
+
+  it("builds a fraction by switching from numerator to denominator", () => {
+    const values: string[] = [];
+    render(<Harness initial="" onValue={(value) => values.push(value)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /структуры/i }));
+    fireEvent.click(screen.getByRole("button", { name: "a⁄b" }));
+    expect(screen.getByText(/числитель/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /основная/i }));
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: /далее/i }));
+    expect(screen.getByText(/знаменатель/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    expect(values.at(-1)).toBe(String.raw`\frac{1}{2}`);
+  });
+
+  it("creates a function with an editable argument", () => {
+    const values: string[] = [];
+    render(<Harness initial="" onValue={(value) => values.push(value)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /функции/i }));
+    fireEvent.click(screen.getByRole("button", { name: "sin" }));
+    expect(screen.getByText(/аргумент функции/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /основная/i }));
+    fireEvent.click(screen.getByRole("button", { name: "x" }));
+    expect(values.at(-1)).toBe(String.raw`\sin\left({x}\right)`);
+  });
+
+  it("keeps raw LaTeX only as an advanced fallback", () => {
     const onChange = vi.fn();
     render(
       <I18nProvider>

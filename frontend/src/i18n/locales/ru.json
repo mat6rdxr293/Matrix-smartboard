@@ -510,7 +510,25 @@
     "math_edit_denominator": "Знаменатель",
     "math_edit_radicand": "Подкоренное выражение",
     "math_edit_root_index": "Показатель корня",
-    "math_apply": "Применить"
+    "math_apply": "Применить",
+    "math_keyboard_editing": "Редактируется",
+    "math_keyboard_basic": "Основная",
+    "math_keyboard_structures": "Структуры",
+    "math_keyboard_functions": "Функции",
+    "math_keyboard_previous": "Предыдущее поле",
+    "math_keyboard_next": "Следующее поле",
+    "math_keyboard_delete": "Удалить",
+    "math_keyboard_clear": "Очистить",
+    "math_keyboard_next_field": "Далее",
+    "math_keyboard_tap_hint": "Нажмите на предел, степень, дробь, корень или другой элемент, чтобы изменить именно его.",
+    "math_keyboard_formula_hint": "Ввод с клавиатуры добавляется в формулу и сразу отображается красиво.",
+    "math_edit_integrand": "Подынтегральное выражение",
+    "math_edit_function_argument": "Аргумент функции",
+    "math_edit_whole_formula": "Вся формула",
+    "math_advanced": "Дополнительно",
+    "math_keyboard_symbols": "Символы",
+    "math_edit_group_argument": "Выражение внутри",
+    "math_edit_summand": "Выражение суммы"
   },
   "defaults": {
     "slides": [

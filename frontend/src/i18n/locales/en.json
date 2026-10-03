@@ -510,7 +510,25 @@
     "math_edit_denominator": "Denominator",
     "math_edit_radicand": "Radicand",
     "math_edit_root_index": "Root index",
-    "math_apply": "Apply"
+    "math_apply": "Apply",
+    "math_keyboard_editing": "Editing",
+    "math_keyboard_basic": "Basic",
+    "math_keyboard_structures": "Structures",
+    "math_keyboard_functions": "Functions",
+    "math_keyboard_previous": "Previous field",
+    "math_keyboard_next": "Next field",
+    "math_keyboard_delete": "Delete",
+    "math_keyboard_clear": "Clear",
+    "math_keyboard_next_field": "Next",
+    "math_keyboard_tap_hint": "Tap a limit, exponent, fraction, root, or another element to edit only that part.",
+    "math_keyboard_formula_hint": "Keyboard input is added to the formula and rendered immediately.",
+    "math_edit_integrand": "Integrand",
+    "math_edit_function_argument": "Function argument",
+    "math_edit_whole_formula": "Whole formula",
+    "math_advanced": "Advanced",
+    "math_keyboard_symbols": "Symbols",
+    "math_edit_group_argument": "Inner expression",
+    "math_edit_summand": "Summand"
   },
   "defaults": {
     "slides": [
