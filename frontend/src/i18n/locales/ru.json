@@ -528,7 +528,13 @@
     "math_advanced": "Дополнительно",
     "math_keyboard_symbols": "Символы",
     "math_edit_group_argument": "Выражение внутри",
-    "math_edit_summand": "Выражение суммы"
+    "math_edit_summand": "Выражение суммы",
+    "room_new": "Новый кабинет",
+    "room_modal_title": "Новый кабинет",
+    "room_modal_description": "Введите номер или короткое название кабинета.",
+    "room_create": "Создать",
+    "room_empty_title": "Кабинетов пока нет",
+    "room_empty_description": "Создайте первый кабинет, чтобы привязать к нему эту доску."
   },
   "defaults": {
     "slides": [

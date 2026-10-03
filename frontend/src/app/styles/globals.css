@@ -663,3 +663,95 @@ body.native-app .android-setup-panel {
   flex-direction: column;
   justify-content: center;
 }
+
+.room-setup-shell {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: clamp(2rem, 4vh, 3.5rem) clamp(1.5rem, 4vw, 4rem);
+}
+
+.room-setup-content {
+  max-width: none;
+}
+
+.room-setup-header {
+  width: 100%;
+}
+
+.room-setup-divider {
+  height: 1px;
+  width: 100%;
+  margin: 1.75rem 0 1.5rem;
+  background: rgb(255 255 255 / 0.08);
+}
+
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 360px));
+  gap: 0.9rem;
+  align-items: stretch;
+}
+
+.room-card {
+  display: flex;
+  min-height: 106px;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 1rem;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    transform 120ms ease;
+}
+
+.room-card:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--color-accent) / 0.45);
+  background: rgb(var(--color-overlay) / 0.04);
+}
+
+.room-empty {
+  display: flex;
+  width: min(520px, 100%);
+  align-items: center;
+  gap: 1rem;
+  border: 1px dashed rgb(255 255 255 / 0.1);
+  border-radius: 1rem;
+  padding: 1.2rem;
+  color: rgb(var(--color-frost) / 0.7);
+}
+
+body.native-app .room-card {
+  box-shadow: none;
+  transition:
+    border-color 80ms ease,
+    background-color 80ms ease;
+}
+
+body.native-app .room-card:hover {
+  transform: none;
+}
+
+@media (max-width: 760px) {
+  .room-setup-shell {
+    padding: 1.25rem;
+  }
+
+  .room-setup-header {
+    flex-direction: column;
+  }
+
+  .room-setup-header > div:last-child {
+    width: 100%;
+  }
+
+  .room-setup-header > div:last-child > button {
+    flex: 1;
+  }
+
+  .room-grid {
+    grid-template-columns: 1fr;
+  }
+}

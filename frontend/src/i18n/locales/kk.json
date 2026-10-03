@@ -528,7 +528,13 @@
     "math_advanced": "Қосымша",
     "math_keyboard_symbols": "Таңбалар",
     "math_edit_group_argument": "Ішкі өрнек",
-    "math_edit_summand": "Қосынды өрнегі"
+    "math_edit_summand": "Қосынды өрнегі",
+    "room_new": "Жаңа кабинет",
+    "room_modal_title": "Жаңа кабинет",
+    "room_modal_description": "Кабинет нөмірін немесе қысқа атауын енгізіңіз.",
+    "room_create": "Жасау",
+    "room_empty_title": "Кабинеттер әлі жоқ",
+    "room_empty_description": "Осы тақтаны байланыстыру үшін бірінші кабинетті жасаңыз."
   },
   "defaults": {
     "slides": [

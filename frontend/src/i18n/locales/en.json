@@ -528,7 +528,13 @@
     "math_advanced": "Advanced",
     "math_keyboard_symbols": "Symbols",
     "math_edit_group_argument": "Inner expression",
-    "math_edit_summand": "Summand"
+    "math_edit_summand": "Summand",
+    "room_new": "New room",
+    "room_modal_title": "New room",
+    "room_modal_description": "Enter a room number or a short room name.",
+    "room_create": "Create",
+    "room_empty_title": "No rooms yet",
+    "room_empty_description": "Create the first room to bind this board to it."
   },
   "defaults": {
     "slides": [

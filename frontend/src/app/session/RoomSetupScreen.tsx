@@ -1,5 +1,6 @@
-import { FormEvent, useState } from "react";
-import { DoorOpen, LogOut, Plus } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { DoorOpen, LogOut, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
@@ -15,47 +16,163 @@ type RoomSetupScreenProps = {
   onLogout: () => void;
 };
 
-export default function RoomSetupScreen({ school, rooms, loading = false, error, onSelectRoom, onCreateRoom, onLogout }: RoomSetupScreenProps) {
+export default function RoomSetupScreen({
+  school,
+  rooms,
+  loading = false,
+  error,
+  onSelectRoom,
+  onCreateRoom,
+  onLogout,
+}: RoomSetupScreenProps) {
   const [name, setName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const { tl } = useI18n();
-  const submit = (event: FormEvent) => {
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const id = window.setTimeout(() => inputRef.current?.focus(), 20);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !loading) setCreateOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [createOpen, loading]);
+
+  const closeCreate = () => {
+    if (loading) return;
+    setCreateOpen(false);
+    setName("");
+  };
+
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || loading) return;
-    void onCreateRoom(name.trim());
+    const normalized = name.trim();
+    if (!normalized || loading) return;
+    await onCreateRoom(normalized);
   };
 
   return (
-    <main className="session-shell grid-overlay items-start py-10 sm:items-center">
-      <section className="w-full max-w-4xl">
-        <header className="mb-7 flex items-center justify-between gap-4">
-          <div>
+    <main className="room-setup-shell session-shell grid-overlay">
+      <section className="room-setup-content w-full">
+        <header className="room-setup-header flex items-start justify-between gap-6">
+          <div className="min-w-0">
             <p className="text-sm font-semibold text-accent">{school.name}</p>
-            <h1 className="mt-1 text-3xl font-bold text-frost">{tl("room_choose")}</h1>
-            <p className="mt-2 text-frost/55">{tl("room_description")}</p>
+            <h1 className="mt-1 text-3xl font-bold text-frost sm:text-[34px]">{tl("room_choose")}</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-frost/55 sm:text-base">
+              {tl("room_description")}
+            </p>
           </div>
-          <Button variant="outline" onClick={onLogout}><LogOut size={16} className="mr-2" />{tl("room_logout")}</Button>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="accent"
+              className="h-10 px-4"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus size={16} />
+              {tl("room_new")}
+            </Button>
+            <Button variant="outline" className="h-10 px-4" onClick={onLogout}>
+              <LogOut size={16} />
+              {tl("room_logout")}
+            </Button>
+          </div>
         </header>
 
-        {rooms.length > 0 && (
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="room-setup-divider" />
+
+        {rooms.length > 0 ? (
+          <div className="room-grid">
             {rooms.map((room) => (
-              <button key={room.id} type="button" className="glass group flex items-center gap-4 rounded-2xl p-5 text-left transition hover:-translate-y-0.5 hover:border-accent/60" onClick={() => onSelectRoom(room)}>
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-accent/15 text-accent"><DoorOpen size={23} /></span>
-                <span><span className="block text-xs uppercase tracking-wide text-frost/45">{tl("room_label")}</span><span className="text-xl font-bold text-frost">{room.name}</span></span>
+              <button
+                key={room.id}
+                type="button"
+                className="room-card glass group"
+                onClick={() => onSelectRoom(room)}
+              >
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent">
+                  <DoorOpen size={24} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-frost/40">
+                    {tl("room_label")}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xl font-bold text-frost">{room.name}</span>
+                </span>
               </button>
             ))}
           </div>
-        )}
-
-        <form onSubmit={submit} className="glass rounded-2xl p-5">
-          <label className="mb-3 block text-sm font-semibold text-frost">{tl("room_add")}</label>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Input className="h-11 flex-1 bg-white/5" placeholder={tl("room_placeholder")} value={name} onChange={(event) => setName(event.target.value)} />
-            <Button variant="accent" className="h-11" disabled={loading || !name.trim()}><Plus size={17} className="mr-2" />{loading ? tl("room_saving") : tl("room_create_select")}</Button>
+        ) : (
+          <div className="room-empty">
+            <DoorOpen size={28} className="text-accent" />
+            <div>
+              <div className="text-sm font-semibold text-frost">{tl("room_empty_title")}</div>
+              <div className="mt-1 text-xs leading-5 text-frost/45">{tl("room_empty_description")}</div>
+            </div>
           </div>
-          {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
-        </form>
+        )}
       </section>
+
+      {createOpen && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[260] grid place-items-center bg-black/55 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCreate();
+          }}
+        >
+          <form
+            onSubmit={(event) => void submit(event)}
+            className="glass w-full max-w-[480px] rounded-2xl border border-white/10 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.42)]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="room-create-title"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="room-create-title" className="text-lg font-semibold text-frost">
+                  {tl("room_modal_title")}
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-frost/45">{tl("room_modal_description")}</p>
+              </div>
+              <button
+                type="button"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-frost/45 hover:bg-white/[0.06] hover:text-frost"
+                onClick={closeCreate}
+                aria-label={tl("cancel")}
+                disabled={loading}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <Input
+              ref={inputRef}
+              className="mt-4 h-11 bg-white/[0.045]"
+              placeholder={tl("room_placeholder")}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+
+            {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="ghost" className="h-10 px-4" onClick={closeCreate} disabled={loading}>
+                {tl("cancel")}
+              </Button>
+              <Button type="submit" variant="accent" className="h-10 px-4" disabled={loading || !name.trim()}>
+                <Plus size={16} />
+                {loading ? tl("room_saving") : tl("room_create")}
+              </Button>
+            </div>
+          </form>
+        </div>,
+        document.body,
+      )}
     </main>
   );
 }
