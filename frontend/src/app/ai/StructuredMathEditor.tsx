@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import katex from "katex";
 import { Code2, MousePointer2 } from "lucide-react";
 import { useI18n } from "@/i18n";
@@ -33,6 +33,19 @@ type Arg = {
   replaceEnd: number;
   bare: boolean;
 };
+
+type CursorAtom = {
+  id: string;
+  start: number;
+  end: number;
+  before: number;
+  after: number;
+};
+
+type CaretAnchor = {
+  atomId: string;
+  side: "before" | "after";
+} | null;
 
 const isLetter = (value: string) => /[A-Za-z]/.test(value);
 
@@ -184,15 +197,146 @@ function analyzeLatex(source: string): EditablePart[] {
   return parts;
 }
 
-function interactiveWrapper(part: EditablePart, body: string, active: boolean) {
-  const marked = `\\htmlData{edit-id=${part.id}}{${body}}`;
-  return active ? `\\htmlClass{math-edit-active}{${marked}}` : marked;
+const CLICKABLE_COMMANDS = new Set([
+  "pi", "infty", "times", "div", "approx", "ne", "pm", "to", "le", "ge",
+  "alpha", "beta", "theta", "Delta", "partial", "circ",
+  "sin", "cos", "tan", "cot", "ln", "log",
+]);
+
+function readCommandEnd(source: string, start: number) {
+  if (source[start] !== "\\") return start + 1;
+  let end = start + 1;
+  if (isLetter(source[end] ?? "")) {
+    while (end < source.length && isLetter(source[end])) end += 1;
+    return end;
+  }
+  return Math.min(source.length, end + 1);
 }
 
-function renderInteractiveLatex(source: string, parts: EditablePart[], selectedId: string | null) {
-  const opens = new Map<number, EditablePart[]>();
-  const closes = new Map<number, EditablePart[]>();
+function consumeAttachedScripts(source: string, from: number) {
+  let cursor = from;
+  for (let pass = 0; pass < 2; pass += 1) {
+    let probe = cursor;
+    while (probe < source.length && /\s/.test(source[probe])) probe += 1;
+    if (source[probe] !== "^" && source[probe] !== "_") break;
+    const arg = readArgument(source, probe + 1);
+    if (!arg) break;
+    cursor = arg.replaceEnd;
+  }
+  return cursor;
+}
+
+function analyzeCursorAtoms(source: string): CursorAtom[] {
+  const atoms: CursorAtom[] = [];
+  let counter = 0;
+
+  for (let i = 0; i < source.length;) {
+    const char = source[i];
+
+    if (/\s/.test(char)) {
+      i += 1;
+      continue;
+    }
+
+    if (char === "\\") {
+      const end = readCommandEnd(source, i);
+      const command = source.slice(i + 1, end);
+      if (command === "left" || command === "right") {
+        if (source[end] === "\\") {
+          i = readCommandEnd(source, end);
+        } else {
+          const delimiterCodePoint = source.codePointAt(end);
+          i = delimiterCodePoint == null ? end : end + (delimiterCodePoint > 0xffff ? 2 : 1);
+        }
+        continue;
+      }
+      if (CLICKABLE_COMMANDS.has(command)) {
+        let semanticEnd = end;
+        while (semanticEnd < source.length && /\s/.test(source[semanticEnd])) semanticEnd += 1;
+        atoms.push({
+          id: "cursor-" + counter++,
+          start: i,
+          end,
+          before: i,
+          after: consumeAttachedScripts(source, semanticEnd),
+        });
+      }
+      i = end;
+      continue;
+    }
+
+    if (char === "{" || char === "}" || char === "[" || char === "]" || char === "^" || char === "_") {
+      i += 1;
+      continue;
+    }
+
+    const codePoint = source.codePointAt(i);
+    if (codePoint == null) {
+      i += 1;
+      continue;
+    }
+    const width = codePoint > 0xffff ? 2 : 1;
+    const end = i + width;
+    atoms.push({
+      id: "cursor-" + counter++,
+      start: i,
+      end,
+      before: i,
+      after: consumeAttachedScripts(source, end),
+    });
+    i = end;
+  }
+
+  return atoms;
+}
+
+function buildCursorStops(source: string, parts: EditablePart[], atoms: CursorAtom[]) {
+  const stops = new Set<number>([0, source.length]);
+  for (const atom of atoms) {
+    stops.add(atom.before);
+    stops.add(atom.after);
+  }
+  for (const part of parts) {
+    stops.add(part.start);
+    stops.add(part.end);
+  }
+  return [...stops]
+    .filter((position) => position >= 0 && position <= source.length)
+    .sort((a, b) => a - b);
+}
+
+function findCaretAnchor(atoms: CursorAtom[], caretPos: number): CaretAnchor {
+  const before = atoms.find((atom) => atom.before === caretPos);
+  if (before) return { atomId: before.id, side: "before" };
+
+  const after = [...atoms].reverse().find((atom) => atom.after === caretPos);
+  if (after) {
+    if (after.after > after.end) {
+      const nested = atoms
+        .filter((atom) => atom.start >= after.end && atom.end <= after.after)
+        .sort((a, b) => b.end - a.end)[0];
+      if (nested) return { atomId: nested.id, side: "after" };
+    }
+    return { atomId: after.id, side: "after" };
+  }
+
+  const previous = atoms
+    .filter((atom) => atom.end <= caretPos)
+    .sort((a, b) => b.end - a.end)[0];
+  return previous ? { atomId: previous.id, side: "after" } : null;
+}
+
+function renderInteractiveLatex(
+  source: string,
+  parts: EditablePart[],
+  atoms: CursorAtom[],
+  caretPos: number,
+  activePartId: string | null,
+) {
+  type Wrapper = { start: number; end: number; open: string; close: string };
+  const wrappers: Wrapper[] = [];
   const empties = new Map<number, EditablePart[]>();
+  const anchor = findCaretAnchor(atoms, caretPos);
 
   for (const part of parts) {
     if (part.start === part.end) {
@@ -202,44 +346,72 @@ function renderInteractiveLatex(source: string, parts: EditablePart[], selectedI
       continue;
     }
 
-    const open = opens.get(part.start) ?? [];
-    open.push(part);
-    opens.set(part.start, open);
-
-    const close = closes.get(part.end) ?? [];
-    close.push(part);
-    closes.set(part.end, close);
+    const active = activePartId === part.id;
+    const prefix = part.bare ? "{" : "";
+    const activePrefix = active ? "\\htmlClass{math-edit-active}{" : "";
+    wrappers.push({
+      start: part.start,
+      end: part.end,
+      open: prefix + activePrefix + "\\htmlData{edit-id=" + part.id + "}{",
+      close: part.bare ? (active ? "}}}" : "}}") : (active ? "}}" : "}"),
+    });
   }
 
+  for (const atom of atoms) {
+    const caretClass =
+      anchor?.atomId === atom.id
+        ? (anchor.side === "before" ? "math-caret-before" : "math-caret-after")
+        : null;
+    const classPrefix = caretClass ? "\\htmlClass{" + caretClass + "}{" : "";
+    wrappers.push({
+      start: atom.start,
+      end: atom.end,
+      open:
+        classPrefix +
+        "\\htmlData{cursor-atom=" + atom.id +
+        ",cursor-before=" + atom.before +
+        ",cursor-after=" + atom.after + "}{",
+      close: caretClass ? "}}" : "}",
+    });
+  }
+
+  const opens = new Map<number, Wrapper[]>();
+  const closes = new Map<number, Wrapper[]>();
+  for (const wrapper of wrappers) {
+    const open = opens.get(wrapper.start) ?? [];
+    open.push(wrapper);
+    opens.set(wrapper.start, open);
+    const close = closes.get(wrapper.end) ?? [];
+    close.push(wrapper);
+    closes.set(wrapper.end, close);
+  }
   for (const group of opens.values()) group.sort((a, b) => b.end - a.end);
   for (const group of closes.values()) group.sort((a, b) => b.start - a.start);
 
   let marked = "";
   for (let i = 0; i <= source.length; i += 1) {
     const closing = closes.get(i);
-    if (closing) {
-      for (const part of closing) {
-        marked += part.bare ? (selectedId === part.id ? "}}}" : "}}") : (selectedId === part.id ? "}}" : "}");
-      }
-    }
+    if (closing) for (const wrapper of closing) marked += wrapper.close;
 
     const empty = empties.get(i);
     if (empty) {
       for (const part of empty) {
-        marked += interactiveWrapper(part, "\\vphantom{0}\\kern0.42em", selectedId === part.id);
+        const active = activePartId === part.id;
+        const caret = caretPos === part.start ? "\\htmlClass{math-caret-empty}{" : "";
+        const activePrefix = active ? "\\htmlClass{math-edit-active}{" : "";
+        const body = "\\htmlData{edit-id=" + part.id + ",cursor-pos=" + part.start + "}{\\vphantom{0}\\kern0.42em}";
+        marked += caret + activePrefix + body + (active ? "}" : "") + (caret ? "}" : "");
       }
     }
 
     const opening = opens.get(i);
-    if (opening) {
-      for (const part of opening) {
-        const prefix = part.bare ? "{" : "";
-        const activePrefix = selectedId === part.id ? "\\htmlClass{math-edit-active}{" : "";
-        marked += `${prefix}${activePrefix}\\htmlData{edit-id=${part.id}}{`;
-      }
-    }
+    if (opening) for (const wrapper of opening) marked += wrapper.open;
 
     if (i < source.length) marked += source[i];
+  }
+
+  if (!source.length) {
+    marked = "\\htmlClass{math-caret-empty}{\\htmlData{cursor-pos=0}{\\vphantom{0}\\kern1em}}";
   }
 
   return katex.renderToString(marked, {
@@ -270,7 +442,7 @@ function validateLatex(source: string) {
 }
 
 function replacePart(source: string, part: EditablePart, nextValue: string) {
-  const replacement = part.bare && nextValue ? `{${nextValue}}` : nextValue;
+  const replacement = part.bare ? `{${nextValue}}` : nextValue;
   return source.slice(0, part.start) + replacement + source.slice(part.end);
 }
 
@@ -320,39 +492,68 @@ export default function StructuredMathEditor({
   const { tl } = useI18n();
   const validLatex = useMemo(() => validateLatex(value), [value]);
   const parts = useMemo(() => validLatex ? analyzeLatex(value) : [], [validLatex, value]);
+  const atoms = useMemo(() => validLatex ? analyzeCursorAtoms(value) : [], [validLatex, value]);
+  const cursorStops = useMemo(
+    () => validLatex ? buildCursorStops(value, parts, atoms) : [0],
+    [atoms, parts, validLatex, value],
+  );
   const [rawMode, setRawMode] = useState(!validLatex);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [pendingSelectKind, setPendingSelectKind] = useState<string | null>(null);
+  const [caretPos, setCaretPos] = useState(() => value.length);
+  const [pendingCaretTarget, setPendingCaretTarget] = useState<{
+    kind: string;
+    from: number;
+    to: number;
+  } | null>(null);
 
-  const selectedPart = selectedId ? parts.find((part) => part.id === selectedId) ?? null : null;
+  const activePart = useMemo(() => {
+    const matches = parts.filter((part) =>
+      part.start === part.end
+        ? caretPos === part.start
+        : part.bare
+          ? caretPos >= part.start && caretPos < part.end
+          : caretPos >= part.start && caretPos <= part.end,
+    );
+    return matches.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] ?? null;
+  }, [caretPos, parts]);
 
   useEffect(() => {
     if (!validLatex) {
       setRawMode(true);
-      setSelectedId(null);
+      setCaretPos(0);
+      setPendingCaretTarget(null);
     }
   }, [validLatex]);
 
-  useEffect(() => {
-    if (!pendingSelectKind) return;
-    const matches = parts.filter((part) => part.kind === pendingSelectKind);
-    if (!matches.length) return;
-    setSelectedId(matches[matches.length - 1].id);
-    setPendingSelectKind(null);
-  }, [parts, pendingSelectKind]);
 
   useEffect(() => {
-    if (selectedId && !selectedPart) setSelectedId(null);
-  }, [selectedId, selectedPart]);
+    if (!validLatex) return;
+    setCaretPos((current) => Math.max(0, Math.min(value.length, current)));
+  }, [validLatex, value.length]);
+
+  useEffect(() => {
+    if (!pendingCaretTarget) return;
+    const matches = parts
+      .filter(
+        (part) =>
+          part.kind === pendingCaretTarget.kind &&
+          part.start >= pendingCaretTarget.from &&
+          part.start <= pendingCaretTarget.to + 2,
+      )
+      .sort((a, b) => a.start - b.start);
+    const target = matches[0];
+    if (!target) return;
+    setCaretPos(target.start);
+    setPendingCaretTarget(null);
+  }, [parts, pendingCaretTarget]);
 
   const html = useMemo(() => {
     if (!validLatex || rawMode) return "";
     try {
-      return renderInteractiveLatex(value.trim(), parts, selectedId);
+      return renderInteractiveLatex(value, parts, atoms, caretPos, activePart?.id ?? null);
     } catch {
       return "";
     }
-  }, [parts, rawMode, selectedId, validLatex, value]);
+  }, [activePart?.id, atoms, caretPos, parts, rawMode, validLatex, value]);
 
   const partLabel = (kind: EditableKind) => {
     switch (kind) {
@@ -371,59 +572,202 @@ export default function StructuredMathEditor({
     }
   };
 
-  const activeLabel = selectedPart ? partLabel(selectedPart.kind) : tl("math_edit_whole_formula");
+  const activeLabel = activePart ? partLabel(activePart.kind) : tl("math_edit_cursor");
 
-  const pickPart = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    const editable = target.closest<HTMLElement>("[data-edit-id]");
-    event.preventDefault();
-
-    if (!editable) {
-      setSelectedId(null);
-      return;
-    }
-
-    const id = editable.dataset.editId ?? null;
-    setSelectedId(id);
-  };
-
-  const updateActive = (transform: (current: string) => string, selectKind?: string) => {
-    const current = selectedPart ? selectedPart.content : value;
-    const nextContent = transform(current);
-    const nextValue = selectedPart ? replacePart(value, selectedPart, nextContent) : nextContent;
-    if (selectKind) setPendingSelectKind(selectKind);
+  const placeCaretInBarePart = (part: EditablePart, localOffset: number) => {
+    const offset = Math.max(0, Math.min(part.content.length, localOffset));
+    const nextValue = replacePart(value, part, part.content);
+    setCaretPos(part.start + 1 + offset);
     onChange(nextValue);
   };
 
-  const moveSelection = (direction: 1 | -1) => {
+  const pickCaret = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const target = event.target as HTMLElement;
+
+    const atomElement = target.closest<HTMLElement>("[data-cursor-atom]");
+    if (atomElement) {
+      const before = Number(atomElement.dataset.cursorBefore);
+      const after = Number(atomElement.dataset.cursorAfter);
+      const rect = atomElement.getBoundingClientRect();
+      const useAfter = rect.width <= 0 || event.clientX >= rect.left + rect.width / 2;
+      const atom = atoms.find((item) => item.id === atomElement.dataset.cursorAtom);
+      const barePart = atom
+        ? parts.find(
+            (part) =>
+              part.bare &&
+              atom.start >= part.start &&
+              atom.end <= part.end,
+          )
+        : null;
+      if (barePart) {
+        placeCaretInBarePart(barePart, useAfter ? barePart.content.length : 0);
+      } else {
+        setCaretPos(useAfter ? after : before);
+      }
+      return;
+    }
+
+    const directCursor = target.closest<HTMLElement>("[data-cursor-pos]");
+    if (directCursor) {
+      const position = Number(directCursor.dataset.cursorPos);
+      if (Number.isFinite(position)) setCaretPos(position);
+      return;
+    }
+
+    const editable = target.closest<HTMLElement>("[data-edit-id]");
+    if (editable) {
+      const part = parts.find((item) => item.id === editable.dataset.editId);
+      if (part) {
+        const rect = editable.getBoundingClientRect();
+        const useAfter = rect.width > 0 && event.clientX >= rect.left + rect.width / 2;
+        if (part.bare) {
+          placeCaretInBarePart(part, useAfter ? part.content.length : 0);
+        } else {
+          setCaretPos(useAfter ? part.end : part.start);
+        }
+        return;
+      }
+    }
+
+    const root = event.currentTarget;
+    const candidates = [...root.querySelectorAll<HTMLElement>("[data-cursor-atom]")];
+    let best: { distance: number; position: number } | null = null;
+    for (const candidate of candidates) {
+      const rect = candidate.getBoundingClientRect();
+      const before = Number(candidate.dataset.cursorBefore);
+      const after = Number(candidate.dataset.cursorAfter);
+      const x = Math.max(rect.left, Math.min(event.clientX, rect.right));
+      const y = Math.max(rect.top, Math.min(event.clientY, rect.bottom));
+      const dx = event.clientX - x;
+      const dy = event.clientY - y;
+      const distance = dx * dx + dy * dy;
+      const position = event.clientX >= rect.left + rect.width / 2 ? after : before;
+      if (!best || distance < best.distance) best = { distance, position };
+    }
+    if (best) setCaretPos(best.position);
+  };
+
+  const insertAtCaret = (latex: string, selectKind?: string) => {
+    const position = Math.max(0, Math.min(value.length, caretPos));
+
+    if (activePart?.bare && position >= activePart.start && position <= activePart.end) {
+      const localOffset = Math.max(0, Math.min(activePart.content.length, position - activePart.start));
+      const nextContent =
+        activePart.content.slice(0, localOffset) + latex + activePart.content.slice(localOffset);
+      const nextValue = replacePart(value, activePart, nextContent);
+      const insertionStart = activePart.start + 1 + localOffset;
+      if (selectKind) {
+        setPendingCaretTarget({ kind: selectKind, from: insertionStart, to: insertionStart + latex.length });
+      } else {
+        setCaretPos(insertionStart + latex.length);
+      }
+      onChange(nextValue);
+      return;
+    }
+
+    const nextValue = value.slice(0, position) + latex + value.slice(position);
+    if (selectKind) {
+      setPendingCaretTarget({ kind: selectKind, from: position, to: position + latex.length });
+    } else {
+      setCaretPos(position + latex.length);
+    }
+    onChange(nextValue);
+  };
+
+  const moveCaret = (direction: 1 | -1) => {
+    if (cursorStops.length <= 1) return;
+    const exact = cursorStops.indexOf(caretPos);
+    if (exact >= 0) {
+      const next = Math.max(0, Math.min(cursorStops.length - 1, exact + direction));
+      const nextPosition = cursorStops[next];
+      if (
+        direction > 0 &&
+        activePart?.bare &&
+        caretPos >= activePart.start &&
+        caretPos < activePart.end &&
+        nextPosition >= activePart.end
+      ) {
+        placeCaretInBarePart(activePart, activePart.content.length);
+        return;
+      }
+      setCaretPos(nextPosition);
+      return;
+    }
+
+    if (direction > 0) {
+      setCaretPos(cursorStops.find((position) => position > caretPos) ?? cursorStops[cursorStops.length - 1]);
+    } else {
+      setCaretPos([...cursorStops].reverse().find((position) => position < caretPos) ?? cursorStops[0]);
+    }
+  };
+
+  const moveToNextField = () => {
     if (!parts.length) return;
-    const currentIndex = selectedId ? parts.findIndex((part) => part.id === selectedId) : -1;
-    const nextIndex =
-      currentIndex < 0
-        ? (direction > 0 ? 0 : parts.length - 1)
-        : (currentIndex + direction + parts.length) % parts.length;
-    setSelectedId(parts[nextIndex].id);
+    const ordered = [...parts].sort((a, b) => a.start - b.start || a.end - b.end);
+    const currentIndex = activePart ? ordered.findIndex((part) => part.id === activePart.id) : -1;
+    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % ordered.length;
+    setCaretPos(ordered[nextIndex].start);
+  };
+
+  const clearActive = () => {
+    if (!activePart) {
+      setCaretPos(0);
+      onChange("");
+      return;
+    }
+    const nextValue = replacePart(value, activePart, "");
+    setCaretPos(activePart.start + (activePart.bare ? 1 : 0));
+    onChange(nextValue);
+  };
+
+  const backspaceAtCaret = () => {
+    const position = Math.max(0, Math.min(value.length, caretPos));
+    if (position <= 0) return;
+
+    if (activePart && position >= activePart.start && position <= activePart.end) {
+      const localOffset = Math.max(0, Math.min(activePart.content.length, position - activePart.start));
+      if (localOffset <= 0) return;
+      const before = activePart.content.slice(0, localOffset);
+      const nextBefore = removeLastMathAtom(before);
+      const removed = before.length - nextBefore.length;
+      const nextContent = nextBefore + activePart.content.slice(localOffset);
+      const nextValue = replacePart(value, activePart, nextContent);
+      const contentStart = activePart.start + (activePart.bare ? 1 : 0);
+      setCaretPos(contentStart + Math.max(0, localOffset - removed));
+      onChange(nextValue);
+      return;
+    }
+
+    const before = value.slice(0, position);
+    const nextBefore = removeLastMathAtom(before);
+    if (nextBefore === before) return;
+    setCaretPos(nextBefore.length);
+    onChange(nextBefore + value.slice(position));
   };
 
   const handleKeyboard = (action: MathKeyboardAction) => {
     switch (action.type) {
       case "insert":
-        updateActive((current) => current + action.latex);
+        insertAtCaret(action.latex);
         break;
       case "template":
-        updateActive((current) => current + action.latex, action.selectKind);
+        insertAtCaret(action.latex, action.selectKind);
         break;
       case "backspace":
-        updateActive(removeLastMathAtom);
+        backspaceAtCaret();
         break;
       case "clear":
-        updateActive(() => "");
+        clearActive();
         break;
-      case "previous":
-        moveSelection(-1);
+      case "moveLeft":
+        moveCaret(-1);
         break;
-      case "next":
-        moveSelection(1);
+      case "moveRight":
+        moveCaret(1);
+        break;
+      case "nextField":
+        moveToNextField();
         break;
     }
   };
@@ -458,8 +802,8 @@ export default function StructuredMathEditor({
   return (
     <div className="mt-2" data-testid="structured-math-editor">
       <div
-        className="structured-math-preview min-h-[108px] overflow-x-auto rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-[18px] text-frost"
-        onClick={pickPart}
+        className="structured-math-preview min-h-[108px] cursor-text overflow-x-auto rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-[18px] text-frost"
+        onPointerDown={pickCaret}
         dangerouslySetInnerHTML={{ __html: html }}
         aria-label={tl("math_visual_formula")}
       />
@@ -467,17 +811,12 @@ export default function StructuredMathEditor({
       <div className="mt-1.5 flex items-center justify-between gap-3">
         <div className="inline-flex min-w-0 items-center gap-1.5 text-[10px] text-frost/35">
           <MousePointer2 size={12} className="shrink-0" />
-          <span className="truncate">
-            {parts.length > 0 ? tl("math_keyboard_tap_hint") : tl("math_keyboard_formula_hint")}
-          </span>
+          <span className="truncate">{tl("math_keyboard_caret_hint")}</span>
         </div>
         <button
           type="button"
           className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold text-frost/35 hover:bg-white/[0.05] hover:text-frost/60"
-          onClick={() => {
-            setSelectedId(null);
-            setRawMode(true);
-          }}
+          onClick={() => setRawMode(true)}
         >
           <Code2 size={12} />
           {tl("math_advanced")}
@@ -486,7 +825,8 @@ export default function StructuredMathEditor({
 
       <MathKeyboard
         activeLabel={activeLabel}
-        canNavigate={parts.length > 0}
+        canNavigate={cursorStops.length > 1}
+        canNextField={parts.length > 0}
         onAction={handleKeyboard}
       />
     </div>

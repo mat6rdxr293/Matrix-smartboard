@@ -54,7 +54,7 @@ describe("StructuredMathEditor visual keyboard", () => {
 
     const upper = container.querySelector<HTMLElement>('[data-edit-id="edit-1"]');
     expect(upper).toBeInTheDocument();
-    fireEvent.click(upper!);
+    fireEvent.pointerDown(upper!, { clientX: 0, clientY: 0 });
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByText(/верхний предел интеграла/i)).toBeInTheDocument();
@@ -128,6 +128,67 @@ describe("StructuredMathEditor visual keyboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /основная/i }));
     fireEvent.click(screen.getByRole("button", { name: "x" }));
     expect(values.at(-1)).toBe(String.raw`\sin\left({x}\right)`);
+  });
+
+  it("moves the caret through ordinary symbols with the arrow buttons", () => {
+    const values: string[] = [];
+    render(<Harness initial="x+2" onValue={(value) => values.push(value)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /предыдущая позиция/i }));
+    fireEvent.click(screen.getByRole("button", { name: "y" }));
+
+    expect(values.at(-1)).toBe("x+y2");
+
+    fireEvent.click(screen.getByRole("button", { name: /следующая позиция/i }));
+    fireEvent.click(screen.getByRole("button", { name: "z" }));
+
+    expect(values.at(-1)).toBe("x+y2z");
+  });
+
+  it("places the caret by tapping either half of an ordinary rendered symbol", () => {
+    const values: string[] = [];
+    const { container } = render(<Harness initial="x+2" onValue={(value) => values.push(value)} />);
+
+    const plus = container.querySelector<HTMLElement>('[data-cursor-before="1"][data-cursor-after="2"]');
+    expect(plus).toBeInTheDocument();
+    Object.defineProperty(plus!, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 100,
+        right: 120,
+        top: 10,
+        bottom: 30,
+        width: 20,
+        height: 20,
+        x: 100,
+        y: 10,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(plus!, { clientX: 101, clientY: 20 });
+    fireEvent.click(screen.getByRole("button", { name: "y" }));
+    expect(values.at(-1)).toBe("xy+2");
+  });
+
+  it("keeps a distinct caret position after a bare exponent", () => {
+    const values: string[] = [];
+    render(<Harness initial="x^3" onValue={(value) => values.push(value)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    expect(values.at(-1)).toBe("x^3+");
+  });
+
+  it("normalizes a bare exponent before editing inside it", () => {
+    const values: string[] = [];
+    const { container } = render(<Harness initial="x^3" onValue={(value) => values.push(value)} />);
+
+    const exponent = container.querySelector<HTMLElement>('[data-edit-id="edit-0"]');
+    expect(exponent).toBeInTheDocument();
+    fireEvent.pointerDown(exponent!, { clientX: 0, clientY: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+
+    expect(values.at(-1)).toBe("x^{23}");
   });
 
   it("keeps raw LaTeX only as an advanced fallback", () => {

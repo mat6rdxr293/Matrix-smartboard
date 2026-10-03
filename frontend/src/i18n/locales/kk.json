@@ -515,8 +515,8 @@
     "math_keyboard_basic": "Негізгі",
     "math_keyboard_structures": "Құрылымдар",
     "math_keyboard_functions": "Функциялар",
-    "math_keyboard_previous": "Алдыңғы өріс",
-    "math_keyboard_next": "Келесі өріс",
+    "math_keyboard_previous": "Алдыңғы орын",
+    "math_keyboard_next": "Келесі орын",
     "math_keyboard_delete": "Өшіру",
     "math_keyboard_clear": "Тазалау",
     "math_keyboard_next_field": "Келесі",
@@ -534,7 +534,9 @@
     "room_modal_description": "Кабинет нөмірін немесе қысқа атауын енгізіңіз.",
     "room_create": "Жасау",
     "room_empty_title": "Кабинеттер әлі жоқ",
-    "room_empty_description": "Осы тақтаны байланыстыру үшін бірінші кабинетті жасаңыз."
+    "room_empty_description": "Осы тақтаны байланыстыру үшін бірінші кабинетті жасаңыз.",
+    "math_keyboard_caret_hint": "Формуланың кез келген жерін басыңыз. Көрсеткілер курсорды таңбалар бойынша жылжытады.",
+    "math_edit_cursor": "Формуладағы орын"
   },
   "defaults": {
     "slides": [

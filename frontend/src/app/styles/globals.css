@@ -755,3 +755,44 @@ body.native-app .room-card:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.structured-math-preview [data-cursor-atom],
+.structured-math-preview [data-cursor-pos] {
+  cursor: text;
+}
+
+.structured-math-preview .math-caret-before,
+.structured-math-preview .math-caret-after,
+.structured-math-preview .math-caret-empty {
+  position: relative;
+}
+
+.structured-math-preview .math-caret-before::before,
+.structured-math-preview .math-caret-after::after,
+.structured-math-preview .math-caret-empty::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  top: -0.16em;
+  bottom: -0.13em;
+  width: 2px;
+  border-radius: 999px;
+  background: rgb(var(--color-accent));
+  box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.12);
+  animation: math-caret-blink 1s steps(1, end) infinite;
+  pointer-events: none;
+}
+
+.structured-math-preview .math-caret-before::before {
+  left: -1px;
+}
+
+.structured-math-preview .math-caret-after::after,
+.structured-math-preview .math-caret-empty::after {
+  right: -1px;
+}
+
+@keyframes math-caret-blink {
+  0%, 54% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}

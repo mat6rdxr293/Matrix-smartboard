@@ -515,8 +515,8 @@
     "math_keyboard_basic": "Основная",
     "math_keyboard_structures": "Структуры",
     "math_keyboard_functions": "Функции",
-    "math_keyboard_previous": "Предыдущее поле",
-    "math_keyboard_next": "Следующее поле",
+    "math_keyboard_previous": "Предыдущая позиция",
+    "math_keyboard_next": "Следующая позиция",
     "math_keyboard_delete": "Удалить",
     "math_keyboard_clear": "Очистить",
     "math_keyboard_next_field": "Далее",
@@ -534,7 +534,9 @@
     "room_modal_description": "Введите номер или короткое название кабинета.",
     "room_create": "Создать",
     "room_empty_title": "Кабинетов пока нет",
-    "room_empty_description": "Создайте первый кабинет, чтобы привязать к нему эту доску."
+    "room_empty_description": "Создайте первый кабинет, чтобы привязать к нему эту доску.",
+    "math_keyboard_caret_hint": "Нажмите в любое место формулы. Стрелки перемещают курсор по символам.",
+    "math_edit_cursor": "Позиция в формуле"
   },
   "defaults": {
     "slides": [
