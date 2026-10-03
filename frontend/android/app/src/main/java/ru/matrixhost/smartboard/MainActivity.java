@@ -16,6 +16,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ServerSecurityPlugin.class);
         super.onCreate(savedInstanceState);
         bridge.setWebViewClient(new PinnedBridgeWebViewClient(bridge, this));
+        bridge.getWebView().setLayerType(View.LAYER_TYPE_HARDWARE, null);
         hideSystemBars();
     }
 
