@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
 import ServerManagementPanel from "@/app/server/ServerManagementPanel";
+import { isNativeApp } from "@/lib/apiClient";
 
 export type ApiStatus = {
   ok: boolean;
@@ -87,6 +88,7 @@ export default function TopBar({
   const [serverPanelOpen, setServerPanelOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
+  const nativeApp = isNativeApp();
   const isSlidesTab = currentTab === "slides";
   const isTeacherTab = currentTab === "teacher";
   const showTimerControls = !isTeacherTab;
@@ -201,16 +203,18 @@ export default function TopBar({
           </div>
         )}
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleFullscreen}
-          aria-label={tl("fullscreen")}
-          title={tl("fullscreen")}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.035] p-0 text-frost/65 hover:bg-white/[0.07] hover:text-frost"
-        >
-          <Expand size={17} />
-        </Button>
+        {!nativeApp && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleFullscreen}
+            aria-label={tl("fullscreen")}
+            title={tl("fullscreen")}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.035] p-0 text-frost/65 hover:bg-white/[0.07] hover:text-frost"
+          >
+            <Expand size={17} />
+          </Button>
+        )}
 
         <Button
           variant="ghost"

@@ -574,3 +574,92 @@ body.native-app .math-keyboard button {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
+
+.android-setup-shell {
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: clamp(1.25rem, 4vh, 3rem) clamp(1.25rem, 4vw, 4rem);
+}
+
+.android-setup-panel {
+  display: flex;
+  width: min(1180px, 100%);
+  min-height: min(680px, calc(100dvh - 3rem));
+  max-height: calc(100dvh - 2rem);
+  flex-direction: column;
+}
+
+.android-setup-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.android-setup-language {
+  max-width: 920px;
+}
+
+.android-setup-existing {
+  max-width: 920px;
+}
+
+@media (min-width: 900px) {
+  .android-setup-language-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .android-setup-language-grid > button {
+    min-height: 112px;
+  }
+}
+
+body.native-app .android-setup-shell {
+  background: var(--app-background);
+}
+
+body.native-app .android-setup-panel {
+  width: min(1240px, 100%);
+}
+
+@media (max-height: 720px) {
+  .android-setup-shell {
+    align-items: flex-start;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .android-setup-panel {
+    min-height: calc(100dvh - 2rem);
+    max-height: none;
+  }
+}
+
+.android-setup-language,
+.android-setup-choice,
+.android-setup-existing {
+  min-height: 0;
+  flex: 1;
+}
+
+.android-setup-language {
+  display: flex;
+  align-items: center;
+}
+
+.android-setup-language-grid {
+  width: 100%;
+}
+
+.android-setup-choice {
+  align-content: center;
+}
+
+.android-setup-existing {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
