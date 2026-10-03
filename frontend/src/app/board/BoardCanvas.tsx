@@ -156,8 +156,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const canvasRectRef = useRef<DOMRectReadOnly | null>(null);
   const rawPointerSupportedRef = useRef(false);
   const rawPointerHandlerRef = useRef<(event: PointerEvent) => void>(() => undefined);
-  const pendingInkPointsRef = useRef<{ x: number; y: number }[]>([]);
-  const pendingInkRafRef = useRef<number | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number | null>(null);
   const pendingRenderRef = useRef(false);
@@ -253,13 +251,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     startZoom: number;
     startDist: number;
   } | null>(null);
-  const pendingViewportRef = useRef<{
-    nextPan: { x: number; y: number };
-    nextZoom: number;
-    startPan: { x: number; y: number };
-    startZoom: number;
-  } | null>(null);
-  const viewportRafRef = useRef<number | null>(null);
   const safariPinchRef = useRef<{
     startZoom: number;
     startPan: { x: number; y: number };
@@ -399,7 +390,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const cap = Math.min(1, renderCap.width / (widthPx * base), renderCap.height / (heightPx * base));
     return Math.max(0.1, base * cap);
   }, [heightPx, pixelRatio, renderCap, widthPx]);
-  const liveRenderRatio = renderRatio;
+  const liveRenderRatio = useMemo(
+    () => (isNativeApp() ? Math.min(renderRatio, 1) : renderRatio),
+    [renderRatio],
+  );
   const minPointDistanceSq = lowPowerMode ? 1.4 : 0.64;
   const maxPointsPerStroke = lowPowerMode ? 1200 : 2200;
   const renderMinDeltaMs = lowPowerMode ? 32 : 16;
@@ -499,13 +493,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     const liveCanvas = liveCanvasRef.current;
     if (liveCanvas) {
-      const activePreview = mode === "line";
-      liveCanvas.width = activePreview ? widthPx * liveRenderRatio : 1;
-      liveCanvas.height = activePreview ? heightPx * liveRenderRatio : 1;
+      liveCanvas.width = widthPx * liveRenderRatio;
+      liveCanvas.height = heightPx * liveRenderRatio;
     }
     liveStrokeActiveRef.current = false;
     scheduleRender();
-  }, [widthPx, heightPx, renderRatio, liveRenderRatio, mode]);
+  }, [widthPx, heightPx, renderRatio, liveRenderRatio]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -529,13 +522,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   const clampPan = (next: { x: number; y: number }) => next;
 
-  const flushTransientViewport = () => {
-    const pending = pendingViewportRef.current;
-    pendingViewportRef.current = null;
-    viewportRafRef.current = null;
-    if (!pending) return;
+  const applyTransientViewport = (
+    nextPan: { x: number; y: number },
+    nextZoom: number,
+    startPan: { x: number; y: number },
+    startZoom: number,
+  ) => {
+    panRef.current = nextPan;
+    zoomRef.current = nextZoom;
 
-    const { nextPan, nextZoom, startPan, startZoom } = pending;
     const scale = nextZoom / Math.max(startZoom, 0.0001);
     const tx = nextPan.x - startPan.x * scale;
     const ty = nextPan.y - startPan.y * scale;
@@ -555,19 +550,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
   };
 
-  const applyTransientViewport = (
-    nextPan: { x: number; y: number },
-    nextZoom: number,
-    startPan: { x: number; y: number },
-    startZoom: number,
-  ) => {
-    panRef.current = nextPan;
-    zoomRef.current = nextZoom;
-    pendingViewportRef.current = { nextPan, nextZoom, startPan, startZoom };
-    if (viewportRafRef.current !== null) return;
-    viewportRafRef.current = requestAnimationFrame(flushTransientViewport);
-  };
-
   const applyTransientPan = (next: { x: number; y: number }, start: { panX: number; panY: number }) => {
     applyTransientViewport(
       next,
@@ -580,12 +562,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const commitTransientViewport = (commitZoom: boolean) => {
     const nextPan = clampPan({ ...panRef.current });
     const nextZoom = clampZoom(zoomRef.current);
-
-    if (viewportRafRef.current !== null) {
-      cancelAnimationFrame(viewportRafRef.current);
-      viewportRafRef.current = null;
-    }
-    pendingViewportRef.current = null;
 
     if (canvasRef.current) {
       canvasRef.current.style.transform = "none";
@@ -901,7 +877,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", isNativeApp() ? { desynchronized: true } : undefined);
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const staticStrokes =
       liveStrokeActiveRef.current && mode === "draw"
@@ -1022,7 +998,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const drawIncrementalSegment = (stroke: Stroke, segment: { x: number; y: number }[]) => {
-    drawSegmentToCanvas(canvasRef.current, stroke, segment);
+    const target = stroke.mode === "erase" ? canvasRef.current : liveCanvasRef.current ?? canvasRef.current;
+    drawSegmentToCanvas(target, stroke, segment);
   };
 
   const commitLiveStrokeToBase = (stroke: Stroke | null | undefined) => {
@@ -1037,7 +1014,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const isHighlighter = humanitiesPreset === "highlight";
     const w = mode === "erase" ? eraserWidth : isHighlighter ? 14 : width;
     if (mode === "draw") {
-      liveStrokeActiveRef.current = false;
+      clearLiveCanvas();
+      liveStrokeActiveRef.current = true;
     } else {
       liveStrokeActiveRef.current = false;
     }
@@ -1075,30 +1053,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     scheduleRender();
   };
 
-  const flushPendingInkPoints = () => {
-    if (pendingInkRafRef.current !== null) {
-      cancelAnimationFrame(pendingInkRafRef.current);
-      pendingInkRafRef.current = null;
-    }
-    if (!pendingInkPointsRef.current.length) return;
-    const points = pendingInkPointsRef.current;
-    pendingInkPointsRef.current = [];
-    addPoints(points);
-  };
-
-  const queueInkPoints = (points: { x: number; y: number }[]) => {
-    if (!points.length) return;
-    pendingInkPointsRef.current.push(...points);
-    if (pendingInkRafRef.current !== null) return;
-    pendingInkRafRef.current = requestAnimationFrame(() => {
-      pendingInkRafRef.current = null;
-      if (!pendingInkPointsRef.current.length) return;
-      const queued = pendingInkPointsRef.current;
-      pendingInkPointsRef.current = [];
-      addPoints(queued);
-    });
-  };
-
   rawPointerHandlerRef.current = (event: PointerEvent) => {
     const canvas = canvasRef.current;
     if (!canvas || activePointerIdRef.current !== event.pointerId) return;
@@ -1107,7 +1061,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (event.cancelable) event.preventDefault();
     recordPointerSample(event.timeStamp || performance.now());
     const points = extractNativePoints(event, canvas);
-    if (points.length) queueInkPoints(points);
+    if (points.length) addPoints(points);
   };
 
   useEffect(() => {
@@ -1283,7 +1237,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           startZoom: zoomRef.current,
           startDist: Math.max(dist, 1),
         };
-        flushPendingInkPoints();
         activePointerIdRef.current = null;
         if (liveStrokeActiveRef.current && mode === "draw") {
           const partialStroke = strokesRef.current[strokesRef.current.length - 1];
@@ -1461,10 +1414,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       drawSegmentToCanvas(liveCanvasRef.current ?? canvasRef.current, linePreviewRef.current, linePreviewRef.current.points);
       return;
     }
-    if (mode === "draw" || mode === "erase") {
-      queueInkPoints(points);
-      return;
-    }
     addPoints(points);
   };
 
@@ -1475,15 +1424,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (e.pointerType === "touch") {
       touchPointsRef.current.delete(e.pointerId);
       if (touchPointsRef.current.size < 2) {
-        const endingGesture = touchGestureRef.current !== null;
         touchPanRef.current.active = false;
         touchPanRef.current.lastCenter = null;
         pinchRef.current = { active: false, startDist: 0 };
-        touchGestureRef.current = null;
-        if (endingGesture) {
-          commitTransientViewport(true);
-          return;
-        }
       }
       if (!lowPowerMode && mode === "erase" && touchPointsRef.current.size === 0) {
         eraserPreviewRef.current = null;
@@ -1515,7 +1458,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     if (activePointerIdRef.current !== e.pointerId) return;
     e.preventDefault();
-    if (mode === "draw" || mode === "erase") flushPendingInkPoints();
     activePointerIdRef.current = null;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -1550,15 +1492,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (e.pointerType === "touch") {
       touchPointsRef.current.delete(e.pointerId);
       if (touchPointsRef.current.size < 2) {
-        const endingGesture = touchGestureRef.current !== null;
         touchPanRef.current.active = false;
         touchPanRef.current.lastCenter = null;
         pinchRef.current = { active: false, startDist: 0 };
-        touchGestureRef.current = null;
-        if (endingGesture) {
-          commitTransientViewport(true);
-          return;
-        }
       }
       if (!lowPowerMode && mode === "erase" && touchPointsRef.current.size === 0) {
         eraserPreviewRef.current = null;
@@ -1591,7 +1527,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       return;
     }
     if (activePointerIdRef.current !== e.pointerId) return;
-    if (mode === "draw" || mode === "erase") flushPendingInkPoints();
     activePointerIdRef.current = null;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -2187,10 +2122,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             <canvas
               ref={liveCanvasRef}
               aria-hidden="true"
-              className={cn(
-                "pointer-events-none absolute inset-0 h-full w-full",
-                mode === "line" ? "block" : "hidden",
-              )}
+              className="pointer-events-none absolute inset-0 block h-full w-full"
             />
             <div
               ref={contentOverlayRef}

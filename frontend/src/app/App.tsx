@@ -153,7 +153,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(performanceHudKey) === "1";
   });
-  const nativeApp = isNativeApp();
   const ultraLite = performanceMode === "performance";
   const [currentSlide, setCurrentSlide] = useState(0);
   const [selectedTaskId, setSelectedTaskId] = useState(() => defaultTaskData[0]?.id ?? 1);
@@ -1693,7 +1692,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                   aria-hidden={boardExpanded}
                   style={{
                     width: tasksSidebarWidth,
-                    contain: "layout paint style",
                     opacity: boardExpanded ? 0 : 1,
                     pointerEvents: boardExpanded ? "none" : "auto",
                     transform: boardExpanded ? `translate3d(-${tasksSidebarWidth + 24}px, 0, 0)` : "translate3d(0, 0, 0)",
@@ -1790,12 +1788,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                 <div
                   className="absolute inset-0 h-full min-w-0 transition-transform duration-200"
                   style={{
-                    transform: nativeApp
+                    transform: boardExpanded
                       ? "translate3d(0, 0, 0)"
-                      : boardExpanded
-                        ? "translate3d(0, 0, 0)"
-                        : `translate3d(${tasksSidebarWidth + 24}px, 0, 0)`,
-                    willChange: nativeApp ? undefined : "transform",
+                      : `translate3d(${tasksSidebarWidth + 24}px, 0, 0)`,
+                    willChange: "transform",
                   }}
                 >
                   <BoardCanvas
@@ -1826,7 +1822,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     onToggleAssistant={toggleAssistantPanel}
                     performanceHud={performanceHud}
                     onTogglePerformanceHud={() => setPerformanceHud((value) => !value)}
-                    viewportRightInset={nativeApp ? 0 : boardExpanded ? 0 : tasksSidebarWidth + 24}
+                    viewportRightInset={boardExpanded ? 0 : tasksSidebarWidth + 24}
                     boardProfile={boardProfile}
                   />
                 </div>
