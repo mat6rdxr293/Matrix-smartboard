@@ -534,7 +534,8 @@
     "room_modal_description": "Введите номер или короткое название кабинета.",
     "room_create": "Создать",
     "room_empty_title": "Кабинетов пока нет",
-    "room_empty_description": "Создайте первый кабинет, чтобы привязать к нему эту доску."
+    "room_empty_description": "Создайте первый кабинет, чтобы привязать к нему эту доску.",
+    "performance_hud_hint": "FPS, задержка пера и время отрисовки"
   },
   "defaults": {
     "slides": [

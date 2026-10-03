@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
+import { CloudUpload, DoorOpen, Expand, Gauge, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
-import ServerManagementPanel from "@/app/server/ServerManagementPanel";
 import { isNativeApp } from "@/lib/apiClient";
+
+const ServerManagementPanel = lazy(() => import("@/app/server/ServerManagementPanel"));
 
 export type ApiStatus = {
   ok: boolean;
@@ -21,7 +22,8 @@ type TopBarProps = {
   presenterMode: boolean;
   onTogglePresenter: () => void;
   running: boolean;
-  seconds: number;
+  seconds?: number;
+  timerResetToken?: number;
   onToggleRunning: () => void;
   onReset: () => void;
   currentTab: string;
@@ -34,6 +36,8 @@ type TopBarProps = {
   m365BadgeLabel?: string;
   performanceMode: "quality" | "balanced" | "performance";
   onChangePerformanceMode: (mode: "quality" | "balanced" | "performance") => void;
+  performanceHud?: boolean;
+  onTogglePerformanceHud?: () => void;
   schoolName: string;
   roomName: string;
   grade: number;
@@ -60,6 +64,7 @@ export default function TopBar({
   onTogglePresenter,
   running,
   seconds,
+  timerResetToken = 0,
   onToggleRunning,
   onReset,
   currentTab,
@@ -72,6 +77,8 @@ export default function TopBar({
   m365BadgeLabel = "M365",
   performanceMode,
   onChangePerformanceMode,
+  performanceHud = false,
+  onTogglePerformanceHud = () => undefined,
   schoolName,
   roomName,
   grade,
@@ -86,14 +93,35 @@ export default function TopBar({
   const { theme, setTheme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [serverPanelOpen, setServerPanelOpen] = useState(false);
+  const [localTimerSeconds, setLocalTimerSeconds] = useState(seconds ?? 0);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
   const nativeApp = isNativeApp();
+  const displayedSeconds = seconds ?? localTimerSeconds;
   const isSlidesTab = currentTab === "slides";
   const isTeacherTab = currentTab === "teacher";
   const showTimerControls = !isTeacherTab;
   const showPresentationControls = isSlidesTab;
   const officeManaged = isSlidesTab && m365Mode;
+
+  useEffect(() => {
+    if (typeof seconds === "number") setLocalTimerSeconds(seconds);
+  }, [seconds]);
+
+  useEffect(() => {
+    if (typeof seconds === "number" || !running) return;
+    const id = window.setInterval(() => setLocalTimerSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [running, seconds]);
+
+  useEffect(() => {
+    if (typeof seconds !== "number") setLocalTimerSeconds(0);
+  }, [timerResetToken, seconds]);
+
+  const handleResetTimer = () => {
+    if (typeof seconds !== "number") setLocalTimerSeconds(0);
+    onReset();
+  };
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -159,7 +187,7 @@ export default function TopBar({
       <div className="flex min-w-0 items-center justify-end gap-1.5">
         {showTimerControls && (
           <div className="flex h-9 min-w-[58px] items-center justify-center rounded-xl border border-white/10 bg-white/[0.035] px-2.5 text-[12px] font-semibold tabular-nums text-frost/70">
-            {formatTime(seconds)}
+            {formatTime(displayedSeconds)}
           </div>
         )}
 
@@ -272,7 +300,7 @@ export default function TopBar({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={onReset}
+                        onClick={handleResetTimer}
                         aria-label={tl("reset")}
                         className="inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
                       >
@@ -432,18 +460,52 @@ export default function TopBar({
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  className="mt-2 flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2.5 text-left transition hover:bg-white/[0.045]"
+                  aria-pressed={performanceHud}
+                  onClick={onTogglePerformanceHud}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+                      <Gauge size={15} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[11px] font-semibold text-frost/75">Performance HUD</span>
+                      <span className="mt-0.5 block truncate text-[9px] text-frost/35">{tl("performance_hud_hint")}</span>
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      "relative h-5 w-9 shrink-0 rounded-full transition",
+                      performanceHud ? "bg-accent" : "bg-white/10"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        performanceHud ? "translate-x-[18px]" : "translate-x-0.5"
+                      )}
+                    />
+                  </span>
+                </button>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      <ServerManagementPanel
-        open={serverPanelOpen}
-        onClose={() => setServerPanelOpen(false)}
-        connectionState={connectionState}
-        pendingOperations={pendingOperations}
-      />
+      {serverPanelOpen && (
+        <Suspense fallback={null}>
+          <ServerManagementPanel
+            open
+            onClose={() => setServerPanelOpen(false)}
+            connectionState={connectionState}
+            pendingOperations={pendingOperations}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ const callbacks = {
   onChangeTab: vi.fn(),
   onToggleSlideshow: vi.fn(),
   onChangePerformanceMode: vi.fn(),
+  onTogglePerformanceHud: vi.fn(),
   onCompleteLesson: vi.fn(),
   onOpenHistory: vi.fn(),
   onChangeRoom: vi.fn(),
@@ -29,6 +30,7 @@ const props = {
   tabs: [{ id: "tasks", label: "Задания" }, { id: "slides", label: "Презентация" }],
   slideshowOpen: false,
   performanceMode: "balanced" as const,
+  performanceHud: false,
   schoolName: "ОСШГ №11",
   roomName: "20",
   grade: 11,
@@ -87,6 +89,17 @@ describe("TopBar lesson UI", () => {
     expect(callbacks.onReset).toHaveBeenCalledOnce();
     expect(callbacks.onOpenHistory).toHaveBeenCalledOnce();
     expect(callbacks.onChangeRoom).toHaveBeenCalledOnce();
+  });
+
+  it("toggles Performance HUD from settings", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+
+    const hud = screen.getByRole("button", { name: /Performance HUD/i });
+    expect(hud).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(hud);
+
+    expect(callbacks.onTogglePerformanceHud).toHaveBeenCalledOnce();
   });
 
   it("switches the application theme from settings", () => {

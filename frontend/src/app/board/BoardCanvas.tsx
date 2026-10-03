@@ -12,11 +12,16 @@ import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
+import { Gauge, Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 import { isNativeApp } from "@/lib/apiClient";
+import {
+  isPerformanceTelemetryEnabled,
+  recordCanvasDraw,
+  recordPointerSample,
+} from "@/app/performance/performanceTelemetry";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
 
@@ -106,6 +111,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   assistantOpen,
   onToggleTask,
   onToggleAssistant,
+  performanceHud = false,
+  onTogglePerformanceHud,
   boardProfile,
 }: {
   onOcrText?: (text: string) => void;
@@ -133,6 +140,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   assistantOpen?: boolean;
   onToggleTask?: () => void;
   onToggleAssistant?: () => void;
+  performanceHud?: boolean;
+  onTogglePerformanceHud?: () => void;
   boardProfile: BoardProfile;
 }, ref: ForwardedRef<BoardCanvasHandle>) {
   const { tl } = useI18n();
@@ -701,6 +710,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, [boardLock, mode]);
 
   function drawFrame() {
+    const measure = isPerformanceTelemetryEnabled();
+    const drawStartedAt = measure ? performance.now() : 0;
     if (workerEnabledRef.current && workerRef.current) {
       workerRef.current.postMessage({
         type: "render",
@@ -723,6 +734,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           eraserPreview: eraserPreviewRef.current,
         },
       });
+      if (measure) recordCanvasDraw(performance.now() - drawStartedAt);
       return;
     }
     const canvas = canvasRef.current;
@@ -758,6 +770,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       ctx.stroke();
       ctx.restore();
     }
+    if (measure) recordCanvasDraw(performance.now() - drawStartedAt);
   }
 
   drawFrameRef.current = drawFrame;
@@ -792,6 +805,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   const drawIncrementalSegment = (stroke: Stroke, segment: { x: number; y: number }[]) => {
     if (segment.length < 2) return;
+    const measure = isPerformanceTelemetryEnabled();
+    const drawStartedAt = measure ? performance.now() : 0;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -814,6 +829,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     ctx.stroke();
     ctx.restore();
+    if (measure) recordCanvasDraw(performance.now() - drawStartedAt);
   };
 
   const startStroke = (x: number, y: number) => {
@@ -857,6 +873,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (touchPanRef.current.active || (mode !== "draw" && mode !== "erase")) return;
     if (!shouldHandlePointerType(event.pointerType)) return;
     if (event.cancelable) event.preventDefault();
+    recordPointerSample(event.timeStamp || performance.now());
     const points = extractNativePoints(event, canvas);
     if (points.length) addPoints(points);
   };
@@ -1177,6 +1194,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     if (activePointerIdRef.current !== e.pointerId) return;
     e.preventDefault();
+    if (!rawPointerSupportedRef.current && (mode === "draw" || mode === "erase")) {
+      recordPointerSample((e.nativeEvent as PointerEvent).timeStamp || performance.now());
+    }
     if (rawPointerSupportedRef.current && (mode === "draw" || mode === "erase")) {
       return;
     }
@@ -2374,6 +2394,28 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                     {tl("center")}
                   </button>
                 </div>
+                {onTogglePerformanceHud && (
+                  <button
+                    type="button"
+                    className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2 text-left"
+                    aria-pressed={performanceHud}
+                    onClick={onTogglePerformanceHud}
+                  >
+                    <span className="inline-flex items-center gap-2 text-xs font-medium text-frost/70">
+                      <Gauge size={14} className="text-accent" />
+                      Performance HUD
+                    </span>
+                    <span className={cn(
+                      "relative h-5 w-9 rounded-full transition",
+                      performanceHud ? "bg-accent" : "bg-white/10"
+                    )}>
+                      <span className={cn(
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                        performanceHud ? "translate-x-[18px]" : "translate-x-0.5"
+                      )} />
+                    </span>
+                  </button>
+                )}
                 <div className="flex items-center gap-2">
                   <div
                     className="h-6 w-6 rounded-full border border-white/20 bg-white/10 flex items-center justify-center text-xs"
