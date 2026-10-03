@@ -8,13 +8,15 @@ export type MathKeyboardAction =
   | { type: "template"; latex: string; selectKind: string }
   | { type: "backspace" }
   | { type: "clear" }
-  | { type: "previous" }
-  | { type: "next" };
+  | { type: "moveLeft" }
+  | { type: "moveRight" }
+  | { type: "nextField" };
 
 type Props = {
   onAction: (action: MathKeyboardAction) => void;
   activeLabel: string;
   canNavigate: boolean;
+  canNextField: boolean;
 };
 
 type KeyDef = {
@@ -104,7 +106,7 @@ const SYMBOL_ROWS: KeyDef[][] = [
     { label: "∂", latex: "\\partial " }, { label: "°", latex: "^{\\circ}", selectKind: "exponent" },
   ],
 ];
-export default function MathKeyboard({ onAction, activeLabel, canNavigate }: Props) {
+export default function MathKeyboard({ onAction, activeLabel, canNavigate, canNextField }: Props) {
   const { tl } = useI18n();
   const [tab, setTab] = useState<"basic" | "structures" | "functions" | "symbols">("basic");
 
@@ -186,7 +188,7 @@ export default function MathKeyboard({ onAction, activeLabel, canNavigate }: Pro
           type="button"
           className="math-key-control"
           disabled={!canNavigate}
-          onClick={() => onAction({ type: "previous" })}
+          onClick={() => onAction({ type: "moveLeft" })}
           aria-label={tl("math_keyboard_previous")}
         >
           <ArrowLeft size={16} />
@@ -195,7 +197,7 @@ export default function MathKeyboard({ onAction, activeLabel, canNavigate }: Pro
           type="button"
           className="math-key-control"
           disabled={!canNavigate}
-          onClick={() => onAction({ type: "next" })}
+          onClick={() => onAction({ type: "moveRight" })}
           aria-label={tl("math_keyboard_next")}
         >
           <ArrowRight size={16} />
@@ -211,8 +213,8 @@ export default function MathKeyboard({ onAction, activeLabel, canNavigate }: Pro
         <button
           type="button"
           className="math-key-control border-accent/25 bg-accent/[0.08] text-accent"
-          disabled={!canNavigate}
-          onClick={() => onAction({ type: "next" })}
+          disabled={!canNextField}
+          onClick={() => onAction({ type: "nextField" })}
         >
           <MoveRight size={15} />
           <span>{tl("math_keyboard_next_field")}</span>

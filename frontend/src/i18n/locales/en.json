@@ -515,8 +515,8 @@
     "math_keyboard_basic": "Basic",
     "math_keyboard_structures": "Structures",
     "math_keyboard_functions": "Functions",
-    "math_keyboard_previous": "Previous field",
-    "math_keyboard_next": "Next field",
+    "math_keyboard_previous": "Previous position",
+    "math_keyboard_next": "Next position",
     "math_keyboard_delete": "Delete",
     "math_keyboard_clear": "Clear",
     "math_keyboard_next_field": "Next",
@@ -534,7 +534,9 @@
     "room_modal_description": "Enter a room number or a short room name.",
     "room_create": "Create",
     "room_empty_title": "No rooms yet",
-    "room_empty_description": "Create the first room to bind this board to it."
+    "room_empty_description": "Create the first room to bind this board to it.",
+    "math_keyboard_caret_hint": "Tap anywhere in the formula. Arrows move the caret through symbols.",
+    "math_edit_cursor": "Formula position"
   },
   "defaults": {
     "slides": [
