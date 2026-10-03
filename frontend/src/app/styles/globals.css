@@ -524,3 +524,53 @@ body.native-app .session-board-profile svg {
 body.native-app .structured-math-preview [data-edit-id] {
   transition: none;
 }
+
+.math-edit-active [data-edit-id],
+.structured-math-preview .math-edit-active {
+  background: rgb(var(--color-accent) / 0.16);
+  box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.24);
+}
+
+.structured-math-preview [data-edit-id] {
+  min-width: 0.22em;
+  min-height: 0.7em;
+}
+
+.math-key-control {
+  display: inline-flex;
+  min-width: 0;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 0.55rem;
+  background: rgb(255 255 255 / 0.035);
+  padding: 0 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: rgb(var(--color-frost) / 0.62);
+  transition:
+    background-color 100ms ease,
+    border-color 100ms ease,
+    transform 80ms ease;
+}
+
+.math-key-control:active:not(:disabled) {
+  transform: scale(0.97);
+  background: rgb(var(--color-accent) / 0.12);
+}
+
+.math-key-control:disabled {
+  opacity: 0.28;
+}
+
+body.native-app .math-keyboard button {
+  transition-duration: 70ms;
+}
+
+.math-keyboard button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
