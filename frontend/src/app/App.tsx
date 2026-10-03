@@ -1686,27 +1686,21 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           {tab === "tasks" && (
             <div className="relative flex h-full min-h-0 flex-col gap-2">
               <div className="relative min-h-0 flex-1">
-              <div className="flex h-full min-h-0 overflow-hidden">
-                <motion.div
-                  className="h-full shrink-0 overflow-hidden"
-                  initial={false}
-                  animate={{
-                    width: boardExpanded ? 0 : tasksSidebarWidth,
-                    opacity: boardExpanded ? 0 : 1,
-                  }}
-                  transition={{
-                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: boardExpanded ? 0.14 : 0.2, ease: "easeOut" },
-                  }}
+              <div className="relative h-full min-h-0 overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 z-20 h-full overflow-hidden transition-[transform,opacity] duration-200"
                   aria-hidden={boardExpanded}
-                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
+                  style={{
+                    width: tasksSidebarWidth,
+                    opacity: boardExpanded ? 0 : 1,
+                    pointerEvents: boardExpanded ? "none" : "auto",
+                    transform: boardExpanded ? `translate3d(-${tasksSidebarWidth + 24}px, 0, 0)` : "translate3d(0, 0, 0)",
+                    willChange: "transform, opacity",
+                  }}
                 >
-                  <motion.div
+                  <div
                     className="glass h-full rounded-2xl p-4 shadow-soft"
                     style={{ width: tasksSidebarWidth }}
-                    initial={false}
-                    animate={{ x: boardExpanded ? -14 : 0 }}
-                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                   >
                     <div className="mb-3">
                       <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">
@@ -1770,27 +1764,36 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         )}
                       </div>
                     </div>
-                  </motion.div>
-                </motion.div>
+                  </div>
+                </div>
 
-                <motion.div
-                  className="relative flex h-full shrink-0 items-stretch justify-center overflow-hidden"
-                  initial={false}
-                  animate={{ width: boardExpanded ? 0 : 24, opacity: boardExpanded ? 0 : 1 }}
-                  transition={{
-                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: 0.16, ease: "easeOut" },
-                  }}
+                <div
+                  className="absolute inset-y-0 z-20 flex h-full items-stretch justify-center overflow-hidden transition-[transform,opacity] duration-200"
                   onPointerDown={boardExpanded ? undefined : startSidebarResize("tasks")}
-                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
+                  style={{
+                    left: tasksSidebarWidth,
+                    width: 24,
+                    opacity: boardExpanded ? 0 : 1,
+                    pointerEvents: boardExpanded ? "none" : "auto",
+                    transform: boardExpanded ? `translate3d(-${tasksSidebarWidth + 24}px, 0, 0)` : "translate3d(0, 0, 0)",
+                    willChange: "transform, opacity",
+                  }}
                 >
                   <div
                     className="h-full w-2 cursor-col-resize rounded-full bg-white/5 hover:bg-white/10"
                     style={{ touchAction: "none" }}
                   />
-                </motion.div>
+                </div>
 
-                <div className="h-full min-w-0 flex-1">
+                <div
+                  className="absolute inset-0 h-full min-w-0 transition-transform duration-200"
+                  style={{
+                    transform: boardExpanded
+                      ? "translate3d(0, 0, 0)"
+                      : `translate3d(${tasksSidebarWidth + 24}px, 0, 0)`,
+                    willChange: "transform",
+                  }}
+                >
                   <BoardCanvas
                     ref={boardCanvasRef}
                     ocrEnabled={!!apiStatus?.ocr}
@@ -1819,6 +1822,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     onToggleAssistant={toggleAssistantPanel}
                     performanceHud={performanceHud}
                     onTogglePerformanceHud={() => setPerformanceHud((value) => !value)}
+                    viewportRightInset={boardExpanded ? 0 : tasksSidebarWidth + 24}
                     boardProfile={boardProfile}
                   />
                 </div>
