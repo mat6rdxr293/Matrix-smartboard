@@ -288,87 +288,73 @@ export default function AppRoot() {
     return <LessonWorkspace school={school} room={room} lesson={lesson} boardProfile={boardProfile} onComplete={() => void finishLesson()} onOpenHistory={() => void openHistory()} onChangeRoom={() => { setLesson(null); setView("roomSetup"); }} />;
   }
 
-  const entryTransition = nativeNavigation
-    ? { duration: 0.1, ease: "easeOut" as const }
-    : { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
-  const entryVariants = nativeNavigation
-    ? {
-        enter: () => ({ opacity: 0 }),
-        center: { opacity: 1 },
-        exit: () => ({ opacity: 1, transition: { duration: 0 } }),
-      }
-    : {
-        enter: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? 32 : -32 }),
-        center: { opacity: 1, x: 0 },
-        exit: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? -32 : 32 }),
-      };
+  const entryTransition = { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
+  const entryVariants = {
+    enter: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? 32 : -32 }),
+    center: { opacity: 1, x: 0 },
+    exit: (direction: 1 | -1) => ({ opacity: 0, x: direction > 0 ? -32 : 32 }),
+  };
+
+  const pickerKey =
+    view === "boardProfile" && grade && selectedSubjectId
+      ? "board-profile-picker"
+      : view === "subject" && grade
+        ? "subject-picker"
+        : "grade-picker";
+
+  const pickerContent =
+    view === "boardProfile" && grade && selectedSubjectId ? (
+      <BoardProfilePicker
+        onSelectProfile={(profile) => void startLesson(profile)}
+        onBack={() => { setEntryDirection(-1); setError(null); setView("subject"); }}
+      />
+    ) : view === "subject" && grade ? (
+      <SubjectPicker
+        grade={grade}
+        locale={locale}
+        loading={busy}
+        error={error}
+        onSelectSubject={(subjectId) => {
+          setEntryDirection(1);
+          setSelectedSubjectId(subjectId);
+          setError(null);
+          setView("boardProfile");
+        }}
+        onBack={() => { setEntryDirection(-1); setSelectedSubjectId(null); setError(null); setView("grade"); }}
+      />
+    ) : (
+      <GradePicker
+        school={school}
+        room={room}
+        onSelectGrade={(selected) => { setEntryDirection(1); setGrade(selected); setSelectedSubjectId(null); setError(null); setView("subject"); }}
+        onOpenHistory={() => void openHistory()}
+        onLogout={() => void logout()}
+        onChangeRoom={() => setView("roomSetup")}
+      />
+    );
 
   return (
     <div className="relative h-full overflow-hidden">
-      <AnimatePresence mode="wait" initial={false} custom={entryDirection}>
-        {view === "boardProfile" && grade && selectedSubjectId ? (
+      {nativeNavigation ? (
+        <div key={pickerKey} className="h-full">
+          {pickerContent}
+        </div>
+      ) : (
+        <AnimatePresence mode="wait" initial={false} custom={entryDirection}>
           <motion.div
-            key="board-profile-picker"
+            key={pickerKey}
             custom={entryDirection}
             variants={entryVariants}
             className="h-full"
             initial="enter"
             animate="center"
-            exit={nativeNavigation ? undefined : "exit"}
+            exit="exit"
             transition={entryTransition}
           >
-            <BoardProfilePicker
-              onSelectProfile={(profile) => void startLesson(profile)}
-              onBack={() => { setEntryDirection(-1); setError(null); setView("subject"); }}
-            />
+            {pickerContent}
           </motion.div>
-        ) : view === "subject" && grade ? (
-          <motion.div
-            key="subject-picker"
-            custom={entryDirection}
-            variants={entryVariants}
-            className="h-full"
-            initial="enter"
-            animate="center"
-            exit={nativeNavigation ? undefined : "exit"}
-            transition={entryTransition}
-          >
-            <SubjectPicker
-              grade={grade}
-              locale={locale}
-              loading={busy}
-              error={error}
-              onSelectSubject={(subjectId) => {
-                setEntryDirection(1);
-                setSelectedSubjectId(subjectId);
-                setError(null);
-                setView("boardProfile");
-              }}
-              onBack={() => { setEntryDirection(-1); setSelectedSubjectId(null); setError(null); setView("grade"); }}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="grade-picker"
-            custom={entryDirection}
-            variants={entryVariants}
-            className="h-full"
-            initial="enter"
-            animate="center"
-            exit={nativeNavigation ? undefined : "exit"}
-            transition={entryTransition}
-          >
-            <GradePicker
-              school={school}
-              room={room}
-              onSelectGrade={(selected) => { setEntryDirection(1); setGrade(selected); setSelectedSubjectId(null); setError(null); setView("subject"); }}
-              onOpenHistory={() => void openHistory()}
-              onLogout={() => void logout()}
-              onChangeRoom={() => setView("roomSetup")}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>
+      )}
 
       {view !== "subject" && view !== "boardProfile" && resumeCandidate && (
         <ResumeLessonModal
