@@ -124,6 +124,9 @@ textarea,
   position: absolute;
   opacity: 1;
   pointer-events: auto;
+  contain: layout paint style;
+  isolation: isolate;
+  backface-visibility: hidden;
   will-change: transform, opacity;
   left: 50%;
   bottom: 12px;
