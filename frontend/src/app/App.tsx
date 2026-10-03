@@ -22,7 +22,7 @@ import {
   updateGraphFromAiAction,
   type AiBoardAction,
 } from "@/app/board/aiBoardActions";
-import type { AssistantMessage } from "@/app/ai/AIAssistant";
+import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
 import {
@@ -42,9 +42,7 @@ import { sessionApi } from "@/app/session/api";
 import type { Lesson, Room, School } from "@/app/session/types";
 import type { BoardProfile } from "@/app/board/boardProfiles";
 import TeacherPinGate from "@/app/teacher/TeacherPinGate";
-import PerformanceHud from "@/app/performance/PerformanceHud";
 
-const AIAssistant = lazy(() => import("@/app/ai/AIAssistant"));
 const TeacherDashboard = lazy(() => import("@/app/teacher/TeacherDashboard"));
 
 const TAB_IDS = ["tasks", "slides", "teacher"] as const;
@@ -119,7 +117,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const storageBackupKey = `${subjectStoragePrefix}.backup.storage`;
   const boardReplayBackupKey = `school.${school.id}.room.${room.id}.lesson.${lesson.id}.backup.boardReplayQueue`;
   const performanceModeKey = `${subjectStoragePrefix}.performance.mode`;
-  const performanceHudKey = "matrix.performance.hud";
   const tasksSidebarWidthKey = `${subjectStoragePrefix}.sidebar.tasks`;
   const slidesSidebarWidthKey = `${subjectStoragePrefix}.sidebar.slides`;
   const freeBoardModeKey = `practice.lesson.${lesson.id}.freeBoard`;
@@ -138,7 +135,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     const nav = navigator as Navigator & { deviceMemory?: number };
     const memory = nav.deviceMemory ?? 8;
     const cores = nav.hardwareConcurrency ?? 8;
-    return memory <= 2 || (memory <= 4 && cores <= 2);
+    const coarse = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+    return memory <= 2 || (memory <= 4 && cores <= 4) || (coarse && memory <= 4);
   }, []);
   const defaultPerformanceMode: PerformanceMode = autoUltraLite ? "performance" : "balanced";
   const [performanceMode, setPerformanceMode] = useState<PerformanceMode>(() => {
@@ -148,10 +146,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (raw === "off") return "balanced";
     if (raw === "auto") return defaultPerformanceMode;
     return defaultPerformanceMode;
-  });
-  const [performanceHud, setPerformanceHud] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(performanceHudKey) === "1";
   });
   const ultraLite = performanceMode === "performance";
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -171,7 +165,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setTeacherUnlocked(false);
   }, [teacherPinKey]);
   const [timerRunning, setTimerRunning] = useState(false);
-  const [timerResetToken, setTimerResetToken] = useState(0);
+  const [timerSeconds, setTimerSeconds] = useState(0);
   const [boardExpanded, setBoardExpanded] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
@@ -219,11 +213,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const lastServerSnapshotRef = useRef("");
   const scoreHideTimerRef = useRef<number | null>(null);
   const boardReplayQueueRef = useRef<BoardReplayOp[]>([]);
-  const boardReplayBackupJsonRef = useRef("");
   const boardReplayFlushRef = useRef<Promise<void> | null>(null);
   const boardReplayLoadedRef = useRef(false);
-  const boardReplayBackupTimerRef = useRef<number | null>(null);
-  const storageBackupTimerRef = useRef<number | null>(null);
   const [scoreOverlay, setScoreOverlay] = useState<{
     percent: number;
     color: string;
@@ -270,54 +261,18 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     }, 3000);
   };
 
-  const writeBoardReplayBackup = (queue: BoardReplayOp[]) => {
+  const persistBoardReplayQueue = (queue: BoardReplayOp[]) => {
+    setPendingOperations(queue.length);
     if (typeof window === "undefined") return;
+    if (!queue.length) {
+      window.localStorage.removeItem(boardReplayBackupKey);
+      return;
+    }
     try {
-      if (!queue.length) {
-        boardReplayBackupJsonRef.current = "";
-        window.localStorage.removeItem(boardReplayBackupKey);
-      } else {
-        const serialized = JSON.stringify(queue);
-        boardReplayBackupJsonRef.current = serialized;
-        window.localStorage.setItem(boardReplayBackupKey, serialized);
-      }
+      window.localStorage.setItem(boardReplayBackupKey, JSON.stringify(queue));
     } catch {
       // ignore quota/storage errors
     }
-  };
-
-  const appendBoardReplayBackup = (operation: BoardReplayOp) => {
-    if (typeof window === "undefined") return;
-    try {
-      const item = JSON.stringify(operation);
-      const current = boardReplayBackupJsonRef.current;
-      const serialized =
-        current.startsWith("[") && current.endsWith("]") && current.length > 2
-          ? `${current.slice(0, -1)},${item}]`
-          : `[${item}]`;
-      boardReplayBackupJsonRef.current = serialized;
-      window.localStorage.setItem(boardReplayBackupKey, serialized);
-    } catch {
-      // full queue backup will retry shortly
-    }
-  };
-
-  const persistBoardReplayQueue = (queue: BoardReplayOp[]) => {
-    if (typeof window === "undefined") return;
-    if (boardReplayBackupTimerRef.current !== null) {
-      window.clearTimeout(boardReplayBackupTimerRef.current);
-      boardReplayBackupTimerRef.current = null;
-    }
-    if (!queue.length) {
-      setPendingOperations(0);
-      writeBoardReplayBackup([]);
-      return;
-    }
-    boardReplayBackupTimerRef.current = window.setTimeout(() => {
-      boardReplayBackupTimerRef.current = null;
-      setPendingOperations(boardReplayQueueRef.current.length);
-      writeBoardReplayBackup(boardReplayQueueRef.current);
-    }, 450);
   };
 
   const flushBoardReplay = () => {
@@ -353,9 +308,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   const onBoardReplayOp = (op: BoardReplayOp) => {
     setBoardHistory((previous) => replayBoardOperations(previous, [op]));
-    const queuedOperation = { ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp;
-    boardReplayQueueRef.current.push(queuedOperation);
-    appendBoardReplayBackup(queuedOperation);
+    boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
     if (connectionState === "online") setConnectionState("syncing");
     if (boardReplayLoadedRef.current && boardReplayQueueRef.current.length >= 24) {
@@ -450,6 +403,12 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     });
 
   useEffect(() => {
+    if (!timerRunning) return;
+    const id = setInterval(() => setTimerSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [timerRunning]);
+
+  useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.classList.toggle("lite-mode", ultraLite);
     return () => {
@@ -461,11 +420,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (typeof window === "undefined") return;
     window.localStorage.setItem(performanceModeKey, performanceMode);
   }, [performanceMode, performanceModeKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(performanceHudKey, performanceHud ? "1" : "0");
-  }, [performanceHud]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -513,7 +467,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         try {
           const raw = window.localStorage.getItem(boardReplayBackupKey);
           if (raw) {
-            boardReplayBackupJsonRef.current = raw;
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) queue = parsed as BoardReplayOp[];
           }
@@ -578,10 +531,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   useEffect(() => {
     const onPageHide = () => {
-      if (!boardReplayQueueRef.current.length) return;
-      writeBoardReplayBackup(boardReplayQueueRef.current);
-      if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
+      if (!boardReplayQueueRef.current.length || typeof navigator === "undefined" || !navigator.sendBeacon) return;
       try {
+        persistBoardReplayQueue(boardReplayQueueRef.current);
         const body = JSON.stringify({ operations: boardReplayQueueRef.current.slice(0, 80) });
         const path = `/api/lessons/${lesson.id}/board/operations`;
         if (isNativeApp()) {
@@ -637,47 +589,19 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   useEffect(() => {
     latestStorageRef.current = { tasks: taskData, slides: slideData, siteBackground, presentationSource };
-    if (!storageReadyRef.current || typeof window === "undefined") return;
-
-    if (storageBackupTimerRef.current !== null) {
-      window.clearTimeout(storageBackupTimerRef.current);
-    }
-
-    storageBackupTimerRef.current = window.setTimeout(() => {
-      storageBackupTimerRef.current = null;
-      const current = latestStorageRef.current;
-      window.localStorage.setItem(
-        storageBackupKey,
-        serializeStorage(current.tasks, current.slides, current.siteBackground, current.presentationSource)
-      );
-      setLastLocalBackupAt(Date.now());
-    }, 180);
-
-    return () => {
-      if (storageBackupTimerRef.current !== null) {
-        window.clearTimeout(storageBackupTimerRef.current);
-        storageBackupTimerRef.current = null;
-      }
-    };
-  }, [taskData, slideData, siteBackground, presentationSource, storageBackupKey]);
+    if (!storageReadyRef.current) return;
+    if (typeof window === "undefined") return;
+    // аварийный локальный бэкап на случай внезапного отключения
+    window.localStorage.setItem(
+      storageBackupKey,
+      serializeStorage(taskData, slideData, siteBackground, presentationSource)
+    );
+    setLastLocalBackupAt(Date.now());
+  }, [taskData, slideData, siteBackground, presentationSource]);
 
   useEffect(() => {
     return () => {
       if (scoreHideTimerRef.current) window.clearTimeout(scoreHideTimerRef.current);
-      if (boardReplayBackupTimerRef.current !== null) window.clearTimeout(boardReplayBackupTimerRef.current);
-      if (storageBackupTimerRef.current !== null) window.clearTimeout(storageBackupTimerRef.current);
-      writeBoardReplayBackup(boardReplayQueueRef.current);
-      if (typeof window !== "undefined" && storageReadyRef.current) {
-        const current = latestStorageRef.current;
-        try {
-          window.localStorage.setItem(
-            storageBackupKey,
-            serializeStorage(current.tasks, current.slides, current.siteBackground, current.presentationSource)
-          );
-        } catch {
-          // best-effort final local backup
-        }
-      }
     };
   }, []);
 
@@ -1656,9 +1580,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           presenterMode={presenterMode}
           onTogglePresenter={() => setPresenterMode((v) => !v)}
           running={timerRunning}
-          timerResetToken={timerResetToken}
+          seconds={timerSeconds}
           onToggleRunning={() => setTimerRunning((v) => !v)}
-          onReset={() => setTimerResetToken((value) => value + 1)}
+          onReset={() => setTimerSeconds(0)}
           currentTab={tab}
           tabs={tabs}
           onChangeTab={(id) => setTab(id as TabId)}
@@ -1669,8 +1593,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           m365BadgeLabel={officeEmbedLabel}
           performanceMode={performanceMode}
           onChangePerformanceMode={setPerformanceMode}
-          performanceHud={performanceHud}
-          onTogglePerformanceHud={() => setPerformanceHud((value) => !value)}
           schoolName={school.name}
           roomName={room.name}
           grade={lesson.grade}
@@ -1681,7 +1603,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           connectionState={connectionState}
           pendingOperations={pendingOperations}
         />
-        <PerformanceHud enabled={performanceHud} />
         <div className="relative min-h-0 flex-1">
           {tab === "tasks" && (
             <div className="relative flex h-full min-h-0 flex-col gap-2">
@@ -1817,8 +1738,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     assistantOpen={assistantOpen}
                     onToggleTask={!freeBoardMode && taskData.length ? toggleTaskPanel : undefined}
                     onToggleAssistant={toggleAssistantPanel}
-                    performanceHud={performanceHud}
-                    onTogglePerformanceHud={() => setPerformanceHud((value) => !value)}
                     boardProfile={boardProfile}
                   />
                 </div>
@@ -1923,24 +1842,16 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         </button>
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden p-4">
-                        <Suspense
-                          fallback={
-                            <div className="grid h-full place-items-center text-xs text-frost/35">
-                              {tl("loading")}
-                            </div>
-                          }
-                        >
-                          <AIAssistant
-                            messages={messages}
-                            onContinue={handleContinue}
-                            canContinue={canContinue}
-                            loading={assistantLoading}
-                            lowPowerMode={ultraLite}
-                            ocrEnabled={!!apiStatus?.ocr}
-                            onRecognizeBoard={recognizeBoard}
-                            onSubmitRecognized={handleRecognizedAi}
-                          />
-                        </Suspense>
+                        <AIAssistant
+                          messages={messages}
+                          onContinue={handleContinue}
+                          canContinue={canContinue}
+                          loading={assistantLoading}
+                          lowPowerMode={ultraLite}
+                          ocrEnabled={!!apiStatus?.ocr}
+                          onRecognizeBoard={recognizeBoard}
+                          onSubmitRecognized={handleRecognizedAi}
+                        />
                       </div>
                       <div
                         className="absolute bottom-1.5 right-1.5 h-4 w-4 cursor-se-resize touch-none opacity-35 after:absolute after:bottom-0 after:right-0 after:h-2.5 after:w-2.5 after:border-b after:border-r after:border-frost/50"
