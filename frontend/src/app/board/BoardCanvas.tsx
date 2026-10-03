@@ -16,6 +16,7 @@ import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mou
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
+import { isNativeApp } from "@/lib/apiClient";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
 
@@ -137,6 +138,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const { tl } = useI18n();
   const profileConfig = getBoardProfileConfig(boardProfile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRectRef = useRef<DOMRectReadOnly | null>(null);
+  const rawPointerSupportedRef = useRef(false);
+  const rawPointerHandlerRef = useRef<(event: PointerEvent) => void>(() => undefined);
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number | null>(null);
   const pendingRenderRef = useRef(false);
@@ -350,7 +354,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, [heightPx, pixelRatio, renderCap, widthPx]);
   const minPointDistanceSq = lowPowerMode ? 1.4 : 0.64;
   const maxPointsPerStroke = lowPowerMode ? 1200 : 2200;
-  const renderMinDeltaMs = lowPowerMode ? 60 : 16;
+  const renderMinDeltaMs = lowPowerMode ? 32 : 16;
   const gridStep = profileConfig.backgroundPattern === "lines" ? (lowPowerMode ? 48 : 36) : (lowPowerMode ? 40 : 28);
   const lastRenderTsRef = useRef(0);
   const supportsOffscreenWorker = useMemo(() => {
@@ -847,6 +851,34 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     scheduleRender();
   };
 
+  rawPointerHandlerRef.current = (event: PointerEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || activePointerIdRef.current !== event.pointerId) return;
+    if (touchPanRef.current.active || (mode !== "draw" && mode !== "erase")) return;
+    if (!shouldHandlePointerType(event.pointerType)) return;
+    if (event.cancelable) event.preventDefault();
+    const points = extractNativePoints(event, canvas);
+    if (points.length) addPoints(points);
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const supported =
+      !!canvas &&
+      isNativeApp() &&
+      typeof window !== "undefined" &&
+      "onpointerrawupdate" in window;
+    rawPointerSupportedRef.current = supported;
+    if (!canvas || !supported) return;
+
+    const listener = (event: Event) => rawPointerHandlerRef.current(event as PointerEvent);
+    canvas.addEventListener("pointerrawupdate", listener, { passive: false });
+    return () => {
+      rawPointerSupportedRef.current = false;
+      canvas.removeEventListener("pointerrawupdate", listener);
+    };
+  }, []);
+
   const shouldHandlePointerType = (pointerType: string) => {
     if (inputMode === "auto") return true;
     if (inputMode === "mouse") return pointerType === "mouse";
@@ -949,29 +981,28 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     };
   }, []);
 
-  const extractPoints = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const native = e.nativeEvent as PointerEvent;
+  const extractNativePoints = (native: PointerEvent, target: HTMLCanvasElement) => {
+    const rect = canvasRectRef.current ?? target.getBoundingClientRect();
+    const rawEvents =
+      typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : [native];
     const coalesced =
-      !lowPowerMode && typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : [native];
+      rawEvents && rawEvents.length
+        ? (lowPowerMode && rawEvents.length > 12 ? rawEvents.slice(-12) : rawEvents)
+        : [native];
     const scale = zoomRef.current || 1;
     const panNow = panRef.current;
-    if (!coalesced || coalesced.length === 0) {
-      return [
-        {
-          x: (e.clientX - rect.left - panNow.x) / scale,
-          y: (e.clientY - rect.top - panNow.y) / scale,
-        },
-      ];
-    }
     return coalesced.map((evt) => ({
       x: (evt.clientX - rect.left - panNow.x) / scale,
       y: (evt.clientY - rect.top - panNow.y) / scale,
     }));
   };
 
+  const extractPoints = (e: React.PointerEvent<HTMLCanvasElement>) =>
+    extractNativePoints(e.nativeEvent as PointerEvent, e.currentTarget);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!shouldHandlePointer(e)) return;
+    canvasRectRef.current = e.currentTarget.getBoundingClientRect();
     e.preventDefault();
     setShowPenPalette(false);
     setShowAllPens(false);
@@ -1146,6 +1177,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     }
     if (activePointerIdRef.current !== e.pointerId) return;
     e.preventDefault();
+    if (rawPointerSupportedRef.current && (mode === "draw" || mode === "erase")) {
+      return;
+    }
     const points = extractPoints(e);
     if (!points.length) return;
     const last = points[points.length - 1];
@@ -1159,6 +1193,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!shouldHandlePointer(e)) return;
+    canvasRectRef.current = null;
     if (e.pointerType === "touch") {
       touchPointsRef.current.delete(e.pointerId);
       if (touchPointsRef.current.size < 2) {
@@ -1219,6 +1254,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    canvasRectRef.current = null;
     if (e.pointerType === "touch") {
       touchPointsRef.current.delete(e.pointerId);
       if (touchPointsRef.current.size < 2) {

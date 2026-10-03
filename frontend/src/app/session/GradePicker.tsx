@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { GRADES, type Grade } from "./curriculum";
 import type { Room, School } from "./types";
+import { isNativeApp } from "@/lib/apiClient";
 
 type GradePickerProps = {
   school: School;
@@ -16,6 +17,7 @@ type GradePickerProps = {
 
 export default function GradePicker({ school, room, onSelectGrade, onOpenHistory, onLogout, onChangeRoom }: GradePickerProps) {
   const { locale, setLocale, tl } = useI18n();
+  const nativeApp = isNativeApp();
 
   const handleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -55,16 +57,18 @@ export default function GradePicker({ school, room, onSelectGrade, onOpenHistory
                 </button>
               ))}
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleFullscreen}
-              aria-label={tl("fullscreen")}
-              title={tl("fullscreen")}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] !p-0 text-frost/70 hover:bg-white/[0.06] hover:text-frost"
-            >
-              <Expand size={16} />
-            </Button>
+            {!nativeApp && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleFullscreen}
+                aria-label={tl("fullscreen")}
+                title={tl("fullscreen")}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] !p-0 text-frost/70 hover:bg-white/[0.06] hover:text-frost"
+              >
+                <Expand size={16} />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

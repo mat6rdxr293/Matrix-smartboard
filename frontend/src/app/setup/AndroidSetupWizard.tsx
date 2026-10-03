@@ -249,9 +249,9 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   };
 
   return (
-    <main className="session-shell grid-overlay items-center justify-center p-6">
-      <section className="glass w-full max-w-[940px] overflow-hidden rounded-[24px] border border-white/10 shadow-soft">
-        <div className="border-b border-white/10 px-7 py-6 sm:px-9">
+    <main className="android-setup-shell session-shell grid-overlay">
+      <section className="android-setup-panel glass overflow-hidden rounded-[24px] border border-white/10 shadow-soft">
+        <div className="android-setup-header border-b border-white/10 px-7 py-6 sm:px-9">
           <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-accent">Matrix Smartboard</div>
           {mode === "language" ? (
             <h1 className="mt-2 min-h-[2.6rem] overflow-hidden text-3xl font-bold tracking-[-0.03em] text-frost">
@@ -276,10 +276,10 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
           )}
         </div>
 
-        <div className="p-7 sm:p-9">
+        <div className="android-setup-body p-7 sm:p-9">
           {mode === "language" && (
-            <div className="mx-auto max-w-xl">
-              <div className="grid gap-3">
+            <div className="android-setup-language mx-auto w-full">
+              <div className="android-setup-language-grid grid gap-3">
                 {SETUP_LANGUAGES.map((item) => (
                   <button
                     key={item.code}
@@ -296,7 +296,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
           )}
 
           {mode === "choose" && (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="android-setup-choice grid gap-4 md:grid-cols-2">
               <button type="button" onClick={() => setMode("existing")} className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 text-left transition hover:border-accent/35 hover:bg-white/[0.055]">
                 <Network size={28} className="text-accent" />
                 <div className="mt-5 text-lg font-semibold text-frost">{tl("setup_find_server")}</div>
@@ -311,7 +311,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
           )}
 
           {mode === "existing" && (
-            <div className="mx-auto max-w-xl">
+            <div className="android-setup-existing mx-auto w-full">
               <Back label={tl("back")} onClick={() => { setPendingTrust(null); setMode("choose"); }} />
               <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-semibold">{tl("setup_servers_in_network")}</h2>
@@ -327,21 +327,54 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
               </div>
 
               <div className="mt-5 min-h-[78px] space-y-2">
-                {discovered.map((server) => (
-                  <button
-                    key={`${server.serverId}|${server.serverUrl}`}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => { setServerUrl(server.serverUrl); void connectExisting(server.serverUrl); }}
-                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-left transition hover:border-accent/30 hover:bg-white/[0.05] disabled:opacity-60"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-semibold text-frost">{server.name}</span>
-                      <span className="mt-1 block truncate text-xs text-frost/45">{server.serverUrl}</span>
-                    </span>
-                    <span className="ml-4 shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
-                  </button>
-                ))}
+                {discovered.map((server) => {
+                  const selected = pendingTrust?.serverUrl === server.serverUrl;
+                  return (
+                    <div
+                      key={`${server.serverId}|${server.serverUrl}`}
+                      className={selected ? "overflow-hidden rounded-xl border border-accent/30 bg-accent/[0.055]" : ""}
+                    >
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { setServerUrl(server.serverUrl); void connectExisting(server.serverUrl); }}
+                        className={`flex w-full items-center justify-between border px-4 py-3 text-left transition disabled:opacity-60 ${
+                          selected
+                            ? "border-transparent bg-transparent"
+                            : "rounded-xl border-white/10 bg-white/[0.025] hover:border-accent/30 hover:bg-white/[0.05]"
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-frost">{server.name}</span>
+                          <span className="mt-1 block truncate text-xs text-frost/45">{server.serverUrl}</span>
+                        </span>
+                        <span className="ml-4 shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
+                      </button>
+                      {selected && pendingTrust && (
+                        <div className="border-t border-accent/15 px-4 pb-4 pt-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            <ShieldCheck size={17} className="text-accent" />
+                            {tl("setup_server_confirmation")}
+                          </div>
+                          <div className="mt-1.5 text-xs leading-5 text-frost/55">{tl("setup_verify_fingerprint")}</div>
+                          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                            <div>
+                              <div className="text-[10px] uppercase tracking-[0.12em] text-frost/35">Server ID</div>
+                              <code className="mt-1 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{pendingTrust.serverId}</code>
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase tracking-[0.12em] text-frost/35">Public key pin</div>
+                              <code className="mt-1 block break-all rounded-lg bg-black/20 px-3 py-2 text-[11px] text-frost/70">{pendingTrust.pin}</code>
+                            </div>
+                          </div>
+                          <Button variant="accent" className="mt-3 h-10 w-full" disabled={busy} onClick={() => void confirmServerTrust()}>
+                            {tl("setup_confirm_pin_server")}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {discovering && discovered.length === 0 && (
                   <div className="flex h-[78px] items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.018]">
@@ -386,7 +419,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
                 </div>
               )}
 
-              {pendingTrust && (
+              {pendingTrust && !discovered.some((server) => server.serverUrl === pendingTrust.serverUrl) && (
                 <div className="mt-4 rounded-xl border border-accent/25 bg-accent/[0.06] p-4">
                   <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={17} className="text-accent" />{tl("setup_server_confirmation")}</div>
                   <div className="mt-2 text-xs leading-5 text-frost/55">{tl("setup_verify_fingerprint")}</div>
