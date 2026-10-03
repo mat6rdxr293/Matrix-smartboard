@@ -534,8 +534,7 @@
     "room_modal_description": "Кабинет нөмірін немесе қысқа атауын енгізіңіз.",
     "room_create": "Жасау",
     "room_empty_title": "Кабинеттер әлі жоқ",
-    "room_empty_description": "Осы тақтаны байланыстыру үшін бірінші кабинетті жасаңыз.",
-    "performance_hud_hint": "FPS, қалам кідірісі және сызу уақыты"
+    "room_empty_description": "Осы тақтаны байланыстыру үшін бірінші кабинетті жасаңыз."
   },
   "defaults": {
     "slides": [

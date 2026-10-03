@@ -534,8 +534,7 @@
     "room_modal_description": "Enter a room number or a short room name.",
     "room_create": "Create",
     "room_empty_title": "No rooms yet",
-    "room_empty_description": "Create the first room to bind this board to it.",
-    "performance_hud_hint": "FPS, pen latency and render timing"
+    "room_empty_description": "Create the first room to bind this board to it."
   },
   "defaults": {
     "slides": [
