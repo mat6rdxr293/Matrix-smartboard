@@ -17,6 +17,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 import { isNativeApp } from "@/lib/apiClient";
+import { NativeBoard, nativeBoardRequested, type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
+import type { PluginListenerHandle } from "@capacitor/core";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
 
@@ -139,6 +141,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const profileConfig = getBoardProfileConfig(boardProfile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasRectRef = useRef<DOMRectReadOnly | null>(null);
+  // Opt-in native Android backend. The legacy HTML canvas remains the automatic fallback.
+  const [nativeBoardReady, setNativeBoardReady] = useState(false);
+  const nativeReadyRef = useRef(false);
+  const nativeLastSyncRef = useRef<{ strokes: Stroke[] | null; signature: string }>({ strokes: null, signature: "" });
+  const nativeStrokeStartedRef = useRef<() => void>(() => undefined);
+  const nativeStrokeCommittedRef = useRef<(event: NativeStrokeEvent) => void>(() => undefined);
+  const nativeViewportRef = useRef<(event: NativeViewportEvent) => void>(() => undefined);
+
   const rawPointerSupportedRef = useRef(false);
   const rawPointerHandlerRef = useRef<(event: PointerEvent) => void>(() => undefined);
   const workerRef = useRef<Worker | null>(null);
@@ -598,6 +608,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     onChangeStrokes(next);
   };
 
+  // Native events commit into the unchanged React history/replay/OCR document model.
+  nativeStrokeStartedRef.current = () => onStartTimer();
+  nativeStrokeCommittedRef.current = ({ stroke }) => {
+    if (!nativeReadyRef.current || !stroke?.points?.length) return;
+    strokesRef.current.push(stroke);
+    onReplayOp?.({ op: "add", stroke: buildReplayStroke(stroke), ts: Date.now() });
+    syncStrokesToParent([...strokesRef.current]);
+    scheduleRender();
+  };
+  nativeViewportRef.current = ({ zoom: nextZoom, panX, panY }) => {
+    zoomRef.current = nextZoom;
+    panRef.current = { x: panX, y: panY };
+    setZoom(nextZoom);
+    setPan({ x: panX, y: panY });
+  };
+
   const syncGraphsToParent = (next: GraphElement[]) => {
     graphsRef.current = next;
     setGraphs(next);
@@ -700,7 +726,55 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     linePreviewRef.current = null;
   }, [boardLock, mode]);
 
+  function drawNativeFrame() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) return;
+    const lastStroke = strokesRef.current[strokesRef.current.length - 1];
+    const tail = lastStroke?.points[lastStroke.points.length - 1];
+    const signature = [
+      strokesRef.current.length, lastStroke?.points.length ?? 0,
+      tail?.x ?? "", tail?.y ?? "", lastStroke?.mode ?? "",
+    ].join(":");
+    const previous = nativeLastSyncRef.current;
+    const changed = previous.strokes !== strokesRef.current || previous.signature !== signature;
+    if (changed) nativeLastSyncRef.current = { strokes: strokesRef.current, signature };
+    const frame: NativeBoardFrame = {
+      viewport: {
+        left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+        screenWidth: window.innerWidth, screenHeight: window.innerHeight,
+      },
+      mode,
+      inputMode,
+      zoomPanLocked: boardLock,
+      color: humanitiesPreset === "highlight" ? "#F6D365A6" : color,
+      width: humanitiesPreset === "highlight" ? 14 : width,
+      eraserWidth,
+      bg,
+      appBg: getComputedStyle(document.documentElement).getPropertyValue("--app-background").trim() || "#0A0E14",
+      grid,
+      gridColor: isDarkBg ? "#0FFFFFFF" : "#14000000",
+      gridStep,
+      pattern: profileConfig.backgroundPattern,
+      zoom, pan,
+      preview: linePreviewRef.current,
+      ...(changed ? { strokes: strokesRef.current } : {}),
+    };
+    void NativeBoard.present(frame).catch(() => {
+      // If the Android view fails, restore the legacy web canvas rather than losing ink.
+      nativeReadyRef.current = false;
+      document.body.classList.remove("native-board-active");
+      setNativeBoardReady(false);
+      void NativeBoard.disable().catch(() => undefined);
+    });
+  }
+
   function drawFrame() {
+    if (nativeReadyRef.current) {
+      drawNativeFrame();
+      return;
+    }
     if (workerEnabledRef.current && workerRef.current) {
       workerRef.current.postMessage({
         type: "render",
@@ -1304,7 +1378,78 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   useLayoutEffect(() => {
     scheduleRender();
-  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode]);
+  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady]);
+
+  useEffect(() => {
+    if (!isNativeApp() || !nativeBoardRequested()) return;
+    let disposed = false;
+    const handles: PluginListenerHandle[] = [];
+    const setup = async () => {
+      try {
+        handles.push(await NativeBoard.addListener("strokeStarted", () => nativeStrokeStartedRef.current()));
+        handles.push(await NativeBoard.addListener("strokeCommitted", (event) => nativeStrokeCommittedRef.current(event)));
+        handles.push(await NativeBoard.addListener("viewportChanged", (event) => nativeViewportRef.current(event)));
+        if (disposed) return;
+        await NativeBoard.enable();
+        if (disposed) {
+          await NativeBoard.disable();
+          return;
+        }
+        nativeLastSyncRef.current = { strokes: null, signature: "" };
+        nativeReadyRef.current = true;
+        document.body.classList.add("native-board-active");
+        setNativeBoardReady(true);
+      } catch {
+        nativeReadyRef.current = false;
+        document.body.classList.remove("native-board-active");
+        setNativeBoardReady(false);
+      }
+    };
+    void setup();
+    return () => {
+      disposed = true;
+      nativeReadyRef.current = false;
+      document.body.classList.remove("native-board-active");
+      handles.forEach((handle) => { void handle.remove(); });
+      void NativeBoard.disable().catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!nativeBoardReady) return;
+    // React controls, graph edit handles and floating dialogs must remain clickable
+    // above the ink view. Android receives their bounding rects, never JS touch events.
+    const updateBlockers = () => {
+      const boardRect = canvasRef.current?.getBoundingClientRect();
+      if (!boardRect) return;
+      const selector = [
+        "button", "input", "textarea", "select", "[role=dialog]",
+        "[data-floating-panel]", "[data-graph-interactive=true]",
+        "[data-radix-popper-content-wrapper]", "[data-testid=board-toolbar]",
+      ].join(",");
+      const rects = Array.from(document.querySelectorAll<HTMLElement>(selector))
+        .filter((el) => {
+          const style = getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden" &&
+            style.pointerEvents !== "none" && Number(style.opacity) > 0.05;
+        })
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0 && r.height > 0 &&
+          r.left < boardRect.right && r.right > boardRect.left &&
+          r.top < boardRect.bottom && r.bottom > boardRect.top)
+        .map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height }));
+      void NativeBoard.setBlockers({ rects }).catch(() => undefined);
+    };
+    updateBlockers();
+    const interval = window.setInterval(updateBlockers, 250);
+    return () => window.clearInterval(interval);
+  }, [nativeBoardReady]);
+
+  useEffect(() => {
+    scheduleRender();
+  }, [nativeBoardReady]);
+
+
 
   useEffect(() => {
     const redrawIfVisible = () => {
@@ -1634,18 +1779,33 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const handleSnapshot = async () => {
     const board = areaRef.current;
     if (!board) return;
-    const { default: html2canvas } = await import("html2canvas");
-    const snapshot = await html2canvas(board, {
-      backgroundColor: bg,
-      scale: Math.min(window.devicePixelRatio || 1, 2),
-      useCORS: true,
-      logging: false,
-    });
-    const url = snapshot.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "board.png";
-    a.click();
+    const webCanvas = canvasRef.current;
+    // html2canvas cannot capture an Android View behind the WebView. Repaint the
+    // existing web canvas only for export, then return to the native fast path.
+    if (nativeReadyRef.current && webCanvas) {
+      const ctx = webCanvas.getContext("2d");
+      if (ctx) drawStrokes(ctx, strokesRef.current, {
+        grid, width: widthPx, height: heightPx, zoom, pan,
+        ratio: renderRatio, gridColor, gridStep, pattern: profileConfig.backgroundPattern,
+      });
+      webCanvas.style.opacity = "1";
+    }
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const snapshot = await html2canvas(board, {
+        backgroundColor: bg,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        useCORS: true,
+        logging: false,
+      });
+      const url = snapshot.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "board.png";
+      a.click();
+    } finally {
+      if (nativeReadyRef.current && webCanvas) webCanvas.style.opacity = "0";
+    }
   };
 
   const renderOcrBlob = (inputStrokes?: Stroke[]): Promise<Blob | null> => {
@@ -1852,12 +2012,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         <div className="absolute inset-0">
           <div
             className="absolute inset-0 rounded-2xl border border-white/10 overflow-hidden"
-            style={{ backgroundColor: bg }}
+            style={{ backgroundColor: nativeBoardReady ? "transparent" : bg }}
           >
             <canvas
               ref={canvasRef}
               className={cn("block h-full w-full rounded-2xl", mode === "lasso" && "cursor-crosshair")}
-              style={{ touchAction: "none" }}
+              style={{ touchAction: "none", opacity: nativeBoardReady ? 0 : 1 }}
               onContextMenu={(e) => e.preventDefault()}
               onWheel={handleCanvasWheel}
               onPointerDown={handlePointerDown}
@@ -2404,6 +2564,25 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                     ...
                   </button>
                 </div>
+                {isNativeApp() && (
+                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+                    <span className="text-xs text-frost/70">Canvas renderer</span>
+                    <Button
+                      size="sm"
+                      variant={nativeBoardReady ? "accent" : "outline"}
+                      title="Switch renderer and reload the Android app"
+                      onClick={() => {
+                        window.localStorage.setItem(
+                          "matrix.nativeBoard.enabled",
+                          nativeBoardRequested() ? "0" : "1",
+                        );
+                        window.location.reload();
+                      }}
+                    >
+                      {nativeBoardReady ? "Android (native)" : "Web Canvas"}
+                    </Button>
+                  </div>
+                )}
                 <AnimatePresence>
                   {showAllBg && (
                     <motion.div

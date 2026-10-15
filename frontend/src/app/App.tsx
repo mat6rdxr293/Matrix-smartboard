@@ -1568,6 +1568,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   return (
     <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
     <div
+      data-native-board-page
       ref={appRef}
       className="h-screen overflow-hidden px-1 pt-2"
       onContextMenu={(e) => e.preventDefault()}

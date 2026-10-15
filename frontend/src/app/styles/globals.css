@@ -796,3 +796,12 @@ body.native-app .room-card:hover {
   0%, 54% { opacity: 1; }
   55%, 100% { opacity: 0; }
 }
+
+
+/* Android hybrid renderer: keep WebView transparent above the native ink surface. */
+body.native-board-active,
+body.native-board-active #root,
+body.native-board-active [data-native-board-page] {
+  background: transparent !important;
+  background-image: none !important;
+}

@@ -3,17 +3,40 @@ package ru.matrixhost.smartboard;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.MotionEvent;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private NativeBoardView nativeBoard;
+    private boolean nativePointerCaptured;
+
+    void setNativeBoardView(NativeBoardView view) { nativeBoard = view; }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            nativePointerCaptured = nativeBoard != null && nativeBoard.canCapture(event);
+        }
+        if (nativePointerCaptured && nativeBoard != null) {
+            nativeBoard.handle(event);
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                nativePointerCaptured = false;
+            }
+            return true;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(SshProvisionerPlugin.class);
         registerPlugin(ServerDiscoveryPlugin.class);
         registerPlugin(ServerSecurityPlugin.class);
+        registerPlugin(NativeBoardPlugin.class);
         super.onCreate(savedInstanceState);
         bridge.setWebViewClient(new PinnedBridgeWebViewClient(bridge, this));
         hideSystemBars();
