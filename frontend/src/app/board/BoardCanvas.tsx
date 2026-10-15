@@ -754,7 +754,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       bg,
       appBg: getComputedStyle(document.documentElement).getPropertyValue("--app-background").trim() || "#0A0E14",
       grid,
-      gridColor: isDarkBg ? "#0FFFFFFF" : "#14000000",
+      gridColor: isDarkBg ? "#FFFFFF0F" : "#00000014",
       gridStep,
       pattern: profileConfig.backgroundPattern,
       zoom, pan,
