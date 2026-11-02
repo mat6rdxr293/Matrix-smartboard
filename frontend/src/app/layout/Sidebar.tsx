@@ -1,5 +1,4 @@
 ﻿import { motion } from "framer-motion";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/app/tasks/tasks";
 import MathText from "@/components/MathText";
@@ -31,7 +30,6 @@ export default function Sidebar({
       <div className="glass rounded-2xl p-4 shadow-soft">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">Слайды урока</h3>
-          <Badge>План</Badge>
         </div>
         <div className="flex flex-col gap-2">
           {slides.map((slide, idx) => {

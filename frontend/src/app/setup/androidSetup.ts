@@ -13,7 +13,7 @@ import {
 const SETUP_KEY = "matrix.androidSetupComplete";
 const SERVER_ID_KEY = "matrix.serverId";
 const SERVER_NAME_KEY = "matrix.serverName";
-export const CLIENT_API_VERSION = 2;
+export const CLIENT_API_VERSION = 4;
 
 export type ServerStatus = {
   ok?: boolean;

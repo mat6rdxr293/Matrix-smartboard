@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import TopBar from "@/app/layout/TopBar";
 import Slides, { type Slide } from "@/app/presentation/Slides";
 import OfficePresentationFrame from "@/app/presentation/OfficePresentationFrame";
+import PresentationErrorBoundary from "@/app/presentation/PresentationErrorBoundary";
 import {
   DEFAULT_PRESENTATION_SOURCE,
   isPresentationSource,
@@ -11,6 +12,7 @@ import {
 import type { Task } from "@/app/tasks/tasks";
 import TaskPanel from "@/app/tasks/TaskPanel";
 import MathText from "@/components/MathText";
+import MathFormula from "@/components/MathFormula";
 import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import type { Stroke } from "@/app/board/boardEngine";
 import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
@@ -33,7 +35,7 @@ import {
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
 import { Button } from "@/components/ui/button";
-import { callAi, getStatus, type AiMode } from "@/app/ai/api";
+import { callAi, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
@@ -769,13 +771,18 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     if (!wrap) return;
     const update = () => {
       const rect = wrap.getBoundingClientRect();
-      const scale = Math.max(rect.width / SLIDE_BASE_W, rect.height / SLIDE_BASE_H) || 1;
-      setSlideShowScale(scale);
+      const scale = Math.min(rect.width / SLIDE_BASE_W, rect.height / SLIDE_BASE_H) || 1;
+      setSlideShowScale(Math.max(0.05, scale));
     };
     update();
-    const ro = new ResizeObserver(update);
-    ro.observe(wrap);
-    return () => ro.disconnect();
+    const first = window.setTimeout(update, 0);
+    const second = window.setTimeout(update, 120);
+    window.addEventListener("resize", update);
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(second);
+      window.removeEventListener("resize", update);
+    };
   }, [slideshowOpen]);
 
   const selectedTask = taskData.find((t) => t.id === selectedTaskId) ?? taskData[0];
@@ -790,7 +797,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     }
   }, [selectedTaskId, taskData]);
 
-  const slideshowSlide = slideData[currentSlide];
+  const slideshowSlide = slideData[currentSlide] ?? slideData[0];
+  const slideShowPx = (value: number) => value * slideShowScale;
   const ringSize = 224;
   const ringStroke = 14;
   const ringRadius = (ringSize - ringStroke) / 2;
@@ -858,12 +866,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return Number.isFinite(value) ? clamp(Math.round(value), 0, 100) : null;
   };
 
-  const recognizeBoard = async (mode: AiMode) => {
+  const recognizeBoard = async (mode: AiMode, onProgress?: (update: ProgressUpdate) => void) => {
     if (!apiStatus?.ocr || !boardCanvasRef.current) {
       throw new Error(tl("ocr_not_available"));
     }
     return boardCanvasRef.current.recognize({
       multipleTasks: mode === "solution",
+      onProgress,
     });
   };
 
@@ -1477,10 +1486,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
             <div
               className="relative"
               style={{
-                width: SLIDE_BASE_W,
-                height: SLIDE_BASE_H,
-                transform: `scale(${slideShowScale})`,
-                transformOrigin: "center",
+                width: slideShowPx(SLIDE_BASE_W),
+                height: slideShowPx(SLIDE_BASE_H),
+                backgroundColor: slideshowSlide.backgroundColor ?? "#0A0E14",
                 backgroundImage: slideshowSlide.background ? `url(${backendAssetUrl(slideshowSlide.background)})` : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
@@ -1494,27 +1502,52 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       key={el.id}
                       className="absolute"
                       style={{
-                        left: el.x,
-                        top: el.y,
-                        width: el.w,
-                        height: el.h,
-                        padding: el.padding ?? 0,
-                        paddingLeft: el.paddingLeft ?? el.padding ?? 0,
-                        paddingRight: el.paddingRight ?? el.padding ?? 0,
-                        paddingTop: el.paddingTop ?? el.padding ?? 0,
-                        paddingBottom: el.paddingBottom ?? el.padding ?? 0,
-                        fontSize: el.fontSize ?? 24,
+                        left: slideShowPx(el.x),
+                        top: slideShowPx(el.y),
+                        width: slideShowPx(el.w),
+                        height: slideShowPx(el.h),
+                        padding: slideShowPx(el.padding ?? 0),
+                        paddingLeft: slideShowPx(el.paddingLeft ?? el.padding ?? 0),
+                        paddingRight: slideShowPx(el.paddingRight ?? el.padding ?? 0),
+                        paddingTop: slideShowPx(el.paddingTop ?? el.padding ?? 0),
+                        paddingBottom: slideShowPx(el.paddingBottom ?? el.padding ?? 0),
+                        fontSize: slideShowPx(el.fontSize ?? 24),
                         lineHeight: 1.25,
                         fontFamily: el.fontFamily,
                         color: el.color ?? "#E7F2FF",
                         textAlign: el.align ?? "left",
                         WebkitTextStroke:
-                          el.strokeWidth && el.strokeColor ? `${el.strokeWidth}px ${el.strokeColor}` : undefined,
+                          el.strokeWidth && el.strokeColor ? `${slideShowPx(el.strokeWidth)}px ${el.strokeColor}` : undefined,
                         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                         transformOrigin: "center",
                       }}
                     >
                       <MathText text={el.text} />
+                    </div>
+                  ) : el.type === "math" ? (
+                    <div
+                      key={el.id}
+                      className="absolute flex items-center overflow-hidden"
+                      style={{
+                        left: slideShowPx(el.x),
+                        top: slideShowPx(el.y),
+                        width: slideShowPx(el.w),
+                        height: slideShowPx(el.h),
+                        fontSize: slideShowPx(el.fontSize ?? 26),
+                        color: el.color ?? "#E7F2FF",
+                        textAlign: el.align ?? "center",
+                        justifyContent:
+                          el.align === "left" ? "flex-start" : el.align === "right" ? "flex-end" : "center",
+                        transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                        transformOrigin: "center",
+                      }}
+                    >
+                      <MathFormula
+                        latex={el.latex}
+                        fallbackText={el.fallbackText}
+                        display={el.display ?? true}
+                        className="w-full"
+                      />
                     </div>
                   ) : el.type === "image" ? (
                     <img
@@ -1523,10 +1556,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       alt=""
                       className="absolute object-contain"
                       style={{
-                        left: el.x,
-                        top: el.y,
-                        width: el.w,
-                        height: el.h,
+                        left: slideShowPx(el.x),
+                        top: slideShowPx(el.y),
+                        width: slideShowPx(el.w),
+                        height: slideShowPx(el.h),
                         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                         transformOrigin: "center",
                       }}
@@ -1536,16 +1569,16 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       key={el.id}
                       className="absolute"
                       style={{
-                        left: el.x,
-                        top: el.y,
-                        width: el.w,
-                        height: el.h,
+                        left: slideShowPx(el.x),
+                        top: slideShowPx(el.y),
+                        width: slideShowPx(el.w),
+                        height: slideShowPx(el.h),
                         backgroundColor: el.fill ?? "transparent",
                         border:
                           el.strokeWidth && el.strokeColor
-                            ? `${el.strokeWidth}px solid ${el.strokeColor}`
+                            ? `${slideShowPx(el.strokeWidth)}px solid ${el.strokeColor}`
                             : "none",
-                        borderRadius: el.shape === "ellipse" ? "999px" : el.shape === "round" ? "24px" : "8px",
+                        borderRadius: el.shape === "ellipse" ? "999px" : el.shape === "round" ? `${slideShowPx(24)}px` : `${slideShowPx(8)}px`,
                         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                         transformOrigin: "center",
                       }}
@@ -1880,7 +1913,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                 <div className="glass rounded-2xl p-4 shadow-soft">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">{tl("lesson_slides")}</h3>
-                    <Badge>{tl("plan")}</Badge>
                   </div>
                   <div className="flex flex-col gap-2">
                     {slideData.map((slide, idx) => (
@@ -1910,13 +1942,18 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     style={{ touchAction: "none" }}
                   />
                 </div>
-                <Slides
-                  slides={slideData}
-                  index={currentSlide}
-                  onChange={setCurrentSlide}
-                  presenterMode={presenterMode}
-                  enableHotkeys={!slideshowOpen}
-                />
+                <PresentationErrorBoundary
+                  slide={slideData[currentSlide] ?? slideData[0]}
+                  resetKey={`${currentSlide}:${slideData.length}`}
+                >
+                  <Slides
+                    slides={slideData}
+                    index={currentSlide}
+                    onChange={setCurrentSlide}
+                    presenterMode={presenterMode}
+                    enableHotkeys={!slideshowOpen}
+                  />
+                </PresentationErrorBoundary>
               </div>
             ))}
 

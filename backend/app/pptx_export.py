@@ -60,6 +60,11 @@ def export_pptx(slides: list[dict[str, Any]]) -> bytes:
     for slide_data in slides:
         slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
 
+        background_color = _hex_to_rgb(slide_data.get("backgroundColor"))
+        if background_color:
+            slide.background.fill.solid()
+            slide.background.fill.fore_color.rgb = background_color
+
         background = slide_data.get("background")
         if background:
             img = _data_url_to_bytes(background)
@@ -98,12 +103,16 @@ def export_pptx(slides: list[dict[str, Any]]) -> bytes:
                             width=width,
                             height=height,
                         )
-                elif el_type == "text":
-                    text = str(el.get("text", ""))
-                    font_size = int(el.get("fontSize") or 22)
+                elif el_type in {"text", "math"}:
+                    text = str(
+                        el.get("text", "")
+                        if el_type == "text"
+                        else el.get("fallbackText") or el.get("latex", "")
+                    )
+                    font_size = int(el.get("fontSize") or (28 if el_type == "math" else 22))
                     font_family = el.get("fontFamily")
                     color = _hex_to_rgb(el.get("color"))
-                    align = str(el.get("align") or "left").lower()
+                    align = str(el.get("align") or ("center" if el_type == "math" else "left")).lower()
                     box = slide.shapes.add_textbox(left, top, width, height)
                     tf = box.text_frame
                     tf.clear()
@@ -119,6 +128,8 @@ def export_pptx(slides: list[dict[str, Any]]) -> bytes:
                     run.font.size = Pt(font_size)
                     if font_family:
                         run.font.name = str(font_family)
+                    font_weight = str(el.get("fontWeight") or "normal").lower()
+                    run.font.bold = font_weight in {"semibold", "bold"}
                     if color:
                         run.font.color.rgb = color
                 elif el_type == "shape":

@@ -183,7 +183,7 @@ export default function TopBar({
             >
               <Play size={15} className="mr-1.5" /> {tl("slideshow")}
             </Button>
-            {officeManaged && <Badge className="bg-white/10">{m365BadgeLabel}</Badge>}
+            {officeManaged && <Badge>{m365BadgeLabel}</Badge>}
           </>
         )}
 

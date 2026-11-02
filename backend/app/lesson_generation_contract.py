@@ -23,10 +23,29 @@ def _color(value: str) -> str:
     return value.upper()
 
 
+_MATH_SEGMENT = re.compile(
+    r"(?:\$\$.*?\$\$|\\\[.*?\\\]|\\\(.*?\\\)|(?<!\$)\$(?!\$).*?(?<!\$)\$(?!\$))",
+    re.DOTALL,
+)
+
+
 def _unicode_text(value: str, *, field_name: str) -> str:
     if _LATEX_MARKERS.search(value):
         raise ValueError(
-            f"{field_name}: LaTeX запрещён. Используйте Unicode, например Φ = B·S·cos α или a²."
+            f"{field_name}: сырой LaTeX в text запрещён. Используйте math element или Unicode."
+        )
+    return value
+
+
+def _rich_text(value: str, *, field_name: str) -> str:
+    """Allow delimited LaTeX while tolerating readable plain-text math."""
+    outside = _MATH_SEGMENT.sub("", value)
+    # Plain notation such as x^2, x^(n), a_1 or a_(n) is valid readable text.
+    # What must never leak outside an explicit math segment are raw LaTeX
+    # commands/backslashes or stray dollar delimiters.
+    if "\\" in outside or "$" in outside:
+        raise ValueError(
+            f"{field_name}: LaTeX-команды должны находиться внутри \\(...\\) или \\[...\\]."
         )
     return value
 
@@ -92,7 +111,25 @@ class TextElement(PositionedElement):
 
     @model_validator(mode="after")
     def validate_text(self) -> "TextElement":
-        _unicode_text(self.text, field_name=f"text element {self.id}")
+        _rich_text(self.text, field_name=f"text element {self.id}")
+        if self.color is not None:
+            self.color = _color(self.color)
+        return self
+
+
+class MathElement(PositionedElement):
+    type: Literal["math"]
+    latex: str = Field(min_length=1, max_length=800)
+    fallbackText: str = Field(min_length=1, max_length=800)
+    fontSize: float = Field(default=28, gt=0)
+    color: str | None = None
+    align: Literal["left", "center", "right"] = "center"
+    display: bool = True
+
+    @model_validator(mode="after")
+    def validate_math(self) -> "MathElement":
+        if "$" in self.latex or "\\(" in self.latex or "\\[" in self.latex:
+            raise ValueError("math.latex хранится без внешних LaTeX-разделителей")
         if self.color is not None:
             self.color = _color(self.color)
         return self
@@ -120,7 +157,7 @@ class ImageElement(PositionedElement):
     image_index: int | None = Field(ge=0, description="Индекс изображения на странице с 0; null, если модель не уверена")
 
 
-SlideElement = Annotated[Union[TextElement, ShapeElement, ImageElement], Field(discriminator="type")]
+SlideElement = Annotated[Union[TextElement, MathElement, ShapeElement, ImageElement], Field(discriminator="type")]
 
 
 def _intersects(a: PositionedElement, b: PositionedElement) -> bool:
@@ -148,8 +185,8 @@ class GeneratedSlide(ContractModel):
                 if not _intersects(left, right):
                     continue
 
-                left_content = left.type in {"text", "image"}
-                right_content = right.type in {"text", "image"}
+                left_content = left.type in {"text", "math", "image"}
+                right_content = right.type in {"text", "math", "image"}
                 if left_content and right_content:
                     raise ValueError(
                         f"Слайд {self.id}: элементы {left.id} и {right.id} пересекаются. "
@@ -165,15 +202,28 @@ class GeneratedSlide(ContractModel):
         return self
 
 
+class TaskCheck(ContractModel):
+    status: Literal["ok", "fixed", "wrong", "unverified"]
+    note: str = ""
+
+    @model_validator(mode="after")
+    def validate_note(self) -> "TaskCheck":
+        if self.note:
+            _rich_text(self.note, field_name="task.check.note")
+        return self
+
+
 class BaseTask(ContractModel):
     id: str = Field(min_length=1, max_length=120)
     question: str = Field(min_length=1)
     answer: str = Field(min_length=1)
+    level: int | None = Field(default=None, ge=1, le=3)
+    check: TaskCheck | None = None
 
     @model_validator(mode="after")
     def validate_unicode(self) -> "BaseTask":
-        _unicode_text(self.question, field_name=f"task {self.id}.question")
-        _unicode_text(self.answer, field_name=f"task {self.id}.answer")
+        _rich_text(self.question, field_name=f"task {self.id}.question")
+        _rich_text(self.answer, field_name=f"task {self.id}.answer")
         return self
 
 
@@ -184,12 +234,16 @@ class TestTask(BaseTask):
     @model_validator(mode="after")
     def validate_test(self) -> "TestTask":
         for index, option in enumerate(self.options):
-            _unicode_text(option, field_name=f"task {self.id}.options[{index}]")
+            _rich_text(option, field_name=f"task {self.id}.options[{index}]")
         if len(set(self.options)) != len(self.options):
             raise ValueError(f"Задание {self.id}: варианты ответа должны быть уникальными")
         if self.answer not in self.options:
             raise ValueError(f"Задание {self.id}: answer должен дословно совпадать с одним из options")
         return self
+
+
+class OpenTask(BaseTask):
+    type: Literal["open"]
 
 
 class CalcTask(BaseTask):
@@ -198,11 +252,11 @@ class CalcTask(BaseTask):
 
     @model_validator(mode="after")
     def validate_solution(self) -> "CalcTask":
-        _unicode_text(self.solution, field_name=f"task {self.id}.solution")
+        _rich_text(self.solution, field_name=f"task {self.id}.solution")
         return self
 
 
-GeneratedTask = Annotated[Union[TestTask, CalcTask], Field(discriminator="type")]
+GeneratedTask = Annotated[Union[TestTask, OpenTask, CalcTask], Field(discriminator="type")]
 
 
 class GeneratedLesson(ContractModel):
@@ -227,12 +281,13 @@ MODEL_RULES = [
     "elements — это порядок слоёв: первый элемент рисуется снизу, последний сверху.",
     "text и image не пересекаются друг с другом. shape может лежать под ними как карточка или фон.",
     "Если shape пересекает text/image, shape должен стоять раньше этого элемента в elements.",
-    "Формулы во всех видимых строках задаются Unicode-текстом, не LaTeX: Φ = B·S·cos α, a², ω.",
+    "Обычный text не содержит сырой LaTeX. Отдельные формулы задаются math element: latex без разделителей + fallbackText.",
+    "В заданиях LaTeX разрешён только внутри \\(...\\) или \\[...\\]; обычный текст остаётся обычным текстом.",
     "page — физический номер страницы PDF с 1. image_index — индекс изображения на этой странице с 0; null означает, что модель не уверена.",
     "Явный стиль элемента имеет приоритет над theme. Отсутствующие color/fontFamily у text наследуются из theme.",
     "Цвет элемента не обязан дословно совпадать с палитрой theme, но theme должна оставаться основной палитрой.",
-    "Для test answer дословно совпадает с одним из options. Для calc обязательно поле solution.",
-    "Разрешены только примитивы text, shape и image. В v1 нет градиентного фона и специальных 'card/formulaBlock/hero' элементов.",
+    "Для test answer дословно совпадает с одним из options. Для open нужен эталонный answer. Для calc обязательно поле solution.",
+    "Разрешены примитивы text, math, shape и image. В v1 нет градиентного фона и специальных 'card/hero' элементов.",
 ]
 
 
@@ -241,12 +296,13 @@ def resolved_lesson_payload(lesson: GeneratedLesson) -> dict:
     theme = lesson.theme
     for slide in payload["slides"]:
         for element in slide["elements"]:
-            if element["type"] != "text":
-                continue
-            if element.get("color") is None:
+            if element["type"] == "text":
+                if element.get("color") is None:
+                    element["color"] = theme.textColor
+                if element.get("fontFamily") is None:
+                    element["fontFamily"] = theme.fontFamily
+            elif element["type"] == "math" and element.get("color") is None:
                 element["color"] = theme.textColor
-            if element.get("fontFamily") is None:
-                element["fontFamily"] = theme.fontFamily
     return payload
 
 

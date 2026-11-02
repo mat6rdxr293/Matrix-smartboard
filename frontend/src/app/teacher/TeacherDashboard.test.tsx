@@ -99,6 +99,23 @@ describe("TeacherDashboard simplified navigation", () => {
     expect(screen.getByRole("button", { name: "Сохранить PPTX на сервер" })).toBeInTheDocument();
   });
 
+  it("opens the integrated AI lesson generator from the teacher home", async () => {
+    mount();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Создать урок с ИИ/ }));
+    expect(await screen.findByRole("heading", { name: "Как создать урок?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Назад: Создать урок с ИИ" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Вставить материал/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Учебник/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сгенерировать урок" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Учебник/ }));
+    expect(await screen.findByRole("heading", { name: "Учебник" })).toBeInTheDocument();
+    expect(screen.getByText("Учебники пока не добавлены")).toBeInTheDocument();
+    expect(screen.getByText("Добавить PDF учебника")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сгенерировать урок" })).toBeDisabled();
+  });
+
   it("keeps lesson replay and AI history reachable", async () => {
     mount();
 

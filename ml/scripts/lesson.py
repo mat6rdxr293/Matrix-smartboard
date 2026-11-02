@@ -147,6 +147,78 @@ def to_contract(tasks, seed=0):
     return out
 
 
+def smartboard_contract(tasks, slides):
+    """Полный контракт Smartboard v1: semantic output модели превращается в безопасный 960×540 layout."""
+    contract_tasks = []
+    for index, task in enumerate(tasks, 1):
+        item = {
+            "id": f"task-{index}",
+            "type": task["type"],
+            "question": task["question"],
+            "answer": task["answer"],
+            "level": task.get("level"),
+        }
+        if task.get("check"):
+            item["check"] = task["check"]
+        if task["type"] == "test":
+            item["options"] = task["options"]
+        elif task["type"] == "calc":
+            item["solution"] = task["solution"]
+        contract_tasks.append(item)
+
+    contract_slides = []
+    notes = []
+    for index, slide in enumerate(slides, 1):
+        title = slide["title"]
+        bullets = slide.get("bullets", [])[:4]
+        count = max(1, len(bullets))
+        top, available, gap = 142, 328, 14
+        card_h = min(82, (available - gap * (count - 1)) / count)
+        elements = [
+            {
+                "id": f"s{index}-accent", "type": "shape", "shape": "round",
+                "x": 55, "y": 52, "width": 7, "height": 54, "rotation": 0,
+                "fillColor": "#4DA3FF", "strokeColor": None, "strokeWidth": 0, "cornerRadius": 4,
+            },
+            {
+                "id": f"s{index}-title", "type": "text",
+                "x": 78, "y": 48, "width": 805, "height": 64, "rotation": 0,
+                "text": title, "fontSize": 31, "color": "#F4F7FB",
+                "fontFamily": "Montserrat", "fontWeight": "semibold", "align": "left",
+            },
+        ]
+        for bullet_index, bullet in enumerate(bullets, 1):
+            y = top + (bullet_index - 1) * (card_h + gap)
+            elements += [
+                {
+                    "id": f"s{index}-card-{bullet_index}", "type": "shape", "shape": "round",
+                    "x": 60, "y": y, "width": 840, "height": card_h, "rotation": 0,
+                    "fillColor": "#151C27", "strokeColor": "#263244", "strokeWidth": 1, "cornerRadius": 18,
+                },
+                {
+                    "id": f"s{index}-bullet-{bullet_index}", "type": "text",
+                    "x": 82, "y": y + 11, "width": 796, "height": max(36, card_h - 22), "rotation": 0,
+                    "text": f"• {bullet}", "fontSize": 20 if len(bullet) < 115 else 18,
+                    "color": "#B6C2D1", "fontFamily": "Montserrat", "fontWeight": "normal", "align": "left",
+                },
+            ]
+        contract_slides.append({"id": f"slide-{index}", "title": title, "elements": elements})
+        notes.append(slide.get("notes", ""))
+
+    return {
+        "contractVersion": "1.0",
+        "theme": {
+            "backgroundColor": "#0A0E14",
+            "primaryColor": "#4DA3FF",
+            "textColor": "#F4F7FB",
+            "mutedTextColor": "#B6C2D1",
+            "fontFamily": "Montserrat",
+        },
+        "slides": contract_slides,
+        "tasks": contract_tasks,
+    }, notes
+
+
 def load_pages(book):
     raw = {json.loads(l)["page"]: json.loads(l) for l in open(ROOT / "data" / "raw" / f"{book}.jsonl", encoding="utf-8")}
     vlm_path = ROOT / "data" / "vlm" / f"{book}.jsonl"
@@ -266,6 +338,11 @@ def main():
         print(f"  {what}: {len(items)} шт. за {timing['total_s']} с "
               f"(промпт {timing['prompt_tokens']} ток., из кэша {timing['prompt_cached']}, {timing['prompt_s']} с; "
               f"генерация {timing['gen_tokens']} ток., {timing['gen_s']} с, {timing['gen_tok_per_s']} ток/с)", flush=True)
+
+    if result.get("tasks") and result.get("slides"):
+        lesson, slide_notes = smartboard_contract(result["tasks"], result["slides"])
+        result["lesson"] = lesson
+        result["slide_notes"] = slide_notes
 
     out = ROOT / "data" / "lessons" / f"{args.book}_§{args.section or args.pages}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from lesson import SCHEMA, TASK_VARIANTS, composition, task_schema, text, to_contract  # noqa: E402
+from lesson import SCHEMA, TASK_VARIANTS, composition, smartboard_contract, task_schema, text, to_contract  # noqa: E402
 
 MODEL_TASKS = [
     {"type": "test", "question": "Какая формула выражает второй закон Ньютона?",
@@ -47,6 +47,26 @@ class ContractTest(unittest.TestCase):
         calc = next(v for v in TASK_VARIANTS if v["properties"]["type"]["const"] == "calc")
         keys = list(calc["properties"])
         self.assertLess(keys.index("solution"), keys.index("answer"))
+
+    def test_smartboard_contract_contains_positioned_slides_and_clean_task_variants(self):
+        tasks = to_contract(MODEL_TASKS, seed=0)
+        contract, notes = smartboard_contract(
+            tasks,
+            [
+                {
+                    "title": "Второй закон Ньютона",
+                    "bullets": ["F = ma", "Ускорение направлено по силе"],
+                    "notes": "Разберите пример.",
+                }
+            ],
+        )
+        self.assertEqual(contract["contractVersion"], "1.0")
+        self.assertEqual(notes, ["Разберите пример."])
+        self.assertEqual(contract["slides"][0]["elements"][0]["type"], "shape")
+        self.assertIn("options", contract["tasks"][0])
+        self.assertNotIn("options", contract["tasks"][1])
+        self.assertNotIn("options", contract["tasks"][2])
+        self.assertIn("solution", contract["tasks"][1])
 
 
 class NoLatexPatternTest(unittest.TestCase):

@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .ai import generate_ai_response, generate_board_response
 from .ocr import ocr_image
@@ -32,17 +32,31 @@ from .school_routes import require_school, router as school_router
 from .server_ops import router as server_ops_router
 from .school_store import SchoolStore
 from .server_identity import ServerIdentity
+from .progress_jobs import progress_jobs
 from .lesson_generation_contract import GeneratedLesson, contract_payload, resolved_lesson_payload
+from .lesson_generation_service import (
+    LessonGenerationRequest,
+    generate_lesson,
+    list_textbook_sources,
+)
+from .textbook_library import (
+    MAX_PDF_BYTES,
+    delete_textbook,
+    enqueue_textbook,
+    reindex_textbook,
+    search_pages,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("practice-module")
 
-SERVER_VERSION = "0.3.0"
-API_VERSION = 2
+SERVER_VERSION = "0.4.0"
+API_VERSION = 4
 MIN_CLIENT_API_VERSION = 2
 server_identity = ServerIdentity(settings.server_identity_dir)
 
 app = FastAPI()
+app.state.progress_tasks = set()
 app.state.school_store = SchoolStore(settings.practice_db_path, session_days=settings.school_session_days)
 app.include_router(school_router)
 app.include_router(server_ops_router)
@@ -690,6 +704,48 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
         raise HTTPException(status_code=503, detail=f"AI недоступен: {exc}") from exc
 
 
+def _spawn_progress_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    app.state.progress_tasks.add(task)
+    task.add_done_callback(app.state.progress_tasks.discard)
+
+
+async def _run_ocr_job(job_id: str, data: bytes) -> None:
+    try:
+        def report(value: int, stage: str, completed: int | None, total: int | None) -> None:
+            progress_jobs.update(
+                job_id,
+                progress=value,
+                stage=stage,
+                completed=completed,
+                total=total,
+            )
+
+        text = await asyncio.to_thread(ocr_image, data, report)
+        progress_jobs.complete(job_id, {"text": text})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("OCR progress job failed")
+        progress_jobs.fail(job_id, f"OCR недоступен: {exc}")
+
+
+@app.post("/api/ocr/jobs", dependencies=[Depends(_rate_limit_dependency)])
+async def create_ocr_job(file: UploadFile = File(...)) -> dict:
+    if file.content_type not in {"image/png", "image/jpeg"}:
+        raise HTTPException(status_code=400, detail="Поддерживаются только PNG/JPEG")
+    data = await file.read()
+    job_id = progress_jobs.create("ocr")
+    _spawn_progress_task(_run_ocr_job(job_id, data))
+    return {"jobId": job_id}
+
+
+@app.get("/api/ocr/jobs/{job_id}")
+async def get_ocr_job(job_id: str) -> dict:
+    job = progress_jobs.get(job_id)
+    if job is None or job.get("kind") != "ocr":
+        raise HTTPException(status_code=404, detail="OCR job не найден")
+    return job
+
+
 @app.post("/api/ocr", dependencies=[Depends(_rate_limit_dependency)])
 async def ocr_endpoint(file: UploadFile = File(...)) -> dict:
     if file.content_type not in {"image/png", "image/jpeg"}:
@@ -742,6 +798,108 @@ async def lesson_generation_contract_endpoint() -> dict:
 @app.post("/api/lesson-generation/validate")
 async def validate_lesson_generation_endpoint(payload: GeneratedLesson) -> dict:
     return {"ok": True, "lesson": resolved_lesson_payload(payload)}
+
+
+@app.get("/api/lesson-generation/sources")
+async def lesson_generation_sources_endpoint() -> dict:
+    return list_textbook_sources()
+
+
+@app.post("/api/textbooks/upload", dependencies=[Depends(_rate_limit_dependency)])
+async def upload_textbook_endpoint(file: UploadFile = File(...)) -> dict:
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Нужен файл PDF")
+    data = await file.read(MAX_PDF_BYTES + 1)
+    if len(data) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="PDF слишком большой. Максимальный размер — 250 МБ")
+    try:
+        return {"book": enqueue_textbook(file.filename, data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/textbooks/{book_id}/search")
+async def search_textbook_endpoint(book_id: str, q: str, limit: int = 6) -> dict:
+    try:
+        return {"items": search_pages(book_id, q, limit=limit)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/textbooks/{book_id}/reindex", dependencies=[Depends(_rate_limit_dependency)])
+async def reindex_textbook_endpoint(book_id: str) -> dict:
+    try:
+        return {"book": reindex_textbook(book_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/textbooks/{book_id}", dependencies=[Depends(_rate_limit_dependency)])
+async def delete_textbook_endpoint(book_id: str) -> dict:
+    try:
+        delete_textbook(book_id)
+        return {"ok": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _run_lesson_generation_job(job_id: str, payload: LessonGenerationRequest) -> None:
+    try:
+        def report(value: int, stage: str, completed: int | None, total: int | None) -> None:
+            progress_jobs.update(
+                job_id,
+                progress=value,
+                stage=stage,
+                completed=completed,
+                total=total,
+            )
+
+        result = await asyncio.to_thread(generate_lesson, payload, report)
+        progress_jobs.complete(job_id, result)
+    except ValidationError as exc:
+        logger.warning("Lesson progress job failed contract validation: %s", exc)
+        progress_jobs.fail(job_id, "ИИ вернул некорректный формат урока.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Lesson progress job failed")
+        progress_jobs.fail(job_id, str(exc) or "Не удалось сгенерировать урок")
+
+
+@app.post("/api/lesson-generation/jobs", dependencies=[Depends(_rate_limit_dependency)])
+async def create_lesson_generation_job(payload: LessonGenerationRequest) -> dict:
+    job_id = progress_jobs.create("lesson")
+    _spawn_progress_task(_run_lesson_generation_job(job_id, payload))
+    return {"jobId": job_id}
+
+
+@app.get("/api/lesson-generation/jobs/{job_id}")
+async def get_lesson_generation_job(job_id: str) -> dict:
+    job = progress_jobs.get(job_id)
+    if job is None or job.get("kind") != "lesson":
+        raise HTTPException(status_code=404, detail="Lesson job не найден")
+    return job
+
+
+@app.post("/api/lesson-generation/generate", dependencies=[Depends(_rate_limit_dependency)])
+async def generate_lesson_endpoint(payload: LessonGenerationRequest) -> dict:
+    try:
+        return await asyncio.to_thread(generate_lesson, payload)
+    except ValidationError as exc:
+        logger.warning("Generated lesson failed contract validation: %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail="ИИ вернул некорректный формат урока. Попробуйте сгенерировать ещё раз.",
+        ) from exc
+    except json.JSONDecodeError as exc:
+        logger.warning("Generated lesson returned malformed JSON: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="ИИ вернул повреждённый ответ. Matrix Smartboard автоматически попробует другой ответ при следующей генерации.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Lesson generation failed")
+        raise HTTPException(status_code=503, detail="Не удалось сгенерировать урок. Попробуйте ещё раз.") from exc
 
 
 @app.get("/api/storage")
