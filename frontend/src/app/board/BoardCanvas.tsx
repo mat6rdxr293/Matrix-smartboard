@@ -17,7 +17,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 import { isNativeApp } from "@/lib/apiClient";
-import { NativeBoard, nativeBoardRequested, type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
+import { NativeBoard, encodeNativeStroke, nativeBoardRequested, nativeStrokeChunks, type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
 import type { PluginListenerHandle } from "@capacitor/core";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
@@ -26,6 +26,7 @@ const BALANCED_RENDER_WIDTH = 2560;
 const BALANCED_RENDER_HEIGHT = 1440;
 const PERFORMANCE_RENDER_WIDTH = 1920;
 const PERFORMANCE_RENDER_HEIGHT = 1080;
+const NATIVE_BLOCKER_PAUSE_MS = 1500;
 
 const PRIMARY_COLORS = [
   { name: "Красный", value: "#FF0000" },
@@ -144,10 +145,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   // Opt-in native Android backend. The legacy HTML canvas remains the automatic fallback.
   const [nativeBoardReady, setNativeBoardReady] = useState(false);
   const nativeReadyRef = useRef(false);
-  const nativeLastSyncRef = useRef<{ strokes: Stroke[] | null; signature: string }>({ strokes: null, signature: "" });
+  const nativeSyncedStrokesRef = useRef<Stroke[] | null>(null);
   const nativeStrokeStartedRef = useRef<() => void>(() => undefined);
   const nativeStrokeCommittedRef = useRef<(event: NativeStrokeEvent) => void>(() => undefined);
   const nativeViewportRef = useRef<(event: NativeViewportEvent) => void>(() => undefined);
+  const nativeOwnedStrokesRef = useRef(new WeakSet<Stroke>());
+  const nativeDocumentRevisionRef = useRef(0);
+  const nativeStrokeStartedAtRef = useRef(0);
 
   const rawPointerSupportedRef = useRef(false);
   const rawPointerHandlerRef = useRef<(event: PointerEvent) => void>(() => undefined);
@@ -609,10 +613,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   // Native events commit into the unchanged React history/replay/OCR document model.
-  nativeStrokeStartedRef.current = () => onStartTimer();
+  nativeStrokeStartedRef.current = () => {
+    nativeStrokeStartedAtRef.current = Date.now();
+    onStartTimer();
+  };
   nativeStrokeCommittedRef.current = ({ stroke }) => {
     if (!nativeReadyRef.current || !stroke?.points?.length) return;
     strokesRef.current.push(stroke);
+    nativeOwnedStrokesRef.current.add(stroke);
     onReplayOp?.({ op: "add", stroke: buildReplayStroke(stroke), ts: Date.now() });
     syncStrokesToParent([...strokesRef.current]);
     scheduleRender();
@@ -731,15 +739,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 1 || rect.height <= 1) return;
-    const lastStroke = strokesRef.current[strokesRef.current.length - 1];
-    const tail = lastStroke?.points[lastStroke.points.length - 1];
-    const signature = [
-      strokesRef.current.length, lastStroke?.points.length ?? 0,
-      tail?.x ?? "", tail?.y ?? "", lastStroke?.mode ?? "",
-    ].join(":");
-    const previous = nativeLastSyncRef.current;
-    const changed = previous.strokes !== strokesRef.current || previous.signature !== signature;
-    if (changed) nativeLastSyncRef.current = { strokes: strokesRef.current, signature };
+    const strokes = strokesRef.current;
+    const synced = nativeSyncedStrokesRef.current;
+    // Strokes are immutable once committed, so comparing identities finds what Android lacks.
+    const onlyGrew = synced !== null && synced.length <= strokes.length &&
+      synced.every((stroke, index) => stroke === strokes[index]);
+    const grownStrokes = onlyGrew
+      ? strokes.slice(synced.length).filter((stroke) => !nativeOwnedStrokesRef.current.has(stroke))
+      : [];
+    if (!onlyGrew || synced.length !== strokes.length) nativeSyncedStrokesRef.current = [...strokes];
     const frame: NativeBoardFrame = {
       viewport: {
         left: rect.left, top: rect.top, width: rect.width, height: rect.height,
@@ -759,15 +767,24 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       pattern: profileConfig.backgroundPattern,
       zoom, pan,
       preview: linePreviewRef.current,
-      ...(changed ? { strokes: strokesRef.current } : {}),
+      documentRevision: nativeDocumentRevisionRef.current,
+      strokeCount: strokes.length,
+      ...(grownStrokes.length ? { appendStrokes: grownStrokes.map(encodeNativeStroke) } : {}),
     };
-    void NativeBoard.present(frame).catch(() => {
+    const failToWebCanvas = () => {
       // If the Android view fails, restore the legacy web canvas rather than losing ink.
       nativeReadyRef.current = false;
       document.body.classList.remove("native-board-active");
       setNativeBoardReady(false);
       void NativeBoard.disable().catch(() => undefined);
-    });
+    };
+    if (!onlyGrew) {
+      frame.documentRevision = ++nativeDocumentRevisionRef.current;
+      for (const chunk of nativeStrokeChunks(strokes, frame.documentRevision)) {
+        void NativeBoard.loadStrokes(chunk).catch(failToWebCanvas);
+      }
+    }
+    void NativeBoard.present(frame).catch(failToWebCanvas);
   }
 
   function drawFrame() {
@@ -1389,13 +1406,17 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         handles.push(await NativeBoard.addListener("strokeStarted", () => nativeStrokeStartedRef.current()));
         handles.push(await NativeBoard.addListener("strokeCommitted", (event) => nativeStrokeCommittedRef.current(event)));
         handles.push(await NativeBoard.addListener("viewportChanged", (event) => nativeViewportRef.current(event)));
+        handles.push(await NativeBoard.addListener("resyncNeeded", () => {
+          nativeSyncedStrokesRef.current = null;
+          scheduleRender();
+        }));
         if (disposed) return;
         await NativeBoard.enable();
         if (disposed) {
           await NativeBoard.disable();
           return;
         }
-        nativeLastSyncRef.current = { strokes: null, signature: "" };
+        nativeSyncedStrokesRef.current = null;
         nativeReadyRef.current = true;
         document.body.classList.add("native-board-active");
         setNativeBoardReady(true);
@@ -1420,6 +1441,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     // React controls, graph edit handles and floating dialogs must remain clickable
     // above the ink view. Android receives their bounding rects, never JS touch events.
     const updateBlockers = () => {
+      // This walks the DOM, so it must not compete with the pen mid-stroke.
+      if (Date.now() - nativeStrokeStartedAtRef.current < NATIVE_BLOCKER_PAUSE_MS) return;
       const boardRect = canvasRef.current?.getBoundingClientRect();
       if (!boardRect) return;
       const selector = [

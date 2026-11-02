@@ -14,6 +14,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Android-only renderer behind the transparent Capacitor WebView.
  * React remains responsible for controls, dialogs, board history and export.
@@ -21,6 +26,9 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "NativeBoard")
 public class NativeBoardPlugin extends Plugin {
     private NativeBoardView view;
+    // One worker keeps frames in order while stroke parsing stays off the UI thread.
+    private final ExecutorService frames = Executors.newSingleThreadExecutor();
+    private ArrayList<NativeBoardView.Stroke> incomingDocument = new ArrayList<>();
     private int originalWebViewBackground = Color.WHITE;
 
     @PluginMethod
@@ -49,6 +57,9 @@ public class NativeBoardPlugin extends Plugin {
                             data.put("panY", panY);
                             notifyListeners("viewportChanged", data);
                         }
+                        @Override public void onResyncNeeded() {
+                            notifyListeners("resyncNeeded", new JSObject());
+                        }
                     });
                     parent.addView(view, parent.indexOfChild(web),
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -67,9 +78,32 @@ public class NativeBoardPlugin extends Plugin {
     public void present(PluginCall call) {
         if (view == null) { call.reject("NativeBoard not enabled"); return; }
         final JSONObject data = call.getData();
-        getActivity().runOnUiThread(() -> {
-            view.present(data);
-            call.resolve();
+        frames.execute(() -> {
+            final List<NativeBoardView.Stroke> appended = NativeBoardView.decodeStrokes(data.optJSONArray("appendStrokes"));
+            getActivity().runOnUiThread(() -> {
+                view.present(data, appended);
+                call.resolve();
+            });
+        });
+    }
+
+    /** Full documents arrive in chunks so that no single bridge message can exhaust the Java heap. */
+    @PluginMethod
+    public void loadStrokes(PluginCall call) {
+        if (view == null) { call.reject("NativeBoard not enabled"); return; }
+        final JSONObject data = call.getData();
+        frames.execute(() -> {
+            if (data.optBoolean("first")) incomingDocument = new ArrayList<>();
+            List<NativeBoardView.Stroke> chunk = NativeBoardView.decodeStrokes(data.optJSONArray("strokes"));
+            if (chunk != null) incomingDocument.addAll(chunk);
+            if (!data.optBoolean("last")) { call.resolve(); return; }
+            final List<NativeBoardView.Stroke> document = incomingDocument;
+            final int revision = data.optInt("revision");
+            incomingDocument = new ArrayList<>();
+            getActivity().runOnUiThread(() -> {
+                view.replaceDocument(document, revision);
+                call.resolve();
+            });
         });
     }
 

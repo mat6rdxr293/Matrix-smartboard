@@ -6,6 +6,8 @@
 
 - `NativeBoardView.java` draws ink, grid, background, erasing, and line previews with Android Canvas.
 - `MainActivity.dispatchTouchEvent` routes draw/erase gestures directly to Android. MotionEvent historical points are preserved and **do not cross the JS bridge per move**.
+- Finished ink is cached in one bitmap, so a frame draws the cache plus the live stroke. A pinch stretches the cache and rebuilds it sharp when the fingers lift.
+- React sends only newly added strokes. A full document (undo, reload) travels as chunks of base64 Float32 points and is decoded off the UI thread; one JSON object per point exhausts the Java heap at around 300,000 points.
 - Only completed strokes and throttled pinch/zoom updates are passed to React. React still owns board history, undo/redo, OCR, replay, graphs, solutions, toolbar, dialogs, and backend persistence.
 - In pan, line, graph, or lasso modes input goes to the existing web event handlers. Android redraws their board state; React overlays remain in WebView.
 - The native View is inserted **below** a transparent WebView. Interactive HTML elements are reported as protected hit rectangles every 250ms, so they receive touch events rather than being intercepted by native ink.
@@ -45,6 +47,6 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 2. Test two-finger zoom, locked zoom, lasso, graph controls, AI solution overlays, floating panels and dialogs.
 3. Test on an actual older ZenPad / interactive board; compare Web vs Android under the **same document, resolution and stroke count**. Measure frame-time percentiles with Android Studio profiler / `adb shell dumpsys gfxinfo ru.matrixhost.smartboard framestats`. A successful build **does not establish an FPS improvement**.
 4. Verify light/dark backgrounds, highlighter transparency, rotation, desktop/web fallback, OCR/export, and switching back to the old renderer.
-5. For very large documents benchmark `saveLayer` cost and memory. If it becomes the bottleneck, use cached ink tiles or a GL renderer rather than redrawing all paths.
+5. For very large documents benchmark cache rebuild time and memory. If a rebuild after zoom or undo becomes the bottleneck, use ink tiles or a GL renderer.
 
 Known limitations: the Android underlay uses a solid theme background rather than the full custom site gradient/image; hit exclusion rects are periodically synchronized, so very fast-moving overlays should be checked on device. Native renderer only handles Android, not iOS.
