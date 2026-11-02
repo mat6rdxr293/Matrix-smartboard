@@ -34,6 +34,7 @@ import {
   getSubjectNameForLocale,
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { callAi, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
 import { X } from "lucide-react";
