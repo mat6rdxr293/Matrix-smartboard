@@ -2049,7 +2049,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   return (
     <div
       data-testid="board-canvas-root"
-      className="relative flex h-full flex-col pb-0"
+      className="board-canvas-root relative flex h-full flex-col pb-0"
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >

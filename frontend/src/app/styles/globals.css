@@ -316,6 +316,64 @@ textarea,
   }
 }
 
+/* The toolbar follows the board's width, not the screen's: an open task panel narrows the board. */
+.board-canvas-root {
+  container: board / inline-size;
+}
+
+@container board (max-width: 1140px) {
+  .board-toolbar-dock .board-toolbar-primary-row {
+    gap: 3px;
+    min-height: 56px;
+  }
+
+  .board-toolbar-dock .board-tool-button {
+    height: 54px;
+    width: 54px;
+    min-width: 54px;
+  }
+
+  .board-toolbar-dock .board-utility-button,
+  .board-toolbar-dock .board-segment-button {
+    height: 42px;
+    width: 42px;
+    min-width: 42px;
+  }
+}
+
+@container board (max-width: 920px) {
+  .board-toolbar-dock .board-toolbar-primary-row {
+    gap: 2px;
+    min-height: 50px;
+  }
+
+  .board-toolbar-dock .board-toolbar-primary-row button {
+    min-height: 38px;
+    min-width: 38px;
+  }
+
+  .board-toolbar-dock .board-tool-button {
+    height: 48px;
+    width: 48px;
+    min-width: 48px;
+  }
+
+  .board-toolbar-dock .board-utility-button,
+  .board-toolbar-dock .board-segment-button {
+    height: 38px;
+    width: 38px;
+    min-width: 38px;
+  }
+}
+
+/* Narrower still, wrapping beats hiding tools off the edge of the board. */
+@container board (max-width: 800px) {
+  .board-toolbar-dock .board-toolbar-primary-row {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .board-tool-art,
   .board-tool-button:hover .board-tool-art,
