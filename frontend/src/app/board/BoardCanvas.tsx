@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { callOcr } from "@/app/ai/api";
+import { callOcr, type ProgressUpdate } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
 import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
@@ -67,7 +67,7 @@ const BG_EXTRA = [
 const ALL_BACKGROUNDS = [...BG_PRIMARY, ...BG_EXTRA];
 
 export type BoardCanvasHandle = {
-  recognize: (options?: { multipleTasks?: boolean }) => Promise<string>;
+  recognize: (options?: { multipleTasks?: boolean; onProgress?: (update: ProgressUpdate) => void }) => Promise<string>;
   getLastOcrTargetColor: () => string | null;
   allocateSolutionPlacement: (width?: number, height?: number, targetIndex?: number) => { x: number; y: number; width: number; minHeight: number };
   animateAiStrokes: (
@@ -1723,7 +1723,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const handleOcr = async (
-    options?: { multipleTasks?: boolean },
+    options?: { multipleTasks?: boolean; onProgress?: (update: ProgressUpdate) => void },
   ): Promise<string> => {
     const graphLines = graphsRef.current.flatMap((graph) =>
       graph.expressions
@@ -1781,15 +1781,25 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     setLoading(true);
     try {
       const recognized: string[] = [];
-      for (const cluster of targetClusters) {
+      for (const [clusterIndex, cluster] of targetClusters.entries()) {
         const blob = await renderOcrBlob(cluster.strokes);
         if (!blob) throw new Error(tl("ocr_not_available"));
-        const res = await callOcr(blob);
+        const res = await callOcr(blob, (update) => {
+          const totalClusters = Math.max(1, targetClusters.length);
+          const overall = Math.round(((clusterIndex + update.progress / 100) / totalClusters) * 100);
+          options?.onProgress?.({
+            ...update,
+            progress: overall,
+            completed: clusterIndex,
+            total: totalClusters,
+          });
+        });
         const value = res.text.trim();
         if (!value) continue;
         recognized.push(value);
       }
 
+      options?.onProgress?.({ progress: 98, stage: "composing", completed: targetClusters.length, total: targetClusters.length });
       const taskTexts = sanitizeMultiTaskOcrTexts(recognized);
 
       const text = taskTexts.length > 1
@@ -1799,6 +1809,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         : composeOcrText(taskTexts[0] ?? "", graphLines, true);
 
       if (!text) throw new Error(tl("ocr_not_available"));
+      options?.onProgress?.({ progress: 100, stage: "done", completed: targetClusters.length, total: targetClusters.length });
       onOcrText?.(text);
       return text;
     } catch (error) {
@@ -1961,11 +1972,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   </>
                 )}
               </>
-            )}
-            {loading && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 text-sm">
-                {tl("recognition_loading")}
-              </div>
             )}
           </div>
         </div>

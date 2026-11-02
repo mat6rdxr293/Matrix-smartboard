@@ -7,10 +7,12 @@ import { DEFAULT_PRESENTATION_SOURCE, type PresentationSource } from "@/app/pres
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import MathText from "@/components/MathText";
+import MathFormula from "@/components/MathFormula";
 import { useI18n } from "@/i18n";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import { getSubjectNameForLocale, withSubjectQuery } from "@/app/subjects/subjectConfig";
-import { ArrowLeft, ChevronRight, Download, FileDown, History, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Settings2 } from "lucide-react";
+import LessonGenerator from "@/app/teacher/LessonGenerator";
+import { ArrowLeft, ChevronRight, Download, FileDown, History, LayoutTemplate, ListChecks, MoreHorizontal, Pause, Play, Presentation, RefreshCw, Settings2 } from "lucide-react";
 
 const STAGE_W = 960;
 const STAGE_H = 540;
@@ -172,13 +174,21 @@ export default function TeacherDashboard({
   const subjectName = getSubjectNameForLocale(subjectId, locale);
   const withSubjectApi = (path: string) => withSubjectQuery(path, subjectId);
   const prefersReducedMotion = useReducedMotion();
-  const [section, setSection] = useState<"home" | "tasks" | "slides" | "replays">("home");
+  const [section, setSection] = useState<"home" | "generate" | "tasks" | "slides" | "replays">("home");
   const [sectionDirection, setSectionDirection] = useState<1 | -1>(1);
-  const navigateSection = (next: "home" | "tasks" | "slides" | "replays") => {
+  const navigateSection = (next: "home" | "generate" | "tasks" | "slides" | "replays") => {
     if (next === section) return;
     setSectionDirection(next === "home" ? -1 : 1);
     setSection(next);
   };
+  const sectionTitle =
+    section === "generate"
+      ? tl("Создать урок с ИИ")
+      : section === "tasks"
+        ? tl("tasks")
+        : section === "slides"
+          ? tl("presentation")
+          : tl("teacher_history");
   const [taskIndex, setTaskIndex] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -1135,14 +1145,14 @@ export default function TeacherDashboard({
         >
           <button
             type="button"
-            aria-label={`${tl("back")}: ${section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}`}
+            aria-label={`${tl("back")}: ${sectionTitle}`}
             className="flex h-10 items-center gap-2 rounded-xl pr-3 text-[14px] font-semibold text-frost transition hover:text-accent"
             onClick={() => navigateSection("home")}
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025] text-frost/60">
               <ArrowLeft size={17} />
             </span>
-            {section === "tasks" ? tl("tasks") : section === "slides" ? tl("presentation") : tl("teacher_history")}
+            {sectionTitle}
           </button>
           {section === "slides" && (
             <details className="group relative">
@@ -1226,8 +1236,33 @@ export default function TeacherDashboard({
                 <div className="mt-2 text-[13px] leading-5 text-frost/45">{tl("teacher_history_description")}</div>
               </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => navigateSection("generate")}
+                className="group mt-5 flex min-h-[92px] w-full items-center gap-4 rounded-[20px] border border-accent/20 bg-accent/[0.055] px-5 text-left transition hover:border-accent/40 hover:bg-accent/[0.08]"
+              >
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-accent/[0.12] text-accent">
+                  <LayoutTemplate size={21} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] font-semibold text-frost">{tl("Создать урок с ИИ")}</div>
+                  <div className="mt-1 text-[12px] leading-5 text-frost/42">{tl("Слайды и задания по материалу или локальному учебнику")}</div>
+                </div>
+                <ChevronRight size={18} className="shrink-0 text-accent/55 transition group-hover:translate-x-0.5 group-hover:text-accent" />
+              </button>
             </div>
           </div>
+        )}
+
+        {section === "generate" && (
+          <LessonGenerator
+            currentTasks={tasks}
+            currentSlides={slides}
+            onChangeTasks={onChangeTasks}
+            onChangeSlides={onChangeSlides}
+            onApplied={(mode) => navigateSection(mode === "tasks" ? "tasks" : "slides")}
+          />
         )}
 
         {section === "tasks" && (
@@ -1322,6 +1357,52 @@ export default function TeacherDashboard({
                         }
                       />
                     </label>
+
+                    {activeTask.answer !== undefined && (
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <label className="block text-[12px] font-medium text-frost/50">
+                          {tl("Эталонный ответ")}
+                          <textarea
+                            className="mt-2 min-h-[110px] w-full resize-y rounded-xl border border-white/10 bg-white/[0.015] px-3.5 py-3 text-[13px] leading-5 text-frost outline-none transition focus:border-accent/40"
+                            value={activeTask.answer ?? ""}
+                            onChange={(e) => updateTask({ answer: e.target.value })}
+                          />
+                        </label>
+                        {activeTask.solution != null && (
+                          <label className="block text-[12px] font-medium text-frost/50">
+                            {tl("Решение")}
+                            <textarea
+                              className="mt-2 min-h-[110px] w-full resize-y rounded-xl border border-white/10 bg-white/[0.015] px-3.5 py-3 text-[13px] leading-5 text-frost outline-none transition focus:border-accent/40"
+                              value={activeTask.solution ?? ""}
+                              onChange={(e) => updateTask({ solution: e.target.value })}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTask.check && (
+                      <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+                        <div className="flex items-center gap-2 text-[11px] font-semibold text-frost/60">
+                          {tl("Проверка")}
+                          <span
+                            className={cn(
+                              "rounded-md px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]",
+                              activeTask.check.status === "ok"
+                                ? "bg-emerald-400/10 text-emerald-300"
+                                : activeTask.check.status === "fixed"
+                                  ? "bg-accent/10 text-accent"
+                                  : "bg-amber-300/10 text-amber-200"
+                            )}
+                          >
+                            {activeTask.check.status}
+                          </span>
+                        </div>
+                        {activeTask.check.note && (
+                          <div className="mt-2 text-[11px] leading-5 text-frost/40">{activeTask.check.note}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="py-16 text-center text-[12px] text-frost/40">{tl("no_tasks")}</div>
@@ -1531,6 +1612,7 @@ export default function TeacherDashboard({
                   style={{
                     width: STAGE_W,
                     height: STAGE_H,
+                    backgroundColor: activeSlide?.backgroundColor ?? "#0A0E14",
                     backgroundImage: activeSlide?.background ? `url(${backendAssetUrl(activeSlide.background)})` : undefined,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
@@ -1543,7 +1625,7 @@ export default function TeacherDashboard({
                       key={el.id}
                       className={cn(
                         "absolute rounded-md border",
-                        selectedElementId === el.id ? "border-accent" : "border-white/10"
+                        selectedElementId === el.id ? "border-accent" : "border-transparent"
                       )}
                       style={{ left: el.x, top: el.y, width: el.w, height: el.h }}
                       onPointerDown={(e) => {
@@ -1564,6 +1646,14 @@ export default function TeacherDashboard({
                             fontSize: el.fontSize ?? 22,
                             lineHeight: 1.25,
                             fontFamily: el.fontFamily,
+                            fontWeight:
+                              el.fontWeight === "medium"
+                                ? 500
+                                : el.fontWeight === "semibold"
+                                  ? 600
+                                  : el.fontWeight === "bold"
+                                    ? 700
+                                    : 400,
                             color: el.color ?? "#E7F2FF",
                             textAlign: el.align ?? "left",
                             WebkitTextStroke:
@@ -1573,6 +1663,26 @@ export default function TeacherDashboard({
                           }}
                         >
                           <MathText text={el.text} />
+                        </div>
+                      ) : el.type === "math" ? (
+                        <div
+                          className="flex h-full w-full items-center overflow-hidden"
+                          style={{
+                            fontSize: el.fontSize ?? 26,
+                            color: el.color ?? "#E7F2FF",
+                            textAlign: el.align ?? "center",
+                            justifyContent:
+                              el.align === "left" ? "flex-start" : el.align === "right" ? "flex-end" : "center",
+                            transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                            transformOrigin: "center",
+                          }}
+                        >
+                          <MathFormula
+                            latex={el.latex}
+                            fallbackText={el.fallbackText}
+                            display={el.display ?? true}
+                            className="w-full"
+                          />
                         </div>
                       ) : el.type === "image" ? (
                         <img

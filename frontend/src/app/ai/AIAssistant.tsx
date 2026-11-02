@@ -5,7 +5,7 @@ import MathText from "@/components/MathText";
 import StructuredMathEditor from "./StructuredMathEditor";
 import { useI18n } from "@/i18n";
 import { MessageSquareText } from "lucide-react";
-import type { AiMode } from "./api";
+import type { AiMode, ProgressUpdate } from "./api";
 
 export type AssistantMessage = {
   id: string;
@@ -22,7 +22,7 @@ type AIAssistantProps = {
   loading?: boolean;
   lowPowerMode?: boolean;
   ocrEnabled?: boolean;
-  onRecognizeBoard?: (mode: AiMode) => Promise<string>;
+  onRecognizeBoard?: (mode: AiMode, onProgress?: (update: ProgressUpdate) => void) => Promise<string>;
   onSubmitRecognized?: (mode: AiMode, text: string) => void;
 };
 
@@ -36,9 +36,10 @@ export default function AIAssistant({
   onRecognizeBoard,
   onSubmitRecognized,
 }: AIAssistantProps) {
-  const { tl } = useI18n();
+  const { tl, locale } = useI18n();
   const [recognizing, setRecognizing] = useState(false);
   const [recognitionError, setRecognitionError] = useState<string | null>(null);
+  const [recognitionProgress, setRecognitionProgress] = useState<ProgressUpdate | null>(null);
   const [pendingMode, setPendingMode] = useState<AiMode | null>(null);
   const [recognizedText, setRecognizedText] = useState("");
   const [recognitionRevision, setRecognitionRevision] = useState(0);
@@ -69,14 +70,16 @@ export default function AIAssistant({
   const recognize = async (mode: AiMode) => {
     if (!onRecognizeBoard || recognizing || loading) return;
     setRecognitionError(null);
+    setRecognitionProgress({ progress: 0, stage: "preparing" });
     setRecognizing(true);
     try {
-      const text = (await onRecognizeBoard(mode)).trim();
+      const text = (await onRecognizeBoard(mode, setRecognitionProgress)).trim();
       if (!text) throw new Error(tl("ocr_not_available"));
       setPendingMode(mode);
       setRecognizedText(text);
       setRecognitionRevision((current) => current + 1);
     } catch (error) {
+      setRecognitionProgress(null);
       setRecognitionError(error instanceof Error ? error.message : tl("ocr_not_available"));
     } finally {
       setRecognizing(false);
@@ -94,6 +97,7 @@ export default function AIAssistant({
     setPendingMode(null);
     setRecognizedText("");
     setRecognitionError(null);
+    setRecognitionProgress(null);
     onSubmitRecognized(mode, text);
   };
 
@@ -101,6 +105,29 @@ export default function AIAssistant({
     setPendingMode(null);
     setRecognizedText("");
     setRecognitionError(null);
+    setRecognitionProgress(null);
+  };
+
+  const progressLabel = (stage?: string) => {
+    const labels = {
+      ru: {
+        queued: "Подготовка", preparing: "Подготовка изображения", preprocessed: "Изображение подготовлено",
+        recognizing: "Распознаём запись", fallback: "Повторное распознавание", analyzing_math: "Анализируем математику",
+        reconciling: "Сверяем варианты", auditing: "Проверяем символы", finalizing: "Финальная обработка", composing: "Собираем результат", done: "Готово",
+      },
+      kk: {
+        queued: "Дайындау", preparing: "Кескінді дайындау", preprocessed: "Кескін дайын",
+        recognizing: "Жазуды тану", fallback: "Қайта тану", analyzing_math: "Математиканы талдау",
+        reconciling: "Нұсқаларды салыстыру", auditing: "Таңбаларды тексеру", finalizing: "Соңғы өңдеу", composing: "Нәтижені жинау", done: "Дайын",
+      },
+      en: {
+        queued: "Preparing", preparing: "Preparing image", preprocessed: "Image prepared",
+        recognizing: "Recognizing writing", fallback: "Retrying recognition", analyzing_math: "Analyzing math",
+        reconciling: "Reconciling candidates", auditing: "Checking symbols", finalizing: "Final processing", composing: "Composing result", done: "Done",
+      },
+    } as const;
+    const lang = locale === "kk" ? "kk" : locale === "en" ? "en" : "ru";
+    return labels[lang][stage as keyof typeof labels.ru] ?? labels[lang].recognizing;
   };
 
   return (
@@ -231,7 +258,28 @@ export default function AIAssistant({
             </Button>
           </div>
           <div className="mt-2 min-h-[16px] text-[11px]">
-            {recognizing && <div className="thinking-shimmer">{tl("recognition_loading")}</div>}
+            {recognizing && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="thinking-shimmer">{tl("recognition_loading")}</div>
+                  <div className="tabular-nums text-frost/55">{Math.round(recognitionProgress?.progress ?? 0)}%</div>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+                  <div
+                    className="h-full rounded-full bg-accent transition-[width] duration-200"
+                    style={{ width: `${Math.max(1, Math.round(recognitionProgress?.progress ?? 0))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 text-[10px] text-frost/35">
+                  <span>{progressLabel(recognitionProgress?.stage)}</span>
+                  {recognitionProgress?.total && recognitionProgress.total > 1 ? (
+                    <span className="tabular-nums">
+                      {Math.min(recognitionProgress.total, (recognitionProgress.completed ?? 0) + 1)} / {recognitionProgress.total}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            )}
             {recognitionError && <div className="text-ember">{recognitionError}</div>}
             {!ocrEnabled && <div className="text-frost/35">{tl("ocr_not_available")}</div>}
           </div>

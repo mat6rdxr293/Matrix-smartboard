@@ -536,7 +536,12 @@
     "room_empty_title": "No rooms yet",
     "room_empty_description": "Create the first room to bind this board to it.",
     "math_keyboard_caret_hint": "Tap anywhere in the formula. Arrows move the caret through symbols.",
-    "math_edit_cursor": "Formula position"
+    "math_edit_cursor": "Formula position",
+    "Создать урок с ИИ": "Generate lesson with AI",
+    "Слайды и задания по материалу или локальному учебнику": "Slides and tasks from material or a local textbook",
+    "Эталонный ответ": "Reference answer",
+    "Решение": "Solution",
+    "Проверка": "Verification"
   },
   "defaults": {
     "slides": [

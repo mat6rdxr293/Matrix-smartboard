@@ -4,6 +4,7 @@ import base64
 import io
 import logging
 import re
+from typing import Callable
 
 from openai import OpenAI
 from PIL import Image, ImageOps
@@ -989,7 +990,15 @@ def _reconcile_math_prompt(candidates: list[str]) -> str:
     )
 
 
-def ocr_image(png_bytes: bytes) -> str:
+def ocr_image(
+    png_bytes: bytes,
+    progress: Callable[[int, str, int | None, int | None], None] | None = None,
+) -> str:
+    def emit(value: int, stage: str, completed: int | None = None, total: int | None = None) -> None:
+        if progress is not None:
+            progress(value, stage, completed, total)
+
+    emit(3, "preparing")
     api_key = get_openai_key()
     base_url = settings.ocr_base_url
     if not api_key and not base_url:
@@ -1004,6 +1013,7 @@ def ocr_image(png_bytes: bytes) -> str:
     client = OpenAI(**client_options)
 
     compact = _compact_ocr_image(png_bytes) or png_bytes
+    emit(12, "preprocessed")
     contrast = _contrast_variant(compact) or compact
     detail = _detail_ocr_image(png_bytes) or compact
     # Keep the proven contrast pass second: it is substantially better at
@@ -1016,6 +1026,7 @@ def ocr_image(png_bytes: bytes) -> str:
     math_mode = False
 
     for attempt, prompt in enumerate(_OCR_PROMPTS):
+        emit(18 + attempt * 16, "recognizing", attempt, len(_OCR_PROMPTS))
         image_bytes = variants[min(attempt, len(variants) - 1)]
         try:
             candidate = _request_ocr(
@@ -1037,11 +1048,13 @@ def ocr_image(png_bytes: bytes) -> str:
                 continue
 
             candidates.append(candidate)
+            emit(32 + attempt * 16, "recognizing", attempt + 1, len(_OCR_PROMPTS))
             math_mode = math_mode or _looks_math_heavy(candidate)
 
             # Plain text should stay fast. Formula-heavy content intentionally
             # receives at least one independent second reading.
             if not math_mode:
+                emit(96, "finalizing")
                 return candidate
 
             # A single integral gets a dedicated spatial pass, so a second
@@ -1063,6 +1076,7 @@ def ocr_image(png_bytes: bytes) -> str:
             logger.warning("OCR attempt %s failed: %s", attempt + 1, exc)
 
     if not candidates:
+        emit(68, "fallback")
         try:
             emergency = _compact_ocr_image(png_bytes, max_longest=896) or compact
             candidate = _request_ocr(
@@ -1082,12 +1096,14 @@ def ocr_image(png_bytes: bytes) -> str:
             logger.warning("OCR emergency pass failed: %s", exc)
 
     if candidates and math_mode:
+        emit(72, "analyzing_math")
         best = _choose_math_candidate(candidates)
         keys = {_candidate_key(item) for item in candidates if item}
         integral_count = _integral_count(best)
         needs_reconcile = integral_count > 0 or len(keys) > 1
 
         if needs_reconcile:
+            emit(78, "reconciling")
             try:
                 if integral_count == 1:
                     zones = _math_zone_crops(compact)
@@ -1171,6 +1187,7 @@ def ocr_image(png_bytes: bytes) -> str:
                     if _usable_ocr_text(spatial):
                         candidates.append(spatial)
                         logger.info("Integral OCR accepted spatially reconstructed result")
+                        emit(96, "finalizing")
                         return spatial
                 else:
                     reconciled = _request_ocr(
@@ -1189,6 +1206,7 @@ def ocr_image(png_bytes: bytes) -> str:
 
         best = _choose_math_candidate(candidates)
         if best:
+            emit(90, "auditing")
             if _ocr_line_count(best) == 1:
                 best = _verify_zero_tends_to(client, best, compact, base_url)
                 best = _verify_trailing_numeric_rhs(client, best, compact, base_url)
@@ -1201,9 +1219,11 @@ def ocr_image(png_bytes: bytes) -> str:
                 _math_structure_score(best),
                 len(candidates),
             )
+            emit(96, "finalizing")
             return best
 
     if candidates:
+        emit(96, "finalizing")
         return _normalize_ocr_text(candidates[-1])
 
     logger.warning("OCR exhausted retries: %s", errors)

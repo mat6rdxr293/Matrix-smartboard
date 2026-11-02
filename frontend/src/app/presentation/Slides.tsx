@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import MathText from "@/components/MathText";
+import MathFormula from "@/components/MathFormula";
 import { useI18n } from "@/i18n";
 
 export type SlideElement =
@@ -17,6 +18,7 @@ export type SlideElement =
       text: string;
       fontSize?: number;
       fontFamily?: string;
+      fontWeight?: "normal" | "medium" | "semibold" | "bold";
       color?: string;
       strokeColor?: string;
       strokeWidth?: number;
@@ -26,6 +28,21 @@ export type SlideElement =
       paddingRight?: number;
       paddingTop?: number;
       paddingBottom?: number;
+      rotation?: number;
+    }
+  | {
+      id: string;
+      type: "math";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      latex: string;
+      fallbackText: string;
+      fontSize?: number;
+      color?: string;
+      align?: "left" | "center" | "right";
+      display?: boolean;
       rotation?: number;
     }
   | {
@@ -59,6 +76,7 @@ export type Slide = {
   notes: string;
   elements?: SlideElement[];
   background?: string;
+  backgroundColor?: string;
 };
 
 type SlidesProps = {
@@ -98,21 +116,36 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
     const update = () => {
       const rect = wrap.getBoundingClientRect();
       const scale = Math.min(rect.width / BASE_W, rect.height / BASE_H) || 1;
-      setStageScale(scale);
+      setStageScale(Math.max(0.05, Math.min(1, scale)));
     };
+
     update();
-    const ro = new ResizeObserver(update);
-    ro.observe(wrap);
-    return () => ro.disconnect();
+    const first = window.setTimeout(update, 0);
+    const second = window.setTimeout(update, 120);
+    window.addEventListener("resize", update);
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(second);
+      window.removeEventListener("resize", update);
+    };
   }, []);
 
-  const hasElements = !!(slide?.elements && slide.elements.length > 0);
-  const hasBackground = !!slide?.background;
+  if (!slide) {
+    return (
+      <div className="glass flex h-full items-center justify-center rounded-2xl p-6 text-sm text-frost/45 shadow-glass">
+        {tl("no_slides")}
+      </div>
+    );
+  }
+
+  const hasElements = !!(slide.elements && slide.elements.length > 0);
+  const hasBackground = !!slide.background;
   const showStage = hasElements || hasBackground;
+  const spx = (value: number) => value * stageScale;
 
   return (
-    <div className="grid h-full grid-cols-[2fr_1fr] gap-4">
-      <div className="glass flex h-full flex-col rounded-2xl p-6 shadow-glass">
+    <div className="flex h-full min-h-0 gap-4">
+      <div className="glass flex h-full min-w-0 flex-[2] flex-col rounded-2xl p-6 shadow-glass">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-frost/50">
@@ -124,14 +157,13 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
         </div>
 
         {showStage ? (
-          <div ref={stageWrapRef} className="relative flex-1 overflow-hidden">
+          <div ref={stageWrapRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
             <div
-              className="absolute left-1/2 top-1/2 rounded-xl border border-white/10 bg-white/5 shadow-soft"
+              className="relative shrink-0 rounded-xl border border-white/10 bg-white/5 shadow-soft"
               style={{
-                width: BASE_W,
-                height: BASE_H,
-                transform: `translate(-50%, -50%) scale(${stageScale})`,
-                transformOrigin: "top left",
+                width: spx(BASE_W),
+                height: spx(BASE_H),
+                backgroundColor: slide.backgroundColor ?? "#0A0E14",
                 backgroundImage: hasBackground ? `url(${backendAssetUrl(slide.background)})` : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
@@ -144,27 +176,60 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
                     key={el.id}
                     className="absolute"
                     style={{
-                      left: el.x,
-                      top: el.y,
-                      width: el.w,
-                      height: el.h,
-                      padding: el.padding ?? 0,
-                      paddingLeft: el.paddingLeft ?? el.padding ?? 0,
-                      paddingRight: el.paddingRight ?? el.padding ?? 0,
-                      paddingTop: el.paddingTop ?? el.padding ?? 0,
-                      paddingBottom: el.paddingBottom ?? el.padding ?? 0,
-                      fontSize: el.fontSize ?? 22,
+                      left: spx(el.x),
+                      top: spx(el.y),
+                      width: spx(el.w),
+                      height: spx(el.h),
+                      padding: spx(el.padding ?? 0),
+                      paddingLeft: spx(el.paddingLeft ?? el.padding ?? 0),
+                      paddingRight: spx(el.paddingRight ?? el.padding ?? 0),
+                      paddingTop: spx(el.paddingTop ?? el.padding ?? 0),
+                      paddingBottom: spx(el.paddingBottom ?? el.padding ?? 0),
+                      fontSize: spx(el.fontSize ?? 22),
                       lineHeight: 1.25,
                       fontFamily: el.fontFamily,
+                      fontWeight:
+                        el.fontWeight === "medium"
+                          ? 500
+                          : el.fontWeight === "semibold"
+                            ? 600
+                            : el.fontWeight === "bold"
+                              ? 700
+                              : 400,
                       color: el.color ?? "#E7F2FF",
                       textAlign: el.align ?? "left",
                       WebkitTextStroke:
-                        el.strokeWidth && el.strokeColor ? `${el.strokeWidth}px ${el.strokeColor}` : undefined,
+                        el.strokeWidth && el.strokeColor ? `${spx(el.strokeWidth)}px ${el.strokeColor}` : undefined,
                       transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                       transformOrigin: "center",
                     }}
                   >
                     <MathText text={el.text} />
+                  </div>
+                ) : el.type === "math" ? (
+                  <div
+                    key={el.id}
+                    className="absolute flex items-center overflow-hidden"
+                    style={{
+                      left: spx(el.x),
+                      top: spx(el.y),
+                      width: spx(el.w),
+                      height: spx(el.h),
+                      fontSize: spx(el.fontSize ?? 26),
+                      color: el.color ?? "#E7F2FF",
+                      textAlign: el.align ?? "center",
+                      justifyContent:
+                        el.align === "left" ? "flex-start" : el.align === "right" ? "flex-end" : "center",
+                      transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                      transformOrigin: "center",
+                    }}
+                  >
+                    <MathFormula
+                      latex={el.latex}
+                      fallbackText={el.fallbackText}
+                      display={el.display ?? true}
+                      className="w-full"
+                    />
                   </div>
                 ) : el.type === "image" ? (
                   <img
@@ -173,10 +238,10 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
                     alt=""
                     className="absolute object-contain"
                     style={{
-                      left: el.x,
-                      top: el.y,
-                      width: el.w,
-                      height: el.h,
+                      left: spx(el.x),
+                      top: spx(el.y),
+                      width: spx(el.w),
+                      height: spx(el.h),
                       transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                       transformOrigin: "center",
                     }}
@@ -186,16 +251,16 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
                     key={el.id}
                     className="absolute"
                     style={{
-                      left: el.x,
-                      top: el.y,
-                      width: el.w,
-                      height: el.h,
+                      left: spx(el.x),
+                      top: spx(el.y),
+                      width: spx(el.w),
+                      height: spx(el.h),
                       backgroundColor: el.fill ?? "transparent",
                       border:
                         el.strokeWidth && el.strokeColor
-                          ? `${el.strokeWidth}px solid ${el.strokeColor}`
+                          ? `${spx(el.strokeWidth)}px solid ${el.strokeColor}`
                           : "none",
-                      borderRadius: el.shape === "ellipse" ? "999px" : el.shape === "round" ? "24px" : "8px",
+                      borderRadius: el.shape === "ellipse" ? "999px" : el.shape === "round" ? `${spx(24)}px` : `${spx(8)}px`,
                       transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                       transformOrigin: "center",
                     }}
@@ -232,7 +297,7 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
           </Button>
         </div>
       </div>
-      <div className="glass rounded-2xl p-4 shadow-soft">
+      <div className="glass w-[30%] min-w-[220px] max-w-[360px] rounded-2xl p-4 shadow-soft">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">{tl("notes")}</h3>
           <Badge>{presenterMode ? tl("speaker") : tl("hidden")}</Badge>

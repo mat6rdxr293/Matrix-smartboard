@@ -57,34 +57,45 @@ export async function callAi(
   };
 }
 
-export async function callOcr(blob: Blob) {
+export type ProgressUpdate = {
+  progress: number;
+  stage: string;
+  completed?: number | null;
+  total?: number | null;
+};
+
+export async function callOcr(blob: Blob, onProgress?: (update: ProgressUpdate) => void) {
   const form = new FormData();
   form.append("file", blob, "board.png");
-  const res = await apiFetch("/api/ocr", {
+  const created = await apiFetch("/api/ocr/jobs", {
     method: "POST",
     body: form,
   });
-  if (!res.ok) {
-    const clone = res.clone();
-    let detail = `OCR request failed (${res.status})`;
-    try {
-      const payload = await clone.json() as { detail?: unknown; error?: { message?: unknown } };
-      if (payload?.detail) {
-        detail = String(payload.detail);
-      } else if (payload?.error?.message) {
-        detail = String(payload.error.message);
-      }
-    } catch {
-      try {
-        const text = await res.text();
-        if (text.trim()) detail = text.trim();
-      } catch {
-        // Keep the status-based fallback.
-      }
-    }
-    throw new Error(detail);
+  if (!created.ok) {
+    throw new Error(`OCR request failed (${created.status})`);
   }
-  return (await res.json()) as { text: string };
+  const { jobId } = (await created.json()) as { jobId: string };
+  if (!jobId) throw new Error("OCR job was not created");
+
+  for (;;) {
+    const res = await apiFetch(`/api/ocr/jobs/${encodeURIComponent(jobId)}?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`OCR progress failed (${res.status})`);
+    const job = (await res.json()) as ProgressUpdate & {
+      status: "queued" | "running" | "done" | "error";
+      result?: { text?: string } | null;
+      error?: string | null;
+    };
+    onProgress?.(job);
+    if (job.status === "done") {
+      return { text: String(job.result?.text ?? "") };
+    }
+    if (job.status === "error") {
+      throw new Error(job.error || "OCR недоступен");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
 }
 
 export async function getStatus() {

@@ -21,6 +21,9 @@ backend/.env
 backend/key
 certs/
 
+# Launcher runtime
+.matrix-runtime/
+
 # Local runtime data
 backend/app/data/media/
 backend/app/data/*.ndjson

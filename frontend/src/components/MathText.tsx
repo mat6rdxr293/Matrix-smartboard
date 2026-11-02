@@ -73,9 +73,11 @@ const INLINE_MARKDOWN_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\x60[^\x60\n]+\x60|\*[^
 function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let cursor = 0;
+  const matcher = new RegExp(INLINE_MARKDOWN_RE.source, "g");
+  let match: RegExpExecArray | null;
 
-  for (const match of text.matchAll(INLINE_MARKDOWN_RE)) {
-    const index = match.index ?? 0;
+  while ((match = matcher.exec(text)) !== null) {
+    const index = match.index;
     if (index > cursor) nodes.push(text.slice(cursor, index));
 
     const token = match[0];
@@ -110,10 +112,19 @@ function MathText({ text, className }: { text: string; className?: string }) {
         if (part.type === "math") {
           return part.display ? (
             <div key={idx} className="my-2 overflow-x-auto">
-              <BlockMath math={part.value} errorColor="#FFB86B" />
+              <BlockMath
+                math={part.value}
+                errorColor="#FFB86B"
+                renderError={() => <span className="whitespace-pre-wrap">{part.value}</span>}
+              />
             </div>
           ) : (
-            <InlineMath key={idx} math={part.value} errorColor="#FFB86B" />
+            <InlineMath
+              key={idx}
+              math={part.value}
+              errorColor="#FFB86B"
+              renderError={() => <span className="whitespace-pre-wrap">{part.value}</span>}
+            />
           );
         }
 

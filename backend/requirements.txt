@@ -3,6 +3,8 @@ PyJWT==2.9.0
 uvicorn[standard]==0.30.6
 pydantic-settings==2.5.2
 python-multipart==0.0.9
+PyMuPDF>=1.24,<2
+pytesseract>=0.3.13,<1
 openai>=2.17.0
 python-pptx==0.6.23
 Pillow>=11.0.0

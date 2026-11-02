@@ -91,15 +91,18 @@ def test_shape_must_appear_before_overlapping_content():
         GeneratedLesson.model_validate(payload)
 
 
-def test_latex_is_rejected_but_unicode_math_is_allowed():
+def test_rich_text_allows_delimited_latex_and_plain_math_but_rejects_raw_commands():
     payload = valid_payload()
-    payload["slides"][0]["elements"][1]["text"] = "$\\Phi = BS\\cos\\alpha$"
-    with pytest.raises(ValidationError, match="LaTeX запрещён"):
-        GeneratedLesson.model_validate(payload)
+    payload["slides"][0]["elements"][1]["text"] = r"Формула: \(\Phi = BS\cos\alpha\)"
+    assert GeneratedLesson.model_validate(payload)
 
     payload = valid_payload()
     payload["slides"][0]["elements"][1]["text"] = "v^2 = v0^2 + 2as"
-    with pytest.raises(ValidationError, match="LaTeX запрещён"):
+    assert GeneratedLesson.model_validate(payload)
+
+    payload = valid_payload()
+    payload["slides"][0]["elements"][1]["text"] = r"Формула: \frac{x}{2}"
+    with pytest.raises(ValidationError, match="LaTeX-команды должны находиться"):
         GeneratedLesson.model_validate(payload)
 
     payload = valid_payload()
@@ -135,6 +138,26 @@ def test_calc_requires_solution():
     del payload["tasks"][1]["solution"]
     with pytest.raises(ValidationError):
         GeneratedLesson.model_validate(payload)
+
+
+def test_open_task_and_ml_check_metadata_are_supported():
+    payload = valid_payload()
+    payload["tasks"].append(
+        {
+            "id": "task_open_1",
+            "type": "open",
+            "question": "Что показывает ускорение?",
+            "answer": "Изменение скорости за единицу времени.",
+            "level": 2,
+            "check": {"status": "unverified", "note": "Нужна проверка учителя"},
+        }
+    )
+    lesson = GeneratedLesson.model_validate(payload)
+    task = lesson.tasks[-1]
+    assert task.type == "open"
+    assert task.level == 2
+    assert task.check is not None
+    assert task.check.status == "unverified"
 
 
 def test_rotation_and_shape_stroke_are_optional():
@@ -173,3 +196,38 @@ def test_rotation_is_included_in_safe_area_validation():
     payload["slides"][0]["elements"][1].update({"x": 35, "y": 35, "width": 200, "height": 80, "rotation": 45})
     with pytest.raises(ValidationError, match="не ближе 35px"):
         GeneratedLesson.model_validate(payload)
+
+
+def test_math_element_accepts_latex_with_plain_fallback():
+    payload = valid_payload()
+    payload["slides"][0]["elements"][1] = {
+        "id": "formula",
+        "type": "math",
+        "x": 80,
+        "y": 90,
+        "width": 300,
+        "height": 70,
+        "latex": r"\frac{x^2 + 1}{2}",
+        "fallbackText": "(x² + 1) / 2",
+        "fontSize": 32,
+        "align": "center",
+        "display": True,
+    }
+
+    lesson = GeneratedLesson.model_validate(payload)
+    formula = lesson.slides[0].elements[1]
+    assert formula.type == "math"
+    assert formula.latex == r"\frac{x^2 + 1}{2}"
+    resolved = resolved_lesson_payload(lesson)
+    assert resolved["slides"][0]["elements"][1]["color"] == "#111827"
+
+
+def test_task_math_must_be_explicitly_delimited():
+    payload = valid_payload()
+    payload["tasks"][1]["question"] = r"Найдите \frac{x}{2}"
+    with pytest.raises(ValidationError, match="LaTeX-команды должны находиться"):
+        GeneratedLesson.model_validate(payload)
+
+    payload = valid_payload()
+    payload["tasks"][1]["question"] = r"Найдите \(\frac{x}{2}\)"
+    assert GeneratedLesson.model_validate(payload)

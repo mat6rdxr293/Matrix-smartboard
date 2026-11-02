@@ -10,6 +10,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  // Do not let Vite crawl built Android assets during dependency discovery.
+  // A clean npm ci otherwise sees imports embedded in old APK assets as source dependencies.
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
   server: {
     port: 5174,
     proxy: {
