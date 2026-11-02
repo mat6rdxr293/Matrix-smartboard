@@ -27,6 +27,7 @@ const BALANCED_RENDER_HEIGHT = 1440;
 const PERFORMANCE_RENDER_WIDTH = 1920;
 const PERFORMANCE_RENDER_HEIGHT = 1080;
 const NATIVE_BLOCKER_PAUSE_MS = 1500;
+const TOOLBAR_REVEAL_STRIP_PX = 64;
 
 const PRIMARY_COLORS = [
   { name: "Красный", value: "#FF0000" },
@@ -296,7 +297,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const revealToolbarNearBottom = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.height <= 0) return;
-    const nearBottom = event.clientY >= rect.bottom - 64 && event.clientY <= rect.bottom;
+    const nearBottom = event.clientY >= rect.bottom - TOOLBAR_REVEAL_STRIP_PX && event.clientY <= rect.bottom;
     if (!nearBottom) return;
     const wasHidden = !toolbarVisible;
     revealToolbar();
@@ -1461,12 +1462,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           r.left < boardRect.right && r.right > boardRect.left &&
           r.top < boardRect.bottom && r.bottom > boardRect.top)
         .map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height }));
+      if (!toolbarVisible) {
+        // Android takes every pen touch on the board, so the strip that summons the hidden
+        // toolbar has to be handed back to the WebView or the toolbar can never return.
+        rects.push({
+          left: boardRect.left,
+          top: boardRect.bottom - TOOLBAR_REVEAL_STRIP_PX,
+          width: boardRect.width,
+          height: TOOLBAR_REVEAL_STRIP_PX,
+        });
+      }
       void NativeBoard.setBlockers({ rects }).catch(() => undefined);
     };
     updateBlockers();
     const interval = window.setInterval(updateBlockers, 250);
     return () => window.clearInterval(interval);
-  }, [nativeBoardReady]);
+  }, [nativeBoardReady, toolbarVisible]);
 
   useEffect(() => {
     scheduleRender();
