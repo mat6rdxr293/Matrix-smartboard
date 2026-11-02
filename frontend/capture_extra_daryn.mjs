@@ -1,0 +1,16 @@
+import { chromium } from '@playwright/test';
+import fs from 'fs';
+const OUT='/Users/matveysazhnov/Desktop/дарын/screens_fresh'; fs.mkdirSync(OUT,{recursive:true});
+const browser=await chromium.launch({headless:true});
+const ctx=await browser.newContext({viewport:{width:1366,height:768},deviceScaleFactor:1,ignoreHTTPSErrors:true});
+const page=await ctx.newPage();
+await page.goto('http://127.0.0.1:5175/screenshot.html?screen=teacher-direct', {waitUntil:'networkidle'});
+await page.waitForTimeout(800);
+await page.getByText(/Создать урок с ИИ/i).click().catch(()=>{});
+await page.waitForTimeout(800);
+await page.screenshot({path:`${OUT}/lesson_generator_start.png`,fullPage:false});
+await page.getByText(/Учебник/i).click().catch(()=>{});
+await page.waitForTimeout(800);
+await page.screenshot({path:`${OUT}/lesson_generator_textbook.png`,fullPage:false});
+await ctx.close();
+await browser.close();
