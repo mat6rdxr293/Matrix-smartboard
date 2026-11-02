@@ -153,7 +153,6 @@ export default function Slides({ slides, index, onChange, presenterMode, enableH
             </div>
             <h2 className="text-2xl font-semibold">{slide.title}</h2>
           </div>
-          <Badge>{tl("presentation")}</Badge>
         </div>
 
         {showStage ? (

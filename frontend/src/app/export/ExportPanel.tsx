@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/i18n";
 
 export default function ExportPanel({
@@ -19,7 +18,6 @@ export default function ExportPanel({
           <div className="text-xs uppercase tracking-wider text-frost/50">{tl("export_report")}</div>
           <div className="text-2xl font-semibold">{tl("final_report_of_the_lesson")}</div>
         </div>
-        <Badge>Export</Badge>
       </div>
       <textarea
         readOnly

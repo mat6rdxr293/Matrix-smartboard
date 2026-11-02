@@ -34,7 +34,6 @@ import {
   getSubjectNameForLocale,
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { callAi, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
 import { X } from "lucide-react";
@@ -1913,7 +1912,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                 <div className="glass rounded-2xl p-4 shadow-soft">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">{tl("lesson_slides")}</h3>
-                    <Badge>{tl("plan")}</Badge>
                   </div>
                   <div className="flex flex-col gap-2">
                     {slideData.map((slide, idx) => (

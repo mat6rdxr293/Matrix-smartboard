@@ -1,5 +1,4 @@
 ﻿import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiPost } from "@/app/ai/api";
@@ -89,7 +88,6 @@ export default function AlgorithmsPanel({ onLog }: { onLog: (line: string) => vo
             <div className="text-xs uppercase tracking-wider text-frost/50">{tl("polynomial_algorithms")}</div>
             <div className="text-2xl font-semibold">{tl("verification_and_calculations")}</div>
           </div>
-          <Badge>API</Badge>
         </div>
         <div className="space-y-4">
           <div>
@@ -123,7 +121,6 @@ export default function AlgorithmsPanel({ onLog }: { onLog: (line: string) => vo
       <div className="glass rounded-2xl p-6 shadow-soft">
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold uppercase tracking-wider text-frost/70">{tl("horner_table")}</div>
-          <Badge>Table</Badge>
         </div>
         {table.length === 0 ? (
           <div className="text-sm text-frost/50">{tl("draw_a_horner_diagram_to_see_the_table")}</div>
