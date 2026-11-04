@@ -12,12 +12,21 @@ import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock } from "lucide-react";
+import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 import { isNativeApp } from "@/lib/apiClient";
-import { NativeBoard, encodeNativeStroke, nativeBoardRequested, nativeStrokeChunks, type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
+import {
+  NATIVE_HEALTHY_AFTER_MS,
+  NativeBoard,
+  disableNativeBoardAutomatically,
+  encodeNativeStroke,
+  nativeBoardAutoDisabledReason,
+  nativeBoardRequested,
+  nativeStrokeChunks,
+  setNativeBoardEnabled,
+  type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
 import type { PluginListenerHandle } from "@capacitor/core";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
@@ -152,6 +161,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const nativeViewportRef = useRef<(event: NativeViewportEvent) => void>(() => undefined);
   const nativeOwnedStrokesRef = useRef(new WeakSet<Stroke>());
   const nativeDocumentRevisionRef = useRef(0);
+  const [nativeFallbackReason, setNativeFallbackReason] = useState(() =>
+    isNativeApp() ? nativeBoardAutoDisabledReason() : null,
+  );
+  const [nativeFallbackDismissed, setNativeFallbackDismissed] = useState(false);
   const nativeStrokeStartedAtRef = useRef(0);
 
   const rawPointerSupportedRef = useRef(false);
@@ -633,6 +646,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     setPan({ x: panX, y: panY });
   };
 
+  const switchRenderer = (native: boolean) => {
+    setNativeBoardEnabled(native);
+    // A deliberate switch also forgives earlier crashed starts.
+    void NativeBoard.markHealthy()
+      .catch(() => undefined)
+      .finally(() => window.location.reload());
+  };
+
   const syncGraphsToParent = (next: GraphElement[]) => {
     graphsRef.current = next;
     setGraphs(next);
@@ -773,7 +794,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       ...(grownStrokes.length ? { appendStrokes: grownStrokes.map(encodeNativeStroke) } : {}),
     };
     const failToWebCanvas = () => {
-      // If the Android view fails, restore the legacy web canvas rather than losing ink.
+      // If the Android view fails, restore the legacy web canvas rather than losing ink,
+      // and keep this board on it: a broken bridge would fail again on the next lesson.
+      disableNativeBoardAutomatically("bridge-failure");
+      setNativeFallbackReason("bridge-failure");
       nativeReadyRef.current = false;
       document.body.classList.remove("native-board-active");
       setNativeBoardReady(false);
@@ -1401,6 +1425,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   useEffect(() => {
     if (!isNativeApp() || !nativeBoardRequested()) return;
     let disposed = false;
+    let healthyTimer: number | undefined;
     const handles: PluginListenerHandle[] = [];
     const setup = async () => {
       try {
@@ -1421,7 +1446,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         nativeReadyRef.current = true;
         document.body.classList.add("native-board-active");
         setNativeBoardReady(true);
-      } catch {
+        healthyTimer = window.setTimeout(() => {
+          void NativeBoard.markHealthy().catch(() => undefined);
+        }, NATIVE_HEALTHY_AFTER_MS);
+      } catch (error) {
+        const code = (error as { code?: string } | null)?.code;
+        const reason = code === "AUTO_DISABLED" ? "repeated-crash" : "enable-failed";
+        disableNativeBoardAutomatically(reason);
+        setNativeFallbackReason(reason);
         nativeReadyRef.current = false;
         document.body.classList.remove("native-board-active");
         setNativeBoardReady(false);
@@ -1430,6 +1462,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     void setup();
     return () => {
       disposed = true;
+      // Leaving the board on purpose is not a crash, however soon it happens.
+      window.clearTimeout(healthyTimer);
+      void NativeBoard.markHealthy().catch(() => undefined);
       nativeReadyRef.current = false;
       document.body.classList.remove("native-board-active");
       handles.forEach((handle) => { void handle.remove(); });
@@ -2053,6 +2088,22 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >
+      {nativeFallbackReason && !nativeFallbackDismissed && (
+        <div
+          role="status"
+          data-testid="native-fallback-notice"
+          data-reason={nativeFallbackReason}
+          className="glass absolute left-1/2 top-3 z-50 flex w-[min(720px,calc(100%-24px))] -translate-x-1/2 items-center gap-3 rounded-2xl px-4 py-2 text-sm shadow-soft"
+        >
+          <span className="min-w-0 flex-1">{tl("native_fallback_notice")}</span>
+          <Button size="sm" variant="outline" onClick={() => switchRenderer(true)}>
+            {tl("native_fallback_retry")}
+          </Button>
+          <Button size="sm" variant="ghost" aria-label={tl("close")} title={tl("close")} onClick={() => setNativeFallbackDismissed(true)}>
+            <X size={16} />
+          </Button>
+        </div>
+      )}
       <div ref={areaRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div className="absolute inset-0">
           <div
@@ -2611,13 +2662,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                       size="sm"
                       variant={nativeBoardReady ? "accent" : "outline"}
                       title="Switch renderer and reload the Android app"
-                      onClick={() => {
-                        window.localStorage.setItem(
-                          "matrix.nativeBoard.enabled",
-                          nativeBoardRequested() ? "0" : "1",
-                        );
-                        window.location.reload();
-                      }}
+                      onClick={() => switchRenderer(!nativeBoardReady)}
                     >
                       {nativeBoardReady ? "Android (native)" : "Web Canvas"}
                     </Button>

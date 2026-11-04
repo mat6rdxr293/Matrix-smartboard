@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { encodeNativeStroke, nativeStrokeChunks } from "./nativeBoard";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  disableNativeBoardAutomatically,
+  encodeNativeStroke,
+  nativeBoardAutoDisabledReason,
+  nativeBoardRequested,
+  nativeStrokeChunks,
+  setNativeBoardEnabled,
+} from "./nativeBoard";
 import type { Stroke } from "./boardEngine";
 
 const stroke = (x: number): Stroke => ({
@@ -29,5 +36,36 @@ describe("native board stroke encoding", () => {
 
   it("still sends one chunk for an empty document", () => {
     expect(nativeStrokeChunks([], 1)).toEqual([{ revision: 1, first: true, last: true, strokes: [] }]);
+  });
+});
+
+describe("native board fallback preference", () => {
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+      },
+    });
+  });
+
+  it("stays on the web canvas after an automatic fallback", () => {
+    disableNativeBoardAutomatically("repeated-crash");
+    expect(nativeBoardRequested()).toBe(false);
+    expect(nativeBoardAutoDisabledReason()).toBe("repeated-crash");
+  });
+
+  it("lets the teacher turn native back on after an automatic fallback", () => {
+    disableNativeBoardAutomatically("bridge-failure");
+    setNativeBoardEnabled(true);
+    expect(nativeBoardRequested()).toBe(true);
+    expect(nativeBoardAutoDisabledReason()).toBeNull();
+  });
+
+  it("keeps an explicit opt-out", () => {
+    setNativeBoardEnabled(false);
+    expect(nativeBoardRequested()).toBe(false);
   });
 });

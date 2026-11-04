@@ -541,7 +541,9 @@
     "Слайды и задания по материалу или локальному учебнику": "Slides and tasks from material or a local textbook",
     "Эталонный ответ": "Reference answer",
     "Решение": "Solution",
-    "Проверка": "Verification"
+    "Проверка": "Verification",
+    "native_fallback_notice": "Native drawing failed on this board, so web mode is on. It is slower.",
+    "native_fallback_retry": "Try again"
   },
   "defaults": {
     "slides": [

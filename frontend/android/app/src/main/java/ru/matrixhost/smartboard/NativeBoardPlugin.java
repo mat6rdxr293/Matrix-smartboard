@@ -1,5 +1,7 @@
 package ru.matrixhost.smartboard;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,14 +27,30 @@ import java.util.concurrent.Executors;
  */
 @CapacitorPlugin(name = "NativeBoard")
 public class NativeBoardPlugin extends Plugin {
+    private static final String HEALTH_PREFS = "native_board_health";
+    private static final String UNHEALTHY_STARTS = "unhealthyStarts";
+    private static final int MAX_UNHEALTHY_STARTS = 2;
+
     private NativeBoardView view;
     // One worker keeps frames in order while stroke parsing stays off the UI thread.
     private final ExecutorService frames = Executors.newSingleThreadExecutor();
     private ArrayList<NativeBoardView.Stroke> incomingDocument = new ArrayList<>();
     private int originalWebViewBackground = Color.WHITE;
 
+    private SharedPreferences health() {
+        return getContext().getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE);
+    }
+
     @PluginMethod
     public void enable(PluginCall call) {
+        // A native crash kills the WebView before localStorage reaches disk, so the start is
+        // counted here with a synchronous commit; markHealthy clears it once the board settles.
+        int unhealthy = health().getInt(UNHEALTHY_STARTS, 0);
+        if (unhealthy >= MAX_UNHEALTHY_STARTS) {
+            call.reject("Native board disabled after repeated failed starts", "AUTO_DISABLED");
+            return;
+        }
+        health().edit().putInt(UNHEALTHY_STARTS, unhealthy + 1).commit();
         getActivity().runOnUiThread(() -> {
             try {
                 if (view == null) {
@@ -115,6 +133,12 @@ public class NativeBoardPlugin extends Plugin {
             view.setBlockers(rects);
             call.resolve();
         });
+    }
+
+    @PluginMethod
+    public void markHealthy(PluginCall call) {
+        health().edit().remove(UNHEALTHY_STARTS).commit();
+        call.resolve();
     }
 
     @PluginMethod

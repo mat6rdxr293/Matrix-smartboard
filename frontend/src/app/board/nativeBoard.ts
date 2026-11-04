@@ -41,6 +41,8 @@ export interface NativeBoardPlugin {
   loadStrokes(chunk: NativeStrokeChunk): Promise<void>;
   setBlockers(options: { rects: BoardRect[] }): Promise<void>;
   disable(): Promise<void>;
+  /** Clears Android's count of starts that never settled; see NATIVE_HEALTHY_AFTER_MS. */
+  markHealthy(): Promise<void>;
   addListener(eventName: "strokeStarted", listener: () => void): Promise<PluginListenerHandle>;
   addListener(eventName: "strokeCommitted", listener: (data: NativeStrokeEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: "viewportChanged", listener: (data: NativeViewportEvent) => void): Promise<PluginListenerHandle>;
@@ -81,9 +83,41 @@ export function nativeStrokeChunks(strokes: Stroke[], revision: number): NativeS
   return chunks;
 }
 
-/** Explicit opt-out during rollout: localStorage.setItem("matrix.nativeBoard.enabled", "0"). */
+const ENABLED_KEY = "matrix.nativeBoard.enabled";
+const AUTO_DISABLED_KEY = "matrix.nativeBoard.autoDisabled";
+/** A start that survives this long is healthy; Android counts the ones that crash before it. */
+export const NATIVE_HEALTHY_AFTER_MS = 15000;
+
+const readStorage = (key: string) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeStorage = (key: string, value: string | null) => {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // Without storage the renderer simply falls back to the default each launch.
+  }
+};
+
+/** "0" is the teacher's explicit opt-out; an automatic fallback is kept apart so the toggle can undo it. */
 export const nativeBoardRequested = (): boolean =>
   typeof window !== "undefined" &&
-  window.localStorage.getItem("matrix.nativeBoard.enabled") !== "0";
+  readStorage(ENABLED_KEY) !== "0" &&
+  readStorage(AUTO_DISABLED_KEY) === null;
+
+export const setNativeBoardEnabled = (enabled: boolean) => {
+  writeStorage(ENABLED_KEY, enabled ? "1" : "0");
+  writeStorage(AUTO_DISABLED_KEY, null);
+};
+
+export const disableNativeBoardAutomatically = (reason: string) => writeStorage(AUTO_DISABLED_KEY, reason);
+
+export const nativeBoardAutoDisabledReason = () => readStorage(AUTO_DISABLED_KEY);
 
 export const NativeBoard = registerPlugin<NativeBoardPlugin>("NativeBoard");
