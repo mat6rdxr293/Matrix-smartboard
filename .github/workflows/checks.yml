@@ -62,7 +62,7 @@ jobs:
         with:
           python-version: "3.11"
       # Only what the tested scripts import; the full ML toolchain is not needed here.
-      - run: pip install requests "sympy>=1.13,<2"
+      - run: pip install requests "sympy>=1.13,<2" "PyMuPDF>=1.24,<2"
       - name: Tests
         run: python -m unittest discover tests
 
