@@ -3,6 +3,8 @@ package ru.matrixhost.smartboard;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.os.Build;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -81,6 +83,14 @@ public class NativeBoardPlugin extends Plugin {
                     });
                     parent.addView(view, parent.indexOfChild(web),
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    WetInkLayer wetInk = createWetInk();
+                    if (wetInk != null) {
+                        // Below the WebView in view order so touches still reach it; its surface
+                        // is composited above everything regardless.
+                        parent.addView(wetInk.view(), parent.indexOfChild(web),
+                            new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                        view.setWetInk(wetInk);
+                    }
                     ((MainActivity)getActivity()).setNativeBoardView(view);
                     web.setBackgroundColor(Color.TRANSPARENT);
                 }
@@ -90,6 +100,18 @@ public class NativeBoardPlugin extends Plugin {
                 call.reject("Failed to enable NativeBoard", e);
             }
         });
+    }
+
+    /** `am start ... --ez wetInk false` turns the front buffer off to compare latency on a device. */
+    private WetInkLayer createWetInk() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
+        if (!getActivity().getIntent().getBooleanExtra("wetInk", true)) return null;
+        try {
+            return new WetInkLayer(getContext());
+        } catch (RuntimeException | LinkageError error) {
+            Log.w("MatrixInk", "Front-buffered ink unavailable", error);
+            return null;
+        }
     }
 
     @PluginMethod

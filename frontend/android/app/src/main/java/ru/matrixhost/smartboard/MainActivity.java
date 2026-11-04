@@ -20,6 +20,8 @@ public class MainActivity extends BridgeActivity {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             nativePointerCaptured = nativeBoard != null && nativeBoard.canCapture(event);
+            // Deliver every pen sample as it arrives instead of batching them to the next frame.
+            if (nativePointerCaptured) nativeBoard.requestUnbufferedDispatch(event);
         }
         if (nativePointerCaptured && nativeBoard != null) {
             nativeBoard.handle(event);

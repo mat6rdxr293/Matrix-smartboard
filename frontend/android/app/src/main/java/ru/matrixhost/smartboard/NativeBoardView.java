@@ -9,7 +9,10 @@ import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
+import android.os.Build;
 import android.util.Base64;
+import android.util.Log;
+import android.view.Choreographer;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -103,9 +106,15 @@ public final class NativeBoardView extends View {
     private Bitmap inkBitmap;
     private Canvas inkCanvas;
     private boolean inkDirty = true;
+    private long lastLiveEventTime;
     private boolean inkCacheFailed;
     private float cachedZoom, cachedPanX, cachedPanY, cachedScaleX, cachedScaleY;
     private int documentRevision = -1;
+
+    private WetInkLayer wetInk;
+    private boolean liveIsWet;
+    private float wetLastX, wetLastY;
+    private final InkLatency latency = new InkLatency();
 
     public NativeBoardView(Context context) {
         super(context);
@@ -117,11 +126,39 @@ public final class NativeBoardView extends View {
     }
 
     public void setListener(Listener value) { listener = value; }
+
+    /** Null keeps the live stroke in this view, which is the path for API < 29 or a renderer failure. */
+    public void setWetInk(WetInkLayer layer) {
+        wetInk = layer;
+        if (layer != null) layer.setLatencySink(latency::record);
+    }
+
+    /** Pen-to-render delay inside the app, logged per stroke for on-device comparisons. */
+    static final class InkLatency {
+        private final long[] samples = new long[512];
+        private int count;
+
+        synchronized void record(long millis) {
+            if (count < samples.length) samples[count++] = millis;
+        }
+
+        synchronized void flush(String path) {
+            if (count == 0) return;
+            long[] sorted = Arrays.copyOf(samples, count);
+            Arrays.sort(sorted);
+            long sum = 0;
+            for (long value : sorted) sum += value;
+            Log.i("MatrixInk", String.format(java.util.Locale.US, "path=%s n=%d avg=%.1f p50=%d p95=%d",
+                path, count, sum / (double) count, sorted[count / 2], sorted[Math.min(count - 1, (int) (count * 0.95))]));
+            count = 0;
+        }
+    }
     public void setActive(boolean value) {
         active = value;
         dropLiveStroke();
         pinching = false;
         setVisibility(value ? VISIBLE : GONE);
+        if (wetInk != null) wetInk.view().setVisibility(value ? VISIBLE : GONE);
         invalidate();
     }
 
@@ -268,6 +305,21 @@ public final class NativeBoardView extends View {
     private float centerX(MotionEvent e) { return (e.getX(0)+e.getX(1))/2f / scaleX() - boardLeft; }
     private float centerY(MotionEvent e) { return (e.getY(0)+e.getY(1))/2f / scaleY() - boardTop; }
 
+    private void wetSegment(float x0, float y0, float x1, float y1, long eventTime) {
+        float sx = scaleX(), sy = scaleY();
+        wetInk.draw(new WetInkLayer.Segment(x0, y0, x1, y1, liveStroke.width * sx * zoom, liveStroke.color,
+            boardLeft*sx, boardTop*sy, (boardLeft+boardWidth)*sx, (boardTop+boardHeight)*sy, eventTime));
+        wetLastX = x1;
+        wetLastY = y1;
+    }
+
+    /** The board view shows a committed stroke one frame later; clear the wet copy only after that. */
+    private void clearWetInkAfterCommit() {
+        final WetInkLayer layer = wetInk;
+        Choreographer.getInstance().postFrameCallback(first ->
+            Choreographer.getInstance().postFrameCallback(second -> layer.clear()));
+    }
+
     /** Called from Activity.dispatchTouchEvent so ink doesn't take a JS round-trip. */
     public void handle(MotionEvent e) {
         switch (e.getActionMasked()) {
@@ -278,10 +330,16 @@ public final class NativeBoardView extends View {
                 liveStroke.width = liveStroke.erase ? eraseWidth : inkWidth;
                 liveStroke.color = inkColor;
                 point(e.getX(), e.getY());
+                // Translucent ink would darken where segments overlap, and erasing needs the cache.
+                liveIsWet = wetInk != null && !liveStroke.erase && Color.alpha(inkColor) == 255;
+                if (liveIsWet) wetSegment(e.getX(), e.getY(), e.getX(), e.getY(), e.getEventTime());
+                else latency.record(0);
                 if (listener != null) listener.onStrokeStarted();
                 break;
             case MotionEvent.ACTION_POINTER_DOWN:
                 if (e.getPointerCount() >= 2) {
+                    if (liveIsWet) wetInk.clear();
+                    liveIsWet = false;
                     dropLiveStroke(); // cancel the unfinished mark when starting pinch
                     pinching = true;
                     if (zoomPanLocked) break;
@@ -304,8 +362,16 @@ public final class NativeBoardView extends View {
                         listener.onViewportChanged(zoom, panX, panY);
                     }
                 } else if (!pinching && liveStroke != null) {
-                    for (int h = 0; h < e.getHistorySize(); h++) point(e.getHistoricalX(h), e.getHistoricalY(h));
+                    for (int h = 0; h < e.getHistorySize(); h++) {
+                        point(e.getHistoricalX(h), e.getHistoricalY(h));
+                        if (liveIsWet) wetSegment(wetLastX, wetLastY, e.getHistoricalX(h), e.getHistoricalY(h), e.getHistoricalEventTime(h));
+                    }
                     point(e.getX(), e.getY());
+                    if (liveIsWet) {
+                        wetSegment(wetLastX, wetLastY, e.getX(), e.getY(), e.getEventTime());
+                        return; // the board view has nothing new to draw until the stroke ends
+                    }
+                    lastLiveEventTime = e.getEventTime();
                 }
                 break;
             case MotionEvent.ACTION_UP:
@@ -315,11 +381,16 @@ public final class NativeBoardView extends View {
                     point(e.getX(), e.getY());
                     commitToDocument(liveStroke);
                     if (listener != null) listener.onStrokeCommitted(liveStroke.toJSON());
+                    if (liveIsWet) clearWetInkAfterCommit();
+                    latency.flush(liveIsWet ? "front-buffer" : "view");
                 }
                 liveStroke = null;
+                liveIsWet = false;
                 pinching = false;
                 break;
             case MotionEvent.ACTION_CANCEL:
+                if (liveIsWet) wetInk.clear();
+                liveIsWet = false;
                 dropLiveStroke();
                 pinching = false;
                 break;
@@ -418,9 +489,13 @@ public final class NativeBoardView extends View {
         int save = canvas.save();
         canvas.translate(board.left, board.top);
         applyInkTransform(canvas, sx, sy);
-        if (liveStroke != null && !liveStroke.erase) drawStroke(canvas, liveStroke);
+        if (liveStroke != null && !liveStroke.erase && !liveIsWet) drawStroke(canvas, liveStroke);
         if (previewStroke != null) drawStroke(canvas, previewStroke);
         canvas.restoreToCount(save);
+        if (liveStroke != null && !liveIsWet && lastLiveEventTime > 0) {
+            latency.record(android.os.SystemClock.uptimeMillis() - lastLiveEventTime);
+            lastLiveEventTime = 0;
+        }
     }
 
     @Override protected void onDraw(Canvas canvas) {
