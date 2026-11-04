@@ -80,6 +80,12 @@ public class NativeBoardPlugin extends Plugin {
                         @Override public void onResyncNeeded() {
                             notifyListeners("resyncNeeded", new JSObject());
                         }
+                        @Override public void onStrokeHold(int seq, JSObject stroke) {
+                            JSObject data = new JSObject();
+                            data.put("seq", seq);
+                            data.put("stroke", stroke);
+                            notifyListeners("strokeHold", data);
+                        }
                     });
                     parent.addView(view, parent.indexOfChild(web),
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -124,6 +130,17 @@ public class NativeBoardPlugin extends Plugin {
                 view.present(data, appended);
                 call.resolve();
             });
+        });
+    }
+
+    @PluginMethod
+    public void replaceLiveStroke(PluginCall call) {
+        if (view == null) { call.resolve(); return; }
+        final int seq = call.getInt("seq", -1);
+        final JSONArray points = call.getArray("points");
+        getActivity().runOnUiThread(() -> {
+            view.replaceLiveStroke(seq, points);
+            call.resolve();
         });
     }
 

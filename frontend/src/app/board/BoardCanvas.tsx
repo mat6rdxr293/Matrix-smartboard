@@ -12,11 +12,15 @@ import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X } from "lucide-react";
+import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
 import { isNativeApp } from "@/lib/apiClient";
+import { SHAPE_HOLD_MS, SHAPE_HOLD_TOLERANCE, recognizeShape } from "./shapeRecognition";
+import { pageCount, pageInView, panForPage, strokesOnPage } from "./pages";
+import { applyConstraint, constraintForStroke, createGeometryTool, type GeometryTool, type StrokeConstraint } from "./geometry";
+import GeometryOverlay from "./GeometryOverlay";
 import {
   NATIVE_HEALTHY_AFTER_MS,
   NativeBoard,
@@ -26,7 +30,7 @@ import {
   nativeBoardRequested,
   nativeStrokeChunks,
   setNativeBoardEnabled,
-  type NativeBoardFrame, type NativeStrokeEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
+  type NativeBoardFrame, type NativeStrokeEvent, type NativeStrokeHoldEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
 import type { PluginListenerHandle } from "@capacitor/core";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
@@ -159,6 +163,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const nativeStrokeCommittedRef = useRef<(event: NativeStrokeEvent) => void>(() => undefined);
   const nativeViewportRef = useRef<(event: NativeViewportEvent) => void>(() => undefined);
   const nativeOwnedStrokesRef = useRef(new WeakSet<Stroke>());
+  const nativeStrokeHoldRef = useRef<(event: NativeStrokeHoldEvent) => void>(() => undefined);
   const nativeDocumentRevisionRef = useRef(0);
   const [nativeFallbackReason, setNativeFallbackReason] = useState(() =>
     isNativeApp() ? nativeBoardAutoDisabledReason() : null,
@@ -626,6 +631,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   // Native events commit into the unchanged React history/replay/OCR document model.
+  nativeStrokeHoldRef.current = ({ seq, stroke }) => {
+    const shape = recognizeShape(stroke.points);
+    if (shape) void NativeBoard.replaceLiveStroke({ seq, points: shape.points }).catch(() => undefined);
+  };
   nativeStrokeStartedRef.current = () => {
     nativeStrokeStartedAtRef.current = Date.now();
     onStartTimer();
@@ -643,6 +652,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     panRef.current = { x: panX, y: panY };
     setZoom(nextZoom);
     setPan({ x: panX, y: panY });
+  };
+
+  const currentPage = pageInView(pan, zoom, heightPx);
+  const totalPages = pageCount(strokesRef.current, currentPage);
+  const goToPage = (page: number) => {
+    const next = panForPage(Math.max(0, page), zoomRef.current, panRef.current);
+    clearLassoSelection();
+    panRef.current = next;
+    setPan(next);
   };
 
   const switchRenderer = (native: boolean) => {
@@ -788,6 +806,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       pattern: profileConfig.backgroundPattern,
       zoom, pan,
       preview: linePreviewRef.current,
+      geometry: geometryToolRef.current,
       documentRevision: nativeDocumentRevisionRef.current,
       strokeCount: strokes.length,
       ...(grownStrokes.length ? { appendStrokes: grownStrokes.map(encodeNativeStroke) } : {}),
@@ -931,21 +950,64 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     ctx.restore();
   };
 
+  const [geometryTool, setGeometryTool] = useState<GeometryTool | null>(null);
+  const geometryToolRef = useRef<GeometryTool | null>(null);
+  geometryToolRef.current = geometryTool;
+  // Set at touch-down: a stroke started against a ruler edge or the compass pencil follows it.
+  const strokeConstraintRef = useRef<StrokeConstraint | null>(null);
+
+  const toggleGeometryTool = (kind: GeometryTool["kind"]) => {
+    if (geometryTool?.kind === kind) {
+      setGeometryTool(null);
+      return;
+    }
+    const center = { x: (widthPx / 2 - panRef.current.x) / zoomRef.current, y: (heightPx / 2 - panRef.current.y) / zoomRef.current };
+    setGeometryTool(createGeometryTool(kind, center));
+  };
+
+  // Holding the pen still mid-stroke snaps it to a clean shape before it is lifted.
+  const shapeHoldRef = useRef<{ stroke: Stroke; anchor: { x: number; y: number }; timer: number; snapped: boolean } | null>(null);
+
+  const armShapeHold = (stroke: Stroke, point: { x: number; y: number }) => {
+    const hold = shapeHoldRef.current;
+    if (hold?.stroke === stroke && (hold.snapped ||
+      Math.hypot(point.x - hold.anchor.x, point.y - hold.anchor.y) < SHAPE_HOLD_TOLERANCE)) return;
+    if (hold) window.clearTimeout(hold.timer);
+    const timer = window.setTimeout(() => {
+      const current = shapeHoldRef.current;
+      if (!current || current.stroke !== stroke || activePointerIdRef.current === null) return;
+      const shape = recognizeShape(stroke.points);
+      if (!shape) return;
+      stroke.points = shape.points;
+      current.snapped = true;
+      scheduleRender();
+    }, SHAPE_HOLD_MS);
+    shapeHoldRef.current = { stroke, anchor: point, timer, snapped: false };
+  };
+
   const startStroke = (x: number, y: number) => {
     const isHighlighter = humanitiesPreset === "highlight";
     const w = mode === "erase" ? eraserWidth : isHighlighter ? 14 : width;
-    strokesRef.current.push({
-      points: [{ x, y }],
+    const constraint = mode === "erase" ? null : constraintForStroke(geometryToolRef.current, { x, y });
+    strokeConstraintRef.current = constraint;
+    const start = constraint ? applyConstraint(constraint, { x, y }) : { x, y };
+    const stroke: Stroke = {
+      points: [start],
       color: isHighlighter ? "#F6D365A6" : color,
       width: w,
       mode: mode === "erase" ? "erase" : "draw",
-    });
+    };
+    strokesRef.current.push(stroke);
+    if (stroke.mode === "draw" && !constraint) armShapeHold(stroke, { x, y });
     scheduleRender();
   };
 
   const addPoints = (points: { x: number; y: number }[]) => {
     const last = strokesRef.current[strokesRef.current.length - 1];
     if (!last) return;
+    if (shapeHoldRef.current?.stroke === last && shapeHoldRef.current.snapped) return;
+    const constraint = strokeConstraintRef.current;
+    if (constraint) points = points.map((point) => applyConstraint(constraint, point));
     const startPoint = last.points[last.points.length - 1];
     let prev = startPoint;
     const appended: { x: number; y: number }[] = [];
@@ -959,6 +1021,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       prev = point;
     }
     if (!appended.length) return;
+    if (last.mode === "draw" && !constraint) armShapeHold(last, appended[appended.length - 1]);
     if (!workerEnabledRef.current && mode !== "line" && mode !== "pan") {
       drawIncrementalSegment(last, [startPoint, ...appended]);
       return;
@@ -1419,7 +1482,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   useLayoutEffect(() => {
     scheduleRender();
-  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady]);
+  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady, geometryTool]);
 
   useEffect(() => {
     if (!isNativeApp() || !nativeBoardRequested()) return;
@@ -1431,6 +1494,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         handles.push(await NativeBoard.addListener("strokeStarted", () => nativeStrokeStartedRef.current()));
         handles.push(await NativeBoard.addListener("strokeCommitted", (event) => nativeStrokeCommittedRef.current(event)));
         handles.push(await NativeBoard.addListener("viewportChanged", (event) => nativeViewportRef.current(event)));
+        handles.push(await NativeBoard.addListener("strokeHold", (event) => nativeStrokeHoldRef.current(event)));
         handles.push(await NativeBoard.addListener("resyncNeeded", () => {
           nativeSyncedStrokesRef.current = null;
           scheduleRender();
@@ -1963,10 +2027,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const selectedIndices = lassoSelection.strokeIndices.length
       ? lassoSelection.strokeIndices
       : undefined;
+    // Without a lasso selection "the board" means the page in view, not every page of the lesson.
+    const pageStrokes = selectedIndices
+      ? strokesRef.current
+      : strokesOnPage(strokesRef.current, pageInView(panRef.current, zoomRef.current, heightPx));
     const ocrSourceStrokes =
       !selectedIndices && options?.multipleTasks
-        ? recentUserOcrStrokes(strokesRef.current)
-        : strokesRef.current;
+        ? recentUserOcrStrokes(pageStrokes)
+        : pageStrokes;
     const clusters = clusterOcrStrokes(ocrSourceStrokes, selectedIndices);
     const targetClusters = selectedIndices
       ? (clusters[0] ? [clusters[0]] : [])
@@ -2088,6 +2156,23 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       onPointerMoveCapture={revealToolbarNearBottom}
       onPointerDownCapture={revealToolbarNearBottom}
     >
+      <div
+        data-testid="board-pager"
+        className="glass absolute right-3 top-3 z-30 flex items-center gap-1 rounded-xl p-1 text-sm shadow-soft"
+      >
+        <Button size="sm" variant="ghost" disabled={currentPage === 0} aria-label={tl("previous_page")} title={tl("previous_page")} onClick={() => goToPage(currentPage - 1)}>
+          <ChevronLeft size={18} />
+        </Button>
+        <span data-testid="board-page-label" className="min-w-[3.5rem] text-center tabular-nums text-frost/80">
+          {currentPage + 1} / {totalPages}
+        </span>
+        <Button size="sm" variant="ghost" disabled={currentPage >= totalPages - 1} aria-label={tl("next_page")} title={tl("next_page")} onClick={() => goToPage(currentPage + 1)}>
+          <ChevronRight size={18} />
+        </Button>
+        <Button size="sm" variant="ghost" aria-label={tl("new_page")} title={tl("new_page")} onClick={() => goToPage(totalPages)}>
+          <Plus size={18} />
+        </Button>
+      </div>
       {nativeFallbackReason && !nativeFallbackDismissed && (
         <div
           role="status"
@@ -2125,6 +2210,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                 if (!lowPowerMode) scheduleRender();
               }}
             />
+            {geometryTool && <GeometryOverlay tool={geometryTool} zoom={zoom} pan={pan} onChange={setGeometryTool} />}
             <div
               className="pointer-events-none absolute inset-0 overflow-visible"
               style={{
@@ -2654,6 +2740,17 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   >
                     ...
                   </button>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+                  <span className="text-xs text-frost/70">{tl("geometry")}</span>
+                  <div className="flex gap-1">
+                    {(["ruler", "protractor", "compass"] as const).map((kind) => (
+                      <Button key={kind} size="sm" variant={geometryTool?.kind === kind ? "accent" : "outline"}
+                        aria-pressed={geometryTool?.kind === kind} onClick={() => toggleGeometryTool(kind)}>
+                        {tl(kind)}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
                 {isNativeApp() && (
                   <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">

@@ -1,5 +1,6 @@
 import { registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import type { Stroke } from "./boardEngine";
+import type { GeometryTool } from "./geometry";
 
 /** Shared document stays in React; Android is only an ink rendering/input backend. */
 export type NativeBoardFrame = {
@@ -25,6 +26,7 @@ export type NativeBoardFrame = {
   strokeCount: number;
   appendStrokes?: NativeEncodedStroke[];
   preview?: Stroke | null;
+  geometry: GeometryTool | null;
 };
 
 /** `p` is base64 of little-endian Float32 x,y pairs: one JSON object per point exhausts Android's heap. */
@@ -33,12 +35,15 @@ export type NativeStrokeChunk = { revision: number; first: boolean; last: boolea
 
 export type BoardRect = { left: number; top: number; width: number; height: number };
 export type NativeStrokeEvent = { stroke: Stroke };
+/** The pen has rested mid-stroke; `seq` ties a replaceLiveStroke reply to this very stroke. */
+export type NativeStrokeHoldEvent = { seq: number; stroke: Stroke };
 export type NativeViewportEvent = { zoom: number; panX: number; panY: number };
 
 export interface NativeBoardPlugin {
   enable(): Promise<void>;
   present(frame: NativeBoardFrame): Promise<void>;
   loadStrokes(chunk: NativeStrokeChunk): Promise<void>;
+  replaceLiveStroke(options: { seq: number; points: { x: number; y: number }[] }): Promise<void>;
   setBlockers(options: { rects: BoardRect[] }): Promise<void>;
   disable(): Promise<void>;
   /** Clears Android's count of starts that never settled; see NATIVE_HEALTHY_AFTER_MS. */
@@ -47,6 +52,7 @@ export interface NativeBoardPlugin {
   addListener(eventName: "strokeCommitted", listener: (data: NativeStrokeEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: "viewportChanged", listener: (data: NativeViewportEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: "resyncNeeded", listener: () => void): Promise<PluginListenerHandle>;
+  addListener(eventName: "strokeHold", listener: (data: NativeStrokeHoldEvent) => void): Promise<PluginListenerHandle>;
 }
 
 const NATIVE_CHUNK_STROKES = 200;

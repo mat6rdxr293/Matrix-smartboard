@@ -543,7 +543,14 @@
     "Решение": "Solution",
     "Проверка": "Verification",
     "native_fallback_notice": "Native drawing failed on this board, so web mode is on. It is slower.",
-    "native_fallback_retry": "Try again"
+    "native_fallback_retry": "Try again",
+    "previous_page": "Previous page",
+    "next_page": "Next page",
+    "new_page": "New page",
+    "geometry": "Geometry",
+    "ruler": "Ruler",
+    "protractor": "Protractor",
+    "compass": "Compass"
   },
   "defaults": {
     "slides": [
