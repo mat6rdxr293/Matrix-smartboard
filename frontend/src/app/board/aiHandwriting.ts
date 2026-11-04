@@ -96,7 +96,7 @@ const LATEX_FUNCTIONS = [
 
 const CJK_SCRIPT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+/g;
 
-const sanitizeLanguageText = (value: string, locale: "ru" | "kk" | "en") => {
+const sanitizeLanguageText = (value: string, _locale: "ru" | "kk" | "en") => {
   // Matrix Smartboard currently ships RU/KK/EN locales. None should emit CJK script
   // unless it was present in the source task itself; board solutions are normalized here.
   const withoutCjk = value.replace(CJK_SCRIPT_RE, " ");

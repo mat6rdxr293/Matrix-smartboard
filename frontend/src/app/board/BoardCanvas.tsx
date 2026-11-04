@@ -96,7 +96,6 @@ const NOOP_SOLUTION_CHANGE = (_next: AiSolutionBlock[]) => undefined;
 const BoardCanvas = forwardRef(function BoardCanvas({
   onOcrText,
   ocrEnabled,
-  expanded,
   onTogglePanels,
   onStartTimer,
   initialStrokes,
@@ -200,7 +199,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const [mode, setMode] = useState<"draw" | "erase" | "line" | "pan" | "graph" | "lasso">("draw");
   const [humanitiesPreset, setHumanitiesPreset] = useState<"highlight" | "underline" | null>(null);
   const [grid, setGrid] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [bg, setBg] = useState(initialBgColor);
   const [showAllBg, setShowAllBg] = useState(false);
   const [showBoardSettings, setShowBoardSettings] = useState(false);
@@ -1745,7 +1744,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const committed: Stroke[] = [];
     let pathIndex = 0;
     let pointIndex = 1;
-    let preview: Stroke | null = null;
+    // Assigned inside the animation callbacks, which TypeScript's narrowing cannot see.
+    let preview = null as Stroke | null;
     aiStrokeAnimationActiveRef.current = true;
 
     try {

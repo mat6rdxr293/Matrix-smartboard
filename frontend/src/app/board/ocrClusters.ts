@@ -74,23 +74,6 @@ const splitLogicalTasksFromOcr = (value: string): string[] => {
   return tasks;
 };
 
-const isLikelyCompletedWork = (value: string) => {
-  const lines = value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const rootRows = lines.filter((line) =>
-    /^\s*[xх]\s*(?:_?\{?\s*[12]\s*\}?|[₁₂])\s*=/.test(line)
-  ).length;
-  const hasDiscriminant = lines.some((line) =>
-    /^\s*(?:D|Δ|Д|д)\s*=/.test(line)
-  );
-  const hasAnswer = lines.some((line) =>
-    /^\s*(?:ответ|жауап|answer)\s*:/i.test(line)
-  );
-  return rootRows >= 2 || (hasDiscriminant && rootRows >= 1) || hasAnswer;
-};
-
 const isLikelyTaskText = (value: string) => {
   const compact = value.replace(/\s+/g, "");
   if (compact.length < 3) return false;

@@ -778,7 +778,7 @@ function renderIntegral(
   token: Extract<MathHandwritingToken, { type: "integral" }>,
   options: RenderOptions,
 ): RenderResult {
-  const { x, y, fontSize, color, strokeWidth, renderPlain, measurePlain } = options;
+  const { x, y, fontSize, color, strokeWidth } = options;
   const glyphWidth = fontSize * 0.52;
   const top = y - fontSize * 0.16;
   const bottom = y + fontSize * 1.28;

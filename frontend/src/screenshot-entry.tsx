@@ -10,12 +10,13 @@ import TeacherDashboard from '@/app/teacher/TeacherDashboard';
 import type { Lesson, Room, School } from '@/app/session/types';
 import type { SlideElement } from '@/app/presentation/Slides';
 import { type Task } from '@/app/tasks/tasks';
+import { DEFAULT_PRESENTATION_SOURCE } from '@/app/presentation/presentationSource';
 
 const screen = new URL(location.href).searchParams.get('screen') || 'setup-language';
 
-const school: School = { id: 'school-demo', name: 'ОСШГ №11' };
-const room: Room = { id: 'room-demo', name: '10Б • интерактивная доска' };
-const lesson: Lesson = { id: 'lesson-demo', roomId: room.id, grade: 11, subjectId: 'algebra', status: 'active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Lesson;
+const school: School = { id: 'school-demo', name: 'ОСШГ №11', createdAt: Date.now() };
+const room: Room = { id: 'room-demo', schoolId: school.id, name: '10Б • интерактивная доска', createdAt: Date.now() };
+const lesson: Lesson = { id: 'lesson-demo', schoolId: school.id, roomId: room.id, grade: 11, subjectId: 'algebra', status: 'active', startedAt: Date.now(), updatedAt: Date.now(), endedAt: null };
 
 
 function DemoTeacherDashboard() {
@@ -25,12 +26,13 @@ function DemoTeacherDashboard() {
     subjectId="algebra"
     tasks={tasks}
     slides={slides}
-    presentationSource="builder"
+    presentationSource={DEFAULT_PRESENTATION_SOURCE}
     onChangeTasks={() => {}}
     onChangeSlides={() => {}}
     onChangePresentationSource={() => {}}
     siteBackground={{mode:'solid', color:'#0A0E14', gradient:'', image:''}}
     onChangeSiteBackground={() => {}}
+    onClose={() => {}}
     fullPage
   />;
 }

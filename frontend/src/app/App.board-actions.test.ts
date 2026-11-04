@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-expect-error Vitest/Vite supports raw imports; this project does not include vite/client declarations.
 import source from "./App.tsx?raw";
 
 describe("board quick actions layout", () => {

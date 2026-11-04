@@ -844,19 +844,6 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
   };
 
-  const appendStudentAttempt = (text: string) => {
-    const msg: AssistantMessage = {
-      id: `${Date.now()}-student`,
-      role: "student",
-      text,
-      timestamp: new Date().toLocaleTimeString(locale === "kk" ? "kk-KZ" : locale === "en" ? "en-US" : "ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    };
-    setMessages((prev) => [...prev, msg]);
-  };
-
   const extractCheckPercent = (text: string): number | null => {
     const normalized = text.replace(",", ".");
     const strict = /(?:^|\n)\s*\**\s*(?:выполнено|орындалды|completed)\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\**\s*(?:\n|$)/i;
