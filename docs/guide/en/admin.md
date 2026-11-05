@@ -48,9 +48,41 @@ Any computer that is always on and is on the same network as the boards will do.
 
 **Supported systems and what to prepare:**
 
-- **Debian / Ubuntu** — an SSH server must be running, with a `sudo` user (or `root`). The installer adds everything else (git, Python, curl) through `apt`.
-- **macOS** — turn on "Remote Login" (System Settings → Sharing). Install `python3`, `git` and `curl` with Homebrew. You need an administrator user.
-- **Windows 10/11 or Server** — enable the **OpenSSH Server** feature. The SSH user must be in the **Administrators** group. `winget` is required: the installer uses it to add Python 3.13 and Ollama if they are missing.
+- **Windows 10/11 or Server** — needs the **OpenSSH Server** feature. The SSH user must be in the **Administrators** group. `winget` is required: the installer uses it to add Python 3.13 and Ollama if they are missing.
+- **Linux — Debian / Ubuntu** — an SSH server must be running, with a `sudo` user (or `root`). The installer adds everything else (git, Python, curl) through `apt`.
+- **Linux — Arch** — automatic setup over SSH does **not work on Arch yet**: the installer installs packages with `apt`. Choose Debian or Ubuntu for the server. The Arch commands below are for when Arch runs on the IT admin's own computer.
+- **macOS** — needs "Remote Login", an administrator user, and `python3`, `git` and `curl` from Homebrew.
+
+**How to turn on SSH on the future server:**
+
+**Windows** (PowerShell as administrator):
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+```
+
+**Linux — Debian / Ubuntu:**
+
+```bash
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
+**Linux — Arch:**
+
+```bash
+sudo pacman -S --needed openssh
+sudo systemctl enable --now sshd
+```
+
+**macOS** (or System Settings → Sharing → Remote Login):
+
+```bash
+sudo systemsetup -setremotelogin on
+brew install python git curl
+```
 
 It is best to give the server a **fixed IP** (a DHCP reservation on the router). It is not required: boards find the server after an address change too. But with a fixed IP the connection is faster.
 
@@ -64,13 +96,19 @@ The app ships as an APK file.
 2. On the board, allow installing from unknown sources (Settings → Security). The menu names depend on the board model.
 3. Open the APK and install it.
 
-With ADB (USB or network debugging must be on on the board):
+With ADB (USB or network debugging must be on on the board). ADB goes on the IT admin's computer:
+
+| Platform | How to install ADB |
+|---|---|
+| Windows | `winget install Google.PlatformTools` |
+| Linux — Debian / Ubuntu | `sudo apt install -y adb` |
+| Linux — Arch | `sudo pacman -S android-tools` |
+| macOS | `brew install --cask android-platform-tools` |
+
+The commands themselves are the same on every platform (on Windows, in PowerShell):
 
 ```bash
 adb connect 192.168.1.55:5555
-```
-
-```bash
 adb install -r app-debug.apk
 ```
 
@@ -119,8 +157,9 @@ The server is installed **right from the board**: you enter the computer's addre
 ### What happens after "Check SSH"
 
 1. **SSH key check.** The app connects and shows the fingerprint of the computer's SSH key, and detects the system: "Windows" or "macOS / Linux". Compare the fingerprint with the real one to make sure you reached the right computer and not an impostor:
-   - Linux / macOS: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
-   - Windows (PowerShell as administrator): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Windows** (PowerShell as administrator): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Linux** (Debian, Ubuntu, Arch — the same): `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
+   - **macOS**: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
 
    The app writes the fingerprint in the same format this command prints: `SHA256:…`. If the server has no ed25519 key, compare `ssh_host_ecdsa_key.pub` instead.
 2. Tick the confirmation box and tap **"Install Matrix Smartboard"**. The "Installation progress" pane on the right shows the log live.
@@ -193,7 +232,15 @@ Every server has a permanent **TLS identity**: its own key, created at installat
 
 On the first connection the board **pins** this key and from then on talks only to it. Even if a fake server with the same name appears on the network, the board will not connect to it.
 
-**How to check the PIN on the server itself.** Run this on the server or any computer on the same network:
+**How to check the PIN on the server itself.** Run this on the server or any computer on the same network.
+
+**Windows** (PowerShell; use `curl.exe`, not `curl`, so PowerShell does not swap in its own command):
+
+```powershell
+curl.exe -k https://192.168.1.10:8443/api/status
+```
+
+**Linux** (Debian, Ubuntu, Arch) and **macOS**:
 
 ```bash
 curl -k https://192.168.1.10:8443/api/status
@@ -283,27 +330,35 @@ During a lesson open settings (the sliders icon at the top right) and tap the **
 | Database (school, lessons, boards) | `…/practice.db` | `…/practice.db` | `…\practice.db` |
 | TLS identity | `…/identity` | `…/identity` | `…\identity` |
 | Service | systemd `matrix-smartboard` | launchd `ru.matrixhost.smartboard` | task "Matrix Smartboard Server" |
-| Server log | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | "Server" screen → logs |
-| Update log | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | "Server" screen |
+| Server log | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | `C:\ProgramData\MatrixSmartboard\backend.log` |
+| Ollama log | `journalctl -u ollama` | `/var/tmp/matrix-smartboard-ollama.log` | `C:\ProgramData\MatrixSmartboard\ollama.log` |
+| Update log | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | `C:\ProgramData\MatrixSmartboard\update.log` |
 
-Useful commands on Linux:
+Useful commands — status, restart and the last lines of the log.
+
+**Windows** (PowerShell as administrator):
+
+```powershell
+Get-ScheduledTask -TaskName "Matrix Smartboard Server" | Select-Object TaskName, State
+Stop-ScheduledTask -TaskName "Matrix Smartboard Server"
+Start-ScheduledTask -TaskName "Matrix Smartboard Server"
+Get-Content C:\ProgramData\MatrixSmartboard\backend.log -Tail 100
+```
+
+**Linux** (Debian, Ubuntu, Arch — all use systemd, so the commands are the same):
 
 ```bash
 sudo systemctl status matrix-smartboard
-```
-
-```bash
 sudo systemctl restart matrix-smartboard
-```
-
-```bash
 sudo journalctl -u matrix-smartboard -n 100
 ```
 
-On macOS:
+**macOS:**
 
 ```bash
+sudo launchctl print system/ru.matrixhost.smartboard | head -20
 sudo launchctl kickstart -k system/ru.matrixhost.smartboard
+tail -n 100 /var/tmp/matrix-smartboard.log
 ```
 
 ---
@@ -326,7 +381,15 @@ If the boards and the server are on different VLANs or multicast is blocked, aut
 You can update the server in two ways:
 
 - **From a board:** settings → "Server" → "Check" → "Install".
-- **On the server itself** (Linux, macOS):
+- **On the server itself:**
+
+  **Windows** (PowerShell as administrator):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File C:\ProgramData\MatrixSmartboard\app\deploy\update-server.ps1
+  ```
+
+  **Linux** (Debian, Ubuntu) and **macOS**:
 
   ```bash
   sudo /usr/local/sbin/matrix-smartboard-update
@@ -368,7 +431,16 @@ Done. The teacher sees the grade screen. From there the [teacher's guide](teache
 4. Enter the IP manually: the button appears after 5 seconds of searching.
 
 **Automatic setup: "SSH is unavailable".**
-The SSH server is not running or the port is wrong. Linux: `sudo systemctl status ssh`. Windows: the "OpenSSH SSH Server" (sshd) service must be running. macOS: "Remote Login" is on.
+The SSH server is not running or the port is wrong. Check on the future server:
+
+| Platform | Command |
+|---|---|
+| Windows (PowerShell) | `Get-Service sshd` — should be `Running` |
+| Linux — Debian / Ubuntu | `sudo systemctl status ssh` |
+| Linux — Arch | `sudo systemctl status sshd` |
+| macOS | `sudo systemsetup -getremotelogin` — should be `On` |
+
+If SSH is off, turn it on with the commands from [section 2](#2-what-the-server-needs).
 
 **Automatic setup: "Incorrect SSH username or password".**
 Check the keyboard layout and the user name. Login is by password: the app does not support SSH key-only login.
@@ -395,15 +467,20 @@ Create a backup on the old server ("Server" screen → "Create backup"), install
 No, if mDNS works on the network: the boards find the server by Server ID. If not, on the "Server unavailable" screen tap "Configure connection" and enter the new IP. The key stays the same.
 
 **The AI says "OCR unavailable" or does not answer.**
-Open the "Server" screen: Ollama must be "online" and both models "Installed". If Ollama is not working, tap "Restart". If the models are missing, download them there or on the server:
+Open the "Server" screen: Ollama must be "online" and both models "Installed". If Ollama is not working, tap "Restart". If the models are missing, download them there or on the server. The commands are the same on Windows (PowerShell), Linux (Debian, Ubuntu, Arch) and macOS:
 
 ```bash
 ollama pull qwen2.5:7b
-```
-
-```bash
 ollama pull qwen2.5vl:3b
 ```
+
+To restart Ollama by hand:
+
+| Platform | Command |
+|---|---|
+| Windows (PowerShell as administrator) | `Stop-ScheduledTask "Matrix Smartboard Ollama"; Start-ScheduledTask "Matrix Smartboard Ollama"` |
+| Linux (Debian, Ubuntu, Arch) | `sudo systemctl restart ollama` |
+| macOS | `sudo launchctl kickstart -k system/ru.matrixhost.ollama` |
 
 On a server with 8 GB of memory the AI may not fit. It needs 16 GB.
 
@@ -411,7 +488,7 @@ On a server with 8 GB of memory the AI may not fit. It needs 16 GB.
 Without a graphics card the 7B model takes tens of seconds to answer, which is expected. An NVIDIA card or a Mac with Apple Silicon speeds it up. This does not slow down lessons on the board: the AI is needed only for hints, checking and generation.
 
 **A teacher forgot the PIN.**
-The PIN is stored only on that board. To reset it, clear the app's data: Android Settings → Apps → Matrix Smartboard → Storage → Clear data, or with ADB:
+The PIN is stored only on that board. To reset it, clear the app's data: Android Settings → Apps → Matrix Smartboard → Storage → Clear data, or with ADB from the IT admin's computer (the same command on Windows, Linux and macOS):
 
 ```bash
 adb shell pm clear ru.matrixhost.smartboard
@@ -423,7 +500,15 @@ After that the board has to be connected to the server again ([section 14](#14-c
 It cannot be reset from the app. Boards that are already signed in keep working. A reset needs access to the server; contact the developer.
 
 **A board shows a message about web mode ("Native drawing failed…").**
-Fast ink drawing (native, through Android) failed to start several times in a row, and the board switched to the backup web drawing by itself so the lesson does not stop. The teacher can tap "Try again". If it keeps happening, send the developer the board model and a log. Take the log like this:
+Fast ink drawing (native, through Android) failed to start several times in a row, and the board switched to the backup web drawing by itself so the lesson does not stop. The teacher can tap "Try again". If it keeps happening, send the developer the board model and a log. Take the log from the IT admin's computer.
+
+**Windows** (PowerShell; this saves the file as UTF-8, not UTF-16):
+
+```powershell
+adb logcat -d | Out-File -Encoding utf8 board-log.txt
+```
+
+**Linux** (Debian, Ubuntu, Arch) and **macOS**:
 
 ```bash
 adb logcat -d > board-log.txt

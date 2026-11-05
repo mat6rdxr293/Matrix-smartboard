@@ -48,9 +48,41 @@
 
 **Поддерживаемые системы и что подготовить:**
 
-- **Debian / Ubuntu** — нужен включённый SSH-сервер и пользователь с `sudo` (или `root`). Остальное (git, Python, curl) установщик поставит сам через `apt`.
-- **macOS** — включите «Удалённый вход» (Системные настройки → Общий доступ). Установите через Homebrew `python3`, `git` и `curl`. Понадобится пользователь-администратор.
-- **Windows 10/11 или Server** — включите компонент **OpenSSH Server**. Пользователь SSH должен входить в группу **Administrators**. Нужен `winget`: через него установщик сам поставит Python 3.13 и Ollama, если их нет.
+- **Windows 10/11 или Server** — нужен компонент **OpenSSH Server**. Пользователь SSH должен входить в группу **Administrators**. Нужен `winget`: через него установщик сам поставит Python 3.13 и Ollama, если их нет.
+- **Linux — Debian / Ubuntu** — нужен включённый SSH-сервер и пользователь с `sudo` (или `root`). Остальное (git, Python, curl) установщик поставит сам через `apt`.
+- **Linux — Arch** — автонастройка по SSH на Arch пока **не работает**: установщик ставит пакеты через `apt`. Для сервера выберите Debian или Ubuntu. Команды для Arch ниже пригодятся, если Arch стоит на компьютере сисадмина.
+- **macOS** — нужен «Удалённый вход» (Remote Login), пользователь-администратор и через Homebrew `python3`, `git` и `curl`.
+
+**Как включить SSH на будущем сервере:**
+
+**Windows** (PowerShell от имени администратора):
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+```
+
+**Linux — Debian / Ubuntu:**
+
+```bash
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
+**Linux — Arch:**
+
+```bash
+sudo pacman -S --needed openssh
+sudo systemctl enable --now sshd
+```
+
+**macOS** (или Системные настройки → Общий доступ → Удалённый вход):
+
+```bash
+sudo systemsetup -setremotelogin on
+brew install python git curl
+```
 
 Серверу лучше дать **постоянный IP** (резервирование в DHCP на роутере). Это не обязательно: доски найдут сервер и после смены адреса. Но с постоянным IP подключение быстрее.
 
@@ -64,13 +96,19 @@
 2. На доске разрешите установку из неизвестных источников (Настройки → Безопасность). Названия пунктов зависят от модели доски.
 3. Откройте APK и установите.
 
-Через ADB (на доске должна быть включена отладка по USB или по сети):
+Через ADB (на доске должна быть включена отладка по USB или по сети). ADB ставится на компьютер сисадмина:
+
+| Платформа | Как поставить ADB |
+|---|---|
+| Windows | `winget install Google.PlatformTools` |
+| Linux — Debian / Ubuntu | `sudo apt install -y adb` |
+| Linux — Arch | `sudo pacman -S android-tools` |
+| macOS | `brew install --cask android-platform-tools` |
+
+Сами команды одинаковые на всех платформах (на Windows — в PowerShell):
 
 ```bash
 adb connect 192.168.1.55:5555
-```
-
-```bash
 adb install -r app-debug.apk
 ```
 
@@ -119,8 +157,9 @@ adb install -r app-debug.apk
 ### Что происходит после нажатия «Проверить SSH»
 
 1. **Проверка ключа SSH.** Приложение подключается и показывает отпечаток (fingerprint) ключа SSH этого компьютера, а также определяет систему: «Windows» или «macOS / Linux». Сверьте отпечаток с настоящим, чтобы убедиться, что вы подключились к нужному компьютеру, а не к подменённому:
-   - Linux / macOS: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
-   - Windows (PowerShell от администратора): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Windows** (PowerShell от администратора): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Linux** (Debian, Ubuntu, Arch — одинаково): `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
+   - **macOS**: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
 
    Отпечаток в приложении записан в том же формате, что выдаёт эта команда: `SHA256:…`. Если на сервере нет ключа ed25519, сверяйте файл `ssh_host_ecdsa_key.pub`.
 2. Поставьте галочку подтверждения и нажмите **«Установить Matrix Smartboard»**. Справа в окне «Ход установки» будет виден журнал в реальном времени.
@@ -193,7 +232,15 @@ adb install -r app-debug.apk
 
 При первом подключении доска **закрепляет** (pin) этот ключ и дальше разговаривает только с ним. Даже если в сети появится поддельный сервер с тем же именем, доска к нему не подключится.
 
-**Как проверить PIN на самом сервере.** Откройте на сервере или любом компьютере в той же сети:
+**Как проверить PIN на самом сервере.** Выполните на сервере или любом компьютере в той же сети.
+
+**Windows** (PowerShell; именно `curl.exe`, а не `curl`: так PowerShell не подменит команду своей):
+
+```powershell
+curl.exe -k https://192.168.1.10:8443/api/status
+```
+
+**Linux** (Debian, Ubuntu, Arch) и **macOS**:
 
 ```bash
 curl -k https://192.168.1.10:8443/api/status
@@ -283,27 +330,35 @@ curl -k https://192.168.1.10:8443/api/status
 | База (школа, уроки, доски) | `…/practice.db` | `…/practice.db` | `…\practice.db` |
 | TLS-идентичность | `…/identity` | `…/identity` | `…\identity` |
 | Служба | systemd `matrix-smartboard` | launchd `ru.matrixhost.smartboard` | задача «Matrix Smartboard Server» |
-| Журнал сервера | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | экран «Сервер» → журнал |
-| Журнал обновлений | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | экран «Сервер» |
+| Журнал сервера | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | `C:\ProgramData\MatrixSmartboard\backend.log` |
+| Журнал Ollama | `journalctl -u ollama` | `/var/tmp/matrix-smartboard-ollama.log` | `C:\ProgramData\MatrixSmartboard\ollama.log` |
+| Журнал обновлений | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | `C:\ProgramData\MatrixSmartboard\update.log` |
 
-Полезные команды на Linux:
+Полезные команды — состояние, перезапуск и последние строки журнала.
+
+**Windows** (PowerShell от имени администратора):
+
+```powershell
+Get-ScheduledTask -TaskName "Matrix Smartboard Server" | Select-Object TaskName, State
+Stop-ScheduledTask -TaskName "Matrix Smartboard Server"
+Start-ScheduledTask -TaskName "Matrix Smartboard Server"
+Get-Content C:\ProgramData\MatrixSmartboard\backend.log -Tail 100
+```
+
+**Linux** (Debian, Ubuntu, Arch — везде systemd, команды одинаковые):
 
 ```bash
 sudo systemctl status matrix-smartboard
-```
-
-```bash
 sudo systemctl restart matrix-smartboard
-```
-
-```bash
 sudo journalctl -u matrix-smartboard -n 100
 ```
 
-На macOS:
+**macOS:**
 
 ```bash
+sudo launchctl print system/ru.matrixhost.smartboard | head -20
 sudo launchctl kickstart -k system/ru.matrixhost.smartboard
+tail -n 100 /var/tmp/matrix-smartboard.log
 ```
 
 ---
@@ -326,7 +381,15 @@ sudo launchctl kickstart -k system/ru.matrixhost.smartboard
 Обновить сервер можно двумя способами:
 
 - **С доски:** настройки → «Сервер» → «Проверить» → «Установить».
-- **На самом сервере** (Linux, macOS):
+- **На самом сервере:**
+
+  **Windows** (PowerShell от имени администратора):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File C:\ProgramData\MatrixSmartboard\app\deploy\update-server.ps1
+  ```
+
+  **Linux** (Debian, Ubuntu) и **macOS**:
 
   ```bash
   sudo /usr/local/sbin/matrix-smartboard-update
@@ -368,7 +431,16 @@ sudo launchctl kickstart -k system/ru.matrixhost.smartboard
 4. Введите IP вручную: кнопка появляется через 5 секунд поиска.
 
 **Автонастройка: «SSH недоступен».**
-Не запущен SSH-сервер или указан не тот порт. Linux: `sudo systemctl status ssh`. Windows: служба «OpenSSH SSH Server» (sshd) должна быть запущена. macOS: «Удалённый вход» включён.
+Не запущен SSH-сервер или указан не тот порт. Проверьте на будущем сервере:
+
+| Платформа | Команда |
+|---|---|
+| Windows (PowerShell) | `Get-Service sshd` — должно быть `Running` |
+| Linux — Debian / Ubuntu | `sudo systemctl status ssh` |
+| Linux — Arch | `sudo systemctl status sshd` |
+| macOS | `sudo systemsetup -getremotelogin` — должно быть `On` |
+
+Если SSH выключен, включите его командами из [раздела 2](#2-что-нужно-для-сервера).
 
 **Автонастройка: «Неверный пользователь или пароль SSH».**
 Проверьте раскладку клавиатуры и имя пользователя. Вход выполняется по паролю: вход только по ключу SSH приложение не поддерживает.
@@ -395,15 +467,20 @@ sudo launchctl kickstart -k system/ru.matrixhost.smartboard
 Нет, если в сети работает mDNS: доски найдут сервер по Server ID. Если не работает, на экране «Сервер недоступен» нажмите «Настроить подключение» и введите новый IP. Ключ останется прежним.
 
 **ИИ пишет «OCR недоступен» или не отвечает.**
-Откройте экран «Сервер»: Ollama должна быть «online», обе модели — «Установлена». Если Ollama не работает, нажмите «Перезапустить». Если моделей нет, скачайте их там же или на сервере:
+Откройте экран «Сервер»: Ollama должна быть «online», обе модели — «Установлена». Если Ollama не работает, нажмите «Перезапустить». Если моделей нет, скачайте их там же или на сервере. Команды одинаковые на Windows (PowerShell), Linux (Debian, Ubuntu, Arch) и macOS:
 
 ```bash
 ollama pull qwen2.5:7b
-```
-
-```bash
 ollama pull qwen2.5vl:3b
 ```
+
+Перезапустить Ollama вручную:
+
+| Платформа | Команда |
+|---|---|
+| Windows (PowerShell от администратора) | `Stop-ScheduledTask "Matrix Smartboard Ollama"; Start-ScheduledTask "Matrix Smartboard Ollama"` |
+| Linux (Debian, Ubuntu, Arch) | `sudo systemctl restart ollama` |
+| macOS | `sudo launchctl kickstart -k system/ru.matrixhost.ollama` |
 
 На сервере с 8 ГБ памяти ИИ может не помещаться. Нужно 16 ГБ.
 
@@ -411,7 +488,7 @@ ollama pull qwen2.5vl:3b
 Без видеокарты модель 7B отвечает десятки секунд, это ожидаемо. Ускорит видеокарта NVIDIA или Mac на Apple Silicon. Уроки на доске это не тормозит: ИИ нужен только для подсказок, проверки и генерации.
 
 **Учитель забыл PIN.**
-PIN хранится только на этой доске. Чтобы его сбросить, очистите данные приложения: Настройки Android → Приложения → Matrix Smartboard → Хранилище → Очистить данные, или через ADB:
+PIN хранится только на этой доске. Чтобы его сбросить, очистите данные приложения: Настройки Android → Приложения → Matrix Smartboard → Хранилище → Очистить данные, или через ADB с компьютера сисадмина (команда одинаковая на Windows, Linux и macOS):
 
 ```bash
 adb shell pm clear ru.matrixhost.smartboard
@@ -423,7 +500,15 @@ adb shell pm clear ru.matrixhost.smartboard
 Через приложение он не сбрасывается. Доски, которые уже вошли в аккаунт, продолжают работать. Для сброса нужен доступ к серверу, обратитесь к разработчику.
 
 **На доске появилось сообщение про веб-режим («Нативная отрисовка дала сбой…»).**
-Быстрая отрисовка чернил (нативная, через Android) несколько раз подряд не запустилась, и доска сама переключилась на запасную, веб-отрисовку, чтобы урок не встал. Учитель может нажать «Попробовать снова». Если это повторяется, пришлите разработчику модель доски и журнал. Журнал снимается так:
+Быстрая отрисовка чернил (нативная, через Android) несколько раз подряд не запустилась, и доска сама переключилась на запасную, веб-отрисовку, чтобы урок не встал. Учитель может нажать «Попробовать снова». Если это повторяется, пришлите разработчику модель доски и журнал. Журнал снимается с компьютера сисадмина.
+
+**Windows** (PowerShell; так файл сохранится в UTF-8, а не в UTF-16):
+
+```powershell
+adb logcat -d | Out-File -Encoding utf8 board-log.txt
+```
+
+**Linux** (Debian, Ubuntu, Arch) и **macOS**:
 
 ```bash
 adb logcat -d > board-log.txt

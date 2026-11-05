@@ -48,9 +48,41 @@
 
 **Қолдау көрсетілетін жүйелер және не дайындау керек:**
 
-- **Debian / Ubuntu** — қосулы SSH сервері және `sudo` құқығы бар пайдаланушы (немесе `root`) керек. Қалғанын (git, Python, curl) орнатқыш `apt` арқылы өзі қояды.
-- **macOS** — «Қашықтан кіру» (Remote Login) параметрін қосыңыз (Жүйе параметрлері → Ортақ пайдалану). Homebrew арқылы `python3`, `git` және `curl` орнатыңыз. Әкімші пайдаланушы керек.
-- **Windows 10/11 немесе Server** — **OpenSSH Server** компонентін қосыңыз. SSH пайдаланушысы **Administrators** тобында болуы керек. `winget` керек: Python 3.13 және Ollama жоқ болса, орнатқыш оларды сол арқылы өзі қояды.
+- **Windows 10/11 немесе Server** — **OpenSSH Server** компоненті керек. SSH пайдаланушысы **Administrators** тобында болуы керек. `winget` керек: Python 3.13 және Ollama жоқ болса, орнатқыш оларды сол арқылы өзі қояды.
+- **Linux — Debian / Ubuntu** — қосулы SSH сервері және `sudo` құқығы бар пайдаланушы (немесе `root`) керек. Қалғанын (git, Python, curl) орнатқыш `apt` арқылы өзі қояды.
+- **Linux — Arch** — Arch-та SSH арқылы автоматты баптау әзірге **жұмыс істемейді**: орнатқыш пакеттерді `apt` арқылы қояды. Сервер үшін Debian немесе Ubuntu таңдаңыз. Төмендегі Arch пәрмендері Arch жүйелік әкімшінің өз компьютерінде тұрған жағдайға арналған.
+- **macOS** — «Қашықтан кіру» (Remote Login), әкімші пайдаланушы және Homebrew арқылы `python3`, `git`, `curl` керек.
+
+**Болашақ серверде SSH-ті қалай қосу керек:**
+
+**Windows** (әкімші ретінде ашылған PowerShell):
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+```
+
+**Linux — Debian / Ubuntu:**
+
+```bash
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
+**Linux — Arch:**
+
+```bash
+sudo pacman -S --needed openssh
+sudo systemctl enable --now sshd
+```
+
+**macOS** (немесе Жүйе параметрлері → Ортақ пайдалану → Қашықтан кіру):
+
+```bash
+sudo systemsetup -setremotelogin on
+brew install python git curl
+```
 
 Серверге **тұрақты IP** берген дұрыс (маршрутизатордағы DHCP резервтеу). Бұл міндетті емес: мекенжай өзгерсе де, тақталар серверді табады. Бірақ тұрақты IP болса, қосылу жылдамырақ.
 
@@ -64,13 +96,19 @@
 2. Тақтада белгісіз көздерден орнатуға рұқсат беріңіз (Баптаулар → Қауіпсіздік). Тармақтардың атаулары тақта моделіне байланысты.
 3. APK файлын ашып, орнатыңыз.
 
-ADB арқылы (тақтада USB немесе желі арқылы жөндеу қосулы болуы керек):
+ADB арқылы (тақтада USB немесе желі арқылы жөндеу қосулы болуы керек). ADB жүйелік әкімшінің компьютеріне орнатылады:
+
+| Платформа | ADB-ні қалай орнату керек |
+|---|---|
+| Windows | `winget install Google.PlatformTools` |
+| Linux — Debian / Ubuntu | `sudo apt install -y adb` |
+| Linux — Arch | `sudo pacman -S android-tools` |
+| macOS | `brew install --cask android-platform-tools` |
+
+Пәрмендердің өзі барлық платформада бірдей (Windows-та — PowerShell-де):
 
 ```bash
 adb connect 192.168.1.55:5555
-```
-
-```bash
 adb install -r app-debug.apk
 ```
 
@@ -119,8 +157,9 @@ adb install -r app-debug.apk
 ### «SSH-ті тексеру» батырмасын басқаннан кейін не болады
 
 1. **SSH кілтін тексеру.** Қолданба қосылып, осы компьютердің SSH кілтінің іздерін (fingerprint) көрсетеді және жүйені анықтайды: «Windows» немесе «macOS / Linux». Ауыстырылған емес, қажетті компьютерге қосылғаныңызға көз жеткізу үшін іздерді нақтысымен салыстырыңыз:
-   - Linux / macOS: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
-   - Windows (әкімші ретінде ашылған PowerShell): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Windows** (әкімші ретінде ашылған PowerShell): `ssh-keygen -lf $env:ProgramData\ssh\ssh_host_ed25519_key.pub`
+   - **Linux** (Debian, Ubuntu, Arch — бірдей): `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
+   - **macOS**: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
 
    Қолданбадағы із осы пәрмен шығаратын пішімде жазылады: `SHA256:…`. Серверде ed25519 кілті болмаса, `ssh_host_ecdsa_key.pub` файлымен салыстырыңыз.
 2. Растау белгісін қойып, **«Matrix Smartboard орнату»** батырмасын басыңыз. Оң жақтағы «Орнату барысы» терезесінде журнал нақты уақытта көрінеді.
@@ -193,7 +232,15 @@ adb install -r app-debug.apk
 
 Алғаш қосылғанда тақта бұл кілтті **бекітеді** (pin) және әрі қарай тек онымен сөйлеседі. Желіде дәл сондай атауы бар жалған сервер пайда болса да, тақта оған қосылмайды.
 
-**PIN-ді сервердің өзінде қалай тексеру керек.** Серверде немесе сол желідегі кез келген компьютерде іске қосыңыз:
+**PIN-ді сервердің өзінде қалай тексеру керек.** Серверде немесе сол желідегі кез келген компьютерде іске қосыңыз.
+
+**Windows** (PowerShell; PowerShell пәрменді өзінікімен алмастырмауы үшін `curl` емес, дәл `curl.exe`):
+
+```powershell
+curl.exe -k https://192.168.1.10:8443/api/status
+```
+
+**Linux** (Debian, Ubuntu, Arch) және **macOS**:
 
 ```bash
 curl -k https://192.168.1.10:8443/api/status
@@ -283,27 +330,35 @@ curl -k https://192.168.1.10:8443/api/status
 | База (мектеп, сабақтар, тақталар) | `…/practice.db` | `…/practice.db` | `…\practice.db` |
 | TLS сәйкестендіруі | `…/identity` | `…/identity` | `…\identity` |
 | Қызмет | systemd `matrix-smartboard` | launchd `ru.matrixhost.smartboard` | «Matrix Smartboard Server» тапсырмасы |
-| Сервер журналы | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | «Сервер» экраны → журнал |
-| Жаңарту журналы | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | «Сервер» экраны |
+| Сервер журналы | `journalctl -u matrix-smartboard` | `/var/tmp/matrix-smartboard.log` | `C:\ProgramData\MatrixSmartboard\backend.log` |
+| Ollama журналы | `journalctl -u ollama` | `/var/tmp/matrix-smartboard-ollama.log` | `C:\ProgramData\MatrixSmartboard\ollama.log` |
+| Жаңарту журналы | `/var/lib/matrix-smartboard/update.log` | `/var/tmp/matrix-smartboard-update.log` | `C:\ProgramData\MatrixSmartboard\update.log` |
 
-Linux-тағы пайдалы пәрмендер:
+Пайдалы пәрмендер — күй, қайта іске қосу және журналдың соңғы жолдары.
+
+**Windows** (әкімші ретінде ашылған PowerShell):
+
+```powershell
+Get-ScheduledTask -TaskName "Matrix Smartboard Server" | Select-Object TaskName, State
+Stop-ScheduledTask -TaskName "Matrix Smartboard Server"
+Start-ScheduledTask -TaskName "Matrix Smartboard Server"
+Get-Content C:\ProgramData\MatrixSmartboard\backend.log -Tail 100
+```
+
+**Linux** (Debian, Ubuntu, Arch — бәрінде systemd, пәрмендер бірдей):
 
 ```bash
 sudo systemctl status matrix-smartboard
-```
-
-```bash
 sudo systemctl restart matrix-smartboard
-```
-
-```bash
 sudo journalctl -u matrix-smartboard -n 100
 ```
 
-macOS-та:
+**macOS:**
 
 ```bash
+sudo launchctl print system/ru.matrixhost.smartboard | head -20
 sudo launchctl kickstart -k system/ru.matrixhost.smartboard
+tail -n 100 /var/tmp/matrix-smartboard.log
 ```
 
 ---
@@ -326,7 +381,15 @@ sudo launchctl kickstart -k system/ru.matrixhost.smartboard
 Серверді екі тәсілмен жаңартуға болады:
 
 - **Тақтадан:** баптаулар → «Сервер» → «Тексеру» → «Орнату».
-- **Сервердің өзінде** (Linux, macOS):
+- **Сервердің өзінде:**
+
+  **Windows** (әкімші ретінде ашылған PowerShell):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File C:\ProgramData\MatrixSmartboard\app\deploy\update-server.ps1
+  ```
+
+  **Linux** (Debian, Ubuntu) және **macOS**:
 
   ```bash
   sudo /usr/local/sbin/matrix-smartboard-update
@@ -368,7 +431,16 @@ sudo launchctl kickstart -k system/ru.matrixhost.smartboard
 4. IP-ді қолмен енгізіңіз: батырма іздеудің 5 секундынан кейін шығады.
 
 **Автоматты баптау: «SSH қолжетімсіз».**
-SSH сервері іске қосылмаған немесе порт қате көрсетілген. Linux: `sudo systemctl status ssh`. Windows: «OpenSSH SSH Server» (sshd) қызметі іске қосулы болуы керек. macOS: «Қашықтан кіру» қосулы.
+SSH сервері іске қосылмаған немесе порт қате көрсетілген. Болашақ серверде тексеріңіз:
+
+| Платформа | Пәрмен |
+|---|---|
+| Windows (PowerShell) | `Get-Service sshd` — `Running` болуы керек |
+| Linux — Debian / Ubuntu | `sudo systemctl status ssh` |
+| Linux — Arch | `sudo systemctl status sshd` |
+| macOS | `sudo systemsetup -getremotelogin` — `On` болуы керек |
+
+SSH өшірулі болса, оны [2-бөлімдегі](#2-серверге-не-қажет) пәрмендермен қосыңыз.
 
 **Автоматты баптау: «SSH пайдаланушысы немесе құпиясөзі қате».**
 Пернетақта тілін және пайдаланушы атын тексеріңіз. Кіру құпиясөз арқылы жүреді: тек SSH кілті арқылы кіруді қолданба қолдамайды.
@@ -395,15 +467,20 @@ SSH пайдаланушысы **Administrators** тобында болуы ке
 Желіде mDNS жұмыс істесе — жоқ: тақталар серверді Server ID бойынша табады. Жұмыс істемесе, «Сервер қолжетімсіз» экранында «Қосылымды баптау» басып, жаңа IP енгізіңіз. Кілт сол күйі қалады.
 
 **ЖИ «OCR қолжетімсіз» деп жазады немесе жауап бермейді.**
-«Сервер» экранын ашыңыз: Ollama «online», ал екі модель «Орнатылған» болуы керек. Ollama жұмыс істемесе, «Қайта іске қосу» басыңыз. Модельдер жоқ болса, оларды сол жерден немесе серверде жүктеңіз:
+«Сервер» экранын ашыңыз: Ollama «online», ал екі модель «Орнатылған» болуы керек. Ollama жұмыс істемесе, «Қайта іске қосу» басыңыз. Модельдер жоқ болса, оларды сол жерден немесе серверде жүктеңіз. Пәрмендер Windows (PowerShell), Linux (Debian, Ubuntu, Arch) және macOS-та бірдей:
 
 ```bash
 ollama pull qwen2.5:7b
-```
-
-```bash
 ollama pull qwen2.5vl:3b
 ```
+
+Ollama-ны қолмен қайта іске қосу:
+
+| Платформа | Пәрмен |
+|---|---|
+| Windows (әкімші ретінде ашылған PowerShell) | `Stop-ScheduledTask "Matrix Smartboard Ollama"; Start-ScheduledTask "Matrix Smartboard Ollama"` |
+| Linux (Debian, Ubuntu, Arch) | `sudo systemctl restart ollama` |
+| macOS | `sudo launchctl kickstart -k system/ru.matrixhost.ollama` |
 
 Жады 8 ГБ серверге ЖИ сыймауы мүмкін. 16 ГБ керек.
 
@@ -411,7 +488,7 @@ ollama pull qwen2.5vl:3b
 Бейнекартасыз 7B моделі ондаған секундта жауап береді, бұл күтілетін жағдай. NVIDIA бейнекартасы немесе Apple Silicon-дағы Mac жылдамдатады. Бұл тақтадағы сабақты баяулатпайды: ЖИ тек кеңес, тексеру және сабақ құру үшін керек.
 
 **Мұғалім PIN-кодты ұмытып қалды.**
-PIN тек осы тақтада сақталады. Оны тастау үшін қолданба деректерін тазалаңыз: Android баптаулары → Қолданбалар → Matrix Smartboard → Жад → Деректерді тазалау, немесе ADB арқылы:
+PIN тек осы тақтада сақталады. Оны тастау үшін қолданба деректерін тазалаңыз: Android баптаулары → Қолданбалар → Matrix Smartboard → Жад → Деректерді тазалау, немесе жүйелік әкімшінің компьютерінен ADB арқылы (пәрмен Windows, Linux және macOS-та бірдей):
 
 ```bash
 adb shell pm clear ru.matrixhost.smartboard
@@ -423,7 +500,15 @@ adb shell pm clear ru.matrixhost.smartboard
 Оны қолданба арқылы тастау мүмкін емес. Аккаунтқа кіріп қойған тақталар жұмысын жалғастырады. Тастау үшін серверге қолжетімділік керек, әзірлеушіге хабарласыңыз.
 
 **Тақтада веб-режим туралы хабар шықты («…нативті сызу істен шықты…»).**
-Жылдам сия сызу (Android арқылы нативті) қатарынан бірнеше рет іске қосылмады, ал тақта сабақ тоқтап қалмауы үшін қосалқы веб-сызуға өзі ауысты. Мұғалім «Қайта көру» батырмасын баса алады. Бұл қайталанса, әзірлеушіге тақтаның моделі мен журналын жіберіңіз. Журналды былай алыңыз:
+Жылдам сия сызу (Android арқылы нативті) қатарынан бірнеше рет іске қосылмады, ал тақта сабақ тоқтап қалмауы үшін қосалқы веб-сызуға өзі ауысты. Мұғалім «Қайта көру» батырмасын баса алады. Бұл қайталанса, әзірлеушіге тақтаның моделі мен журналын жіберіңіз. Журналды жүйелік әкімшінің компьютерінен алыңыз.
+
+**Windows** (PowerShell; файл UTF-16 емес, UTF-8 түрінде сақталады):
+
+```powershell
+adb logcat -d | Out-File -Encoding utf8 board-log.txt
+```
+
+**Linux** (Debian, Ubuntu, Arch) және **macOS**:
 
 ```bash
 adb logcat -d > board-log.txt
