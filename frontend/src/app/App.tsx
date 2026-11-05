@@ -27,6 +27,7 @@ import {
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
 import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
+import { nextDeviceStamp } from "@/app/board/deviceStamp";
 import {
   buildDefaultSlidesForSubject,
   getDefaultTasksForSubject,
@@ -311,7 +312,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   const onBoardReplayOp = (op: BoardReplayOp) => {
     setBoardHistory((previous) => replayBoardOperations(previous, [op]));
-    boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID() } as BoardReplayOp);
+    // device_id + client_seq keep this board's operations in order across the servers of a cluster.
+    boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID(), ...nextDeviceStamp() } as BoardReplayOp);
     persistBoardReplayQueue(boardReplayQueueRef.current);
     if (connectionState === "online") setConnectionState("syncing");
     if (boardReplayLoadedRef.current && boardReplayQueueRef.current.length >= 24) {
@@ -516,6 +518,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     }, ultraLite ? 5000 : 2000);
     return () => window.clearInterval(id);
   }, [ultraLite]);
+
+  useEffect(() => {
+    // The board moved to another server of its cluster: send what is queued there right away.
+    const handleServerSwitch = () => void flushBoardReplay();
+    window.addEventListener("matrix:server-switched", handleServerSwitch);
+    return () => window.removeEventListener("matrix:server-switched", handleServerSwitch);
+  }, [lesson.id]);
 
   useEffect(() => {
     const handleOnline = () => {

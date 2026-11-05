@@ -1,3 +1,4 @@
+import { chooseMember, clusterMembers, isClusterMember, memberScore, switchToMember } from "@/lib/cluster";
 import { registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import {
   apiFetch,
@@ -78,7 +79,7 @@ export type SavedServerConnectionResult = {
   serverName: string;
   serverUrl: string;
   detail?: string;
-  source?: "saved-address" | "mdns";
+  source?: "saved-address" | "mdns" | "cluster";
   status?: ServerStatus;
   checks: {
     savedAddress: ConnectionCheckState;
@@ -191,7 +192,8 @@ export const trustServerIdentity = async (serverUrl: string, serverId: string, p
   if (isNativeApp() && normalized.startsWith("https://")) {
     await NativeSecurity.trustServer({ serverUrl: normalized, serverId, pin });
   }
-  if (previousServerId && previousServerId !== serverId) setMobileSessionToken(null);
+  // Moving between members of one cluster keeps the sign-in: sessions replicate there.
+  if (previousServerId && previousServerId !== serverId && !isClusterMember(serverId)) setMobileSessionToken(null);
   rememberServer(normalized, serverId);
 };
 
@@ -202,7 +204,9 @@ export const testServer = async (serverUrl: string) => {
   }
 
   const previousServerId = readStored(SERVER_ID_KEY);
-  if (previousServerId && probe.serverId && previousServerId !== probe.serverId) setMobileSessionToken(null);
+  if (previousServerId && probe.serverId && previousServerId !== probe.serverId && !isClusterMember(probe.serverId)) {
+    setMobileSessionToken(null);
+  }
   rememberServer(probe.serverUrl, probe.serverId, probe.status);
   const response = await apiFetch("/api/status", { cache: "no-store" });
   if (!response.ok) throw new Error(`Сервер ответил кодом ${response.status}`);
@@ -266,6 +270,29 @@ export const reconnectSavedServer = async (discoveryTimeoutMs = 6500): Promise<S
     const incompatible = compatibilityReason(lastDetail);
     if (incompatible) {
       return { ok: false, reason: incompatible, serverName: storedName, serverUrl: lastUrl, detail: lastDetail, checks };
+    }
+  }
+
+  // A board in a cluster first tries the other members it already trusts.
+  if (!savedAddressIdentityMismatch) {
+    const members = clusterMembers();
+    if (members.length) {
+      const scores = new Map(await Promise.all(members.map(async (m) => [m.nodeId, await memberScore(m)] as const)));
+      const choice = chooseMember(members, scores, "");
+      if (choice) {
+        switchToMember(choice);
+        checks.savedAddress = "ok";
+        checks.identity = "ok";
+        checks.backend = "ok";
+        return {
+          ok: true,
+          reason: "connected",
+          serverName: choice.name || storedName,
+          serverUrl: choice.url,
+          source: "cluster",
+          checks,
+        };
+      }
     }
   }
 

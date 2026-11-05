@@ -4,6 +4,8 @@ import type { AiSolutionBlock, BoardImage, GraphElement } from "@/app/board/boar
 
 type BoardReplayMeta = {
   client_operation_id?: string;
+  device_id?: string;
+  client_seq?: number;
   clientOperationId?: string;
   ts?: number;
 };

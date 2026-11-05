@@ -15,6 +15,7 @@ import { useI18n } from "@/i18n";
 import { AnimatePresence, motion } from "framer-motion";
 import AndroidSetupWizard from "./setup/AndroidSetupWizard";
 import ServerConnectionGate from "./setup/ServerConnectionGate";
+import { startClusterBalancer } from "@/lib/cluster";
 import { currentServerName, needsAndroidSetup, reconnectSavedServer, type SavedServerConnectionResult } from "./setup/androidSetup";
 import { isNativeApp } from "@/lib/apiClient";
 import { NativeBoard } from "@/app/board/nativeBoard";
@@ -138,6 +139,12 @@ export default function AppRoot() {
       });
 
     return () => { cancelled = true; };
+  }, [androidConnectionPhase]);
+
+  // In a cluster, keep the board on a responsive, not overloaded server.
+  useEffect(() => {
+    if (androidConnectionPhase !== "ready" || !isNativeApp()) return;
+    return startClusterBalancer(() => window.dispatchEvent(new Event("matrix:server-switched")));
   }, [androidConnectionPhase]);
 
   useEffect(() => {

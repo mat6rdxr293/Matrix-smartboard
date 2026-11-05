@@ -89,6 +89,12 @@ export const backendAssetUrl = (value: string | null | undefined) => {
 
 let recoveryInFlight: Promise<string | null> | null = null;
 
+/** Set by lib/cluster.ts: moves the board to a live member of its cluster when its server is gone. */
+let serverRecoveryHook: (() => Promise<string | null>) | null = null;
+export const setServerRecoveryHook = (hook: (() => Promise<string | null>) | null) => {
+  serverRecoveryHook = hook;
+};
+
 async function recoverTrustedServerUrl(): Promise<string | null> {
   if (!isNativeApp() || typeof window === "undefined") return null;
   const serverId = window.localStorage.getItem(SERVER_ID_KEY);
@@ -97,6 +103,11 @@ async function recoverTrustedServerUrl(): Promise<string | null> {
 
   recoveryInFlight = (async () => {
     try {
+      // In a cluster the other members are known and few: ask them before searching the network.
+      if (serverRecoveryHook) {
+        const member = await serverRecoveryHook();
+        if (member) return member;
+      }
       const found = await NativeDiscovery.discover({ timeoutMs: 5000 });
       for (const candidate of found.servers ?? []) {
         if (candidate.serverId !== serverId || !candidate.serverUrl?.startsWith("https://")) continue;

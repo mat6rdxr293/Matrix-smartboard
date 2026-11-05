@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { currentServerUrl } from "@/app/setup/androidSetup";
+import ClusterSection from "./ClusterSection";
 import {
   serverManagementApi,
   type ModelJobs,
@@ -444,6 +445,8 @@ export default function ServerManagementPanel({
               })}
             </div>
           </section>
+
+          <ClusterSection />
 
           <section className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
             <div className="text-sm font-semibold">{tl("server_backup_restore")}</div>
