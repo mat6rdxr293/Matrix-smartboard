@@ -69,9 +69,45 @@ wait_health() {
   return 1
 }
 
+DATA_REL="backend/app/data"
+RUNTIME_BACKUP=""
+DATA_OWNER=""
+
+# Slides, tasks and the board background are tracked files that the server rewrites while it runs.
+# A reset must not swap a school's lessons for the repository defaults, and git running as root must
+# not leave them unwritable for the service user, so they are saved once here and put back after
+# every reset, including a rollback.
+preserve_runtime_data() {
+  RUNTIME_BACKUP="$(mktemp -d)"
+  if [[ "$SYSTEM" == "Darwin" ]]; then
+    DATA_OWNER="$(stat -f '%Su:%Sg' "$APP_DIR/$DATA_REL")"
+  else
+    DATA_OWNER="$(stat -c '%U:%G' "$APP_DIR/$DATA_REL")"
+  fi
+  local file
+  while IFS= read -r file; do
+    if [[ -f "$APP_DIR/$file" ]]; then
+      mkdir -p "$RUNTIME_BACKUP/$(dirname "$file")"
+      cp -p "$APP_DIR/$file" "$RUNTIME_BACKUP/$file"
+    fi
+  done < <(git -C "$APP_DIR" ls-files -- "$DATA_REL")
+  echo "Preserved runtime data owned by $DATA_OWNER"
+}
+
+restore_runtime_data() {
+  local file
+  while IFS= read -r file; do
+    file="${file#./}"
+    mkdir -p "$APP_DIR/$(dirname "$file")"
+    cp -p "$RUNTIME_BACKUP/$file" "$APP_DIR/$file"
+  done < <(cd "$RUNTIME_BACKUP" && find . -type f)
+  chown -R "$DATA_OWNER" "$APP_DIR/$DATA_REL"
+}
+
 apply_commit() {
   local commit="$1"
   git -C "$APP_DIR" reset --hard "$commit"
+  restore_runtime_data
   "$APP_DIR/.venv/bin/python" -m pip install -q -r "$APP_DIR/backend/requirements.txt"
   install -m 755 "$APP_DIR/deploy/update-server.sh" /usr/local/sbin/matrix-smartboard-update
   install -m 755 "$APP_DIR/deploy/server-control.sh" /usr/local/sbin/matrix-smartboard-service-control
@@ -79,6 +115,7 @@ apply_commit() {
 }
 
 echo "Updating $OLD_COMMIT -> $NEW_COMMIT"
+preserve_runtime_data
 apply_commit "$NEW_COMMIT"
 restart_backend
 

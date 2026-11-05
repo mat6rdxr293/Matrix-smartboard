@@ -66,6 +66,14 @@ jobs:
       - name: Tests
         run: python -m unittest discover tests
 
+  deploy:
+    name: Deploy scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Updater keeps lesson data
+        run: bash scripts/test-update-server.sh
+
   android:
     name: Android build
     runs-on: ubuntu-latest
