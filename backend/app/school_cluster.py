@@ -210,6 +210,19 @@ class ClusterMixin:
             rows = connection.execute("SELECT origin, MAX(seq) AS seq FROM cluster_log GROUP BY origin").fetchall()
         return {row["origin"]: int(row["seq"]) for row in rows}
 
+    def last_change_of(self, origin: str) -> tuple[int, str] | None:
+        """(seq, hlc) of the newest change this node holds from ``origin``."""
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT seq, hlc FROM cluster_log WHERE origin = ? ORDER BY seq DESC LIMIT 1", (origin,)
+            ).fetchone()
+        return (int(row["seq"]), row["hlc"]) if row else None
+
+    def change_hlc(self, origin: str, seq: int) -> str | None:
+        with self.connection() as connection:
+            row = connection.execute("SELECT hlc FROM cluster_log WHERE origin = ? AND seq = ?", (origin, seq)).fetchone()
+        return row["hlc"] if row else None
+
     def cluster_changes(self, after: dict[str, int], *, limit: int = MAX_CHANGES_PER_PULL) -> list[dict]:
         """Changes newer than ``after``, oldest first per origin. Includes changes relayed from others."""
         limit = max(1, min(limit, MAX_CHANGES_PER_PULL))
@@ -443,6 +456,19 @@ class ClusterMixin:
     def cluster_peers(self) -> list[dict]:
         with self.connection() as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM cluster_peers ORDER BY name, node_id")]
+
+    def first_local_school_id(self) -> str | None:
+        """The earliest school created on this node (not received from another member)."""
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT json_extract(data, '$.id') AS id FROM cluster_log
+                WHERE kind = 'school' AND origin = ?
+                ORDER BY json_extract(data, '$.created_at'), seq LIMIT 1
+                """,
+                (self.node_id,),
+            ).fetchone()
+        return row["id"] if row else None
 
     def meta_get(self, key: str) -> str | None:
         with self.connection() as connection:

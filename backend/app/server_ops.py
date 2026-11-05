@@ -23,7 +23,7 @@ from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .school_routes import require_school
+from .school_routes import require_server_admin
 from .settings import get_server_name, settings
 
 
@@ -53,7 +53,7 @@ class ModelPullRequest(BaseModel):
 
 
 def _require_management(request: Request) -> dict:
-    return require_school(request)
+    return require_server_admin(request)
 
 
 def _run(command: list[str], *, timeout: float = 8.0) -> tuple[int, str]:

@@ -115,7 +115,7 @@ def test_three_servers_share_one_school(nodes):
         node.token = token
     # Every node learns all three members, including through a relay.
     eventually(lambda: all(len(n.call("GET", "/api/cluster/members").json()["members"]) == 3 for n in nodes))
-    eventually(lambda: all(m["online"] for m in c.call("GET", "/api/cluster").json()["members"]))
+    eventually(lambda: all(m["online"] for m in c.call("GET", "/api/cluster/members").json()["members"]))
 
     room = c.call("POST", "/api/rooms", json={"name": "204"}).json()["room"]
     lesson = eventually(lambda: a.call("POST", f"/api/rooms/{room['id']}/lessons", json={"grade": 9, "subject_id": "algebra"}).json()["lesson"])
@@ -192,3 +192,45 @@ def test_a_textbook_on_one_server_is_usable_from_another(nodes):
     assert image.headers["content-type"] == "image/jpeg" and image.content[:2] == b"\xff\xd8"
     # b holds no copy of the book itself.
     assert not any((b.root / "ml").rglob("*.pdf"))
+
+
+def test_a_copy_of_a_running_server_stops_instead_of_mixing_logs(tmp_path):
+    import shutil
+
+    a = Node(tmp_path, "orig").start()
+    b = Node(tmp_path, "peer").start()
+    try:
+        a.token = a.call("POST", "/api/auth/register-school", json={"school_name": "Школа", "password": "password11"}).json()["sessionToken"]
+        assert a.call("POST", "/api/cluster/create").status_code == 200
+        code = a.call("POST", "/api/cluster/pairing-code").json()["code"]
+        b.token = b.call("POST", "/api/auth/register-school", json={"school_name": "Своя", "password": "password11"}).json()["sessionToken"]
+        assert b.call("POST", "/api/cluster/join", json={"url": a.url, "code": code}).status_code == 200
+        eventually(lambda: all(m["online"] for m in b.call("GET", "/api/cluster/members").json()["members"]))
+
+        # A backup of a restored on another machine while a keeps running.
+        a.stop()
+        clone = Node(tmp_path, "clone")
+        shutil.rmtree(clone.root)
+        shutil.copytree(a.root, clone.root)
+        a.start()
+        clone.start()
+        clone.token = a.token
+        # The original keeps writing; the copy writes too, under the same id.
+        a.call("POST", "/api/rooms", json={"name": "101"})
+        clone.call("POST", "/api/rooms", json={"name": "999"})
+        # The copy hears from b about changes "it" never made and stops syncing instead of mixing logs.
+        conflict = eventually(lambda: clone.call("GET", "/api/cluster").json().get("conflict"), timeout=30)
+        assert "копия" in conflict
+        # And a member will not admit a second server with the key of a running one.
+        original = next(m for m in b.call("GET", "/api/cluster/members").json()["members"] if m["name"] == "orig")
+        code = b.call("POST", "/api/cluster/pairing-code").json()["code"]
+        pair = b.call("POST", "/api/cluster/pair", json={"code": code, "nodeId": original["nodeId"], "url": "https://10.9.9.9:8443",
+                                                        "pin": original["pin"], "name": "copy"})
+        assert pair.status_code == 409
+    finally:
+        for node in (a, b):
+            node.stop()
+        try:
+            clone.stop()
+        except NameError:
+            pass

@@ -29,7 +29,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .school_routes import require_school
+from .school_routes import require_server_admin
 from .school_store import SchoolStore
 
 logger = logging.getLogger("matrix-cluster")
@@ -114,6 +114,9 @@ class ClusterService:
     health: dict[str, PeerHealth] = field(default_factory=dict)
     pairing: dict[str, float] = field(default_factory=dict)
     pairing_failures: int = 0
+    # Set when another machine writes under this node's id (a backup restored elsewhere while this
+    # server still runs); syncing stops until an administrator sorts it out.
+    conflict: str | None = None
     _books_cache: tuple[float, list[tuple[dict, dict]]] = (0.0, [])
     _task: asyncio.Task | None = None
 
@@ -136,7 +139,7 @@ class ClusterService:
 
     def create(self, self_url: str) -> dict:
         if self.enabled:
-            raise ValueError("this server is already in a cluster")
+            raise ValueError("Этот сервер уже в кластере")
         self.store.meta_set("cluster_id", secrets.token_hex(8))
         self.store.meta_set("cluster_secret", secrets.token_urlsafe(32))
         self.store.meta_set("cluster_self_url", self_url)
@@ -171,23 +174,30 @@ class ClusterService:
 
     def admit(self, node_id: str, url: str, pin: str, name: str) -> dict:
         """Called on an existing member when a new node presents a valid pairing code."""
+        existing = next((p for p in self.store.cluster_peers() if p["node_id"] == node_id), None)
+        alive = node_id == self.store.node_id or (
+            existing is not None and existing["url"] != url and self.health.get(node_id, PeerHealth()).online
+        )
+        if alive:
+            # Same key as a member that is running elsewhere: a copy of that server, not a new one.
+            raise ValueError("Сервер с таким же ключом уже работает в кластере: это копия, а не новый сервер")
         self.store.announce_peer(node_id, url, pin, name)
         return {"clusterId": self.cluster_id, "secret": self.secret, "members": self.store.cluster_peers()}
 
     async def join(self, peer_url: str, code: str, self_url: str) -> dict:
         if self.enabled:
-            raise ValueError("this server is already in a cluster")
+            raise ValueError("Этот сервер уже в кластере")
         peer_url = peer_url.rstrip("/")
         body = {"code": code, "nodeId": self.store.node_id, "url": self_url, "pin": self.pin(), "name": self.name()}
         async with httpx.AsyncClient(verify=False, timeout=PEER_TIMEOUT_S) as client:
             response = await client.post(f"{peer_url}/api/cluster/pair", json=body)
             if response.status_code != 200:
-                raise ValueError(response.json().get("detail", "pairing failed") if response.headers.get("content-type", "").startswith("application/json") else "pairing failed")
+                raise ValueError(response.json().get("detail", "Не удалось присоединиться") if response.headers.get("content-type", "").startswith("application/json") else "Не удалось присоединиться")
             peer_pin = self._peer_pin(response)
             data = response.json()
         members = data.get("members") or []
         if not any(m.get("pin") == peer_pin for m in members):
-            raise ValueError("the server answered with a key that is not in its own member list")
+            raise ValueError("Сервер ответил ключом, которого нет в его же списке узлов")
         self.store.meta_set("cluster_id", data["clusterId"])
         self.store.meta_set("cluster_secret", data["secret"])
         self.store.meta_set("cluster_self_url", self_url)
@@ -240,11 +250,15 @@ class ClusterService:
             "nodeId": self.store.node_id,
             "members": self.members() if self.enabled else [],
             "vector": self.store.cluster_vector(),
+            "conflict": self.conflict,
         }
 
     # ----- sync loop ------------------------------------------------------------------------------
 
     def start(self) -> None:
+        if self.enabled and not any(p["node_id"] == self.store.node_id for p in self.store.cluster_peers()) and self.self_url():
+            # A server that got a new key (its identity folder was removed) joins under its new id.
+            self.store.announce_peer(self.store.node_id, self.self_url() or "", self.pin(), self.name())
         if self.enabled and (self._task is None or self._task.done()):
             try:
                 loop = asyncio.get_running_loop()
@@ -284,6 +298,8 @@ class ClusterService:
     async def sync_once(self, client: httpx.AsyncClient) -> int:
         """Pulls from every other member once; returns the number of changes applied."""
         total = 0
+        if self.conflict:
+            return 0
         for peer in self.store.cluster_peers():
             if peer["node_id"] == self.store.node_id:
                 continue
@@ -307,6 +323,20 @@ class ClusterService:
             response.raise_for_status()
             data = response.json()
             health.load = data.get("load")
+            # What the peer holds under this node's id must be what this node wrote: a change it never
+            # made, or a different one under the same number, means a copy of this server is running.
+            yours = data.get("yourLast")
+            if isinstance(yours, list) and len(yours) == 2 and await asyncio.to_thread(
+                self.store.change_hlc, self.store.node_id, int(yours[0])
+            ) != yours[1]:
+                self.conflict = (
+                    f"У сервера «{peer['name']}» есть изменение №{yours[0]} от имени этого сервера, которого он не делал. "
+                    "Где-то работает копия этого сервера (например, восстановленная резервная копия) или сюда восстановили "
+                    "старую копию. Синхронизация остановлена, см. руководство сисадмина"
+                )
+                logger.error("cluster: %s", self.conflict)
+                self.stop()
+                return applied
             changes = data.get("changes") or []
             count = await asyncio.to_thread(self.store.apply_cluster_changes, changes)
             applied += count
@@ -431,13 +461,13 @@ async def cluster_members(request: Request) -> dict:
 
 @router.get("/api/cluster")
 async def cluster_status(request: Request) -> dict:
-    require_school(request)
+    require_server_admin(request)
     return get_cluster(request).describe()
 
 
 @router.post("/api/cluster/create")
 async def cluster_create(request: Request) -> dict:
-    require_school(request)
+    require_server_admin(request)
     try:
         return get_cluster(request).create(_base_url(request))
     except ValueError as exc:
@@ -446,16 +476,16 @@ async def cluster_create(request: Request) -> dict:
 
 @router.post("/api/cluster/pairing-code")
 async def cluster_pairing_code(request: Request) -> dict:
-    require_school(request)
+    require_server_admin(request)
     cluster = get_cluster(request)
     if not cluster.enabled:
-        raise HTTPException(status_code=409, detail="this server is not in a cluster")
+        raise HTTPException(status_code=409, detail="Этот сервер не в кластере")
     return {"code": cluster.new_pairing_code(), "expiresInSeconds": PAIRING_TTL_S}
 
 
 @router.post("/api/cluster/join")
 async def cluster_join(payload: JoinPayload, request: Request) -> dict:
-    require_school(request)
+    require_server_admin(request)
     try:
         return await get_cluster(request).join(payload.url, payload.code, _base_url(request))
     except (ValueError, httpx.HTTPError) as exc:
@@ -464,7 +494,7 @@ async def cluster_join(payload: JoinPayload, request: Request) -> dict:
 
 @router.post("/api/cluster/leave")
 async def cluster_leave(request: Request) -> dict:
-    require_school(request)
+    require_server_admin(request)
     get_cluster(request).leave()
     return {"ok": True}
 
@@ -474,20 +504,24 @@ async def cluster_pair(payload: PairPayload, request: Request) -> dict:
     """A new node presents the pairing code shown on this one and receives the cluster secret."""
     cluster = get_cluster(request)
     if not cluster.enabled or not cluster.take_pairing_code(payload.code):
-        raise HTTPException(status_code=403, detail="wrong or expired pairing code")
-    return cluster.admit(payload.nodeId, payload.url.rstrip("/"), payload.pin, payload.name)
+        raise HTTPException(status_code=403, detail="Неверный или устаревший код")
+    try:
+        return cluster.admit(payload.nodeId, payload.url.rstrip("/"), payload.pin, payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/api/cluster/changes")
 async def cluster_changes(request: Request, after: str = "{}") -> dict:
-    _require_peer(request)
+    caller = _require_peer(request)
     cluster = get_cluster(request)
     try:
         vector = {str(k): int(v) for k, v in json.loads(after).items()}
     except (ValueError, AttributeError) as exc:
         raise HTTPException(status_code=400, detail="bad vector") from exc
     changes = await asyncio.to_thread(cluster.store.cluster_changes, vector)
-    return {"nodeId": cluster.store.node_id, "changes": changes, "limit": 500, "load": cluster.load.snapshot()}
+    return {"nodeId": cluster.store.node_id, "changes": changes, "limit": 500, "load": cluster.load.snapshot(),
+            "yourLast": await asyncio.to_thread(cluster.store.last_change_of, caller)}
 
 
 @router.get("/api/cluster/media/{name}")

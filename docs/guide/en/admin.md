@@ -468,11 +468,16 @@ A green dot means the server answers, a red one that it does not. Its load is sh
 - **Network split.** If the network split and the halves worked separately, they converge by themselves once connected again. A room keeps one active lesson — the one started later. If a school or room with the same name was created on both sides, both are kept, and the name opens the one created earlier.
 - **Updates.** Update the servers one at a time, not all at once: while one updates, the boards work on the others.
 - **Backups.** Back up any server: the data is the same on all of them. Back up textbooks from every server that holds some.
+- **Who manages a server.** Only the **owner school** can manage a server (the cluster, updates, backups, restarts): the first school registered on that server itself. Other schools on it work as usual but cannot open the "Server" screen; otherwise another school could download a backup with everyone's data or attach the server to its own cluster.
+- **A copy of a server.** Do not run a restored backup on a second computer while the original server is running: the copy has the same key and the same id. The cluster notices: the copy stops syncing and shows a red warning in the "Server cluster" section. To turn the copy into a separate server, stop it, delete the `identity` folder in the data folder (see [section 11](#11-where-things-are-on-the-server)) and start it again: it gets a new key and announces itself to the cluster.
 - **Leaving the cluster** ("Leave the cluster", tap twice). The data stays on the server but stops syncing.
 
 ---
 
 ## 16. IT admin FAQ
+
+**The "Server" screen says only another school can manage this server.**
+You are signed in to another school; the server is managed by its owner school, the first one registered on this server. Sign the board in to the owner school.
 
 **The search does not find the server.**
 1. Are the board and the server on the same network? Guest Wi-Fi is often isolated from the main network.

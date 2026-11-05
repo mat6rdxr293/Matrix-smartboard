@@ -16,7 +16,7 @@ type Member = {
   load?: { score?: number } | null;
   lastError?: string | null;
 };
-type ClusterState = { enabled: boolean; clusterId: string | null; nodeId: string; members: Member[] };
+type ClusterState = { enabled: boolean; clusterId: string | null; nodeId: string; members: Member[]; conflict?: string | null };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, { cache: "no-store", ...init });
@@ -64,6 +64,11 @@ export default function ClusterSection() {
     <section className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3" data-testid="cluster-section">
       <div className="flex items-center gap-2 text-sm font-semibold"><Network size={15} className="text-accent" />{tl("cluster_title")}</div>
       <div className="mt-1 text-[11px] leading-5 text-frost/40">{tl("cluster_description")}</div>
+
+      {state?.conflict && (
+        // Another machine writes under this server's id; syncing stopped so the logs do not mix.
+        <div className="mt-3 rounded-lg border border-danger/40 bg-danger/[0.08] px-3 py-2 text-[11px] leading-5 text-danger">{state.conflict}</div>
+      )}
 
       {state?.enabled && (
         <div className="mt-3 space-y-1.5">

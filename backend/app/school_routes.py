@@ -90,6 +90,27 @@ def require_school(request: Request) -> dict:
     return school
 
 
+def require_server_admin(request: Request) -> dict:
+    """The signed-in school, when it may manage this server (updates, backups, the cluster).
+
+    Several schools can share a server, and a backup or a cluster join would hand one of them the
+    data of all. The owner is the earliest school registered on this server itself (schools that
+    arrived from other cluster members do not count); others may not manage it."""
+    school = require_school(request)
+    store = get_store(request)
+    owner = store.meta_get("server_owner_school") or store.first_local_school_id()
+    if owner is None:
+        owner = school["id"]
+    if store.meta_get("server_owner_school") is None:
+        store.meta_set("server_owner_school", owner)
+    if owner != school["id"]:
+        with store.connection() as connection:
+            row = connection.execute("SELECT name FROM schools WHERE id = ?", (owner,)).fetchone()
+        name = row["name"] if row else "—"
+        raise HTTPException(status_code=403, detail=f"Управлять этим сервером может только школа «{name}»")
+    return school
+
+
 def _session_response(request: Request, school: dict, token: str, *, status_code: int) -> JSONResponse:
     store = get_store(request)
     body = {"school": school}

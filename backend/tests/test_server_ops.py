@@ -100,3 +100,30 @@ def test_backup_restore_roundtrip(tmp_path, monkeypatch):
     assert (identity / "server-key.pem").read_text(encoding="utf-8") == "original-key"
     assert (backend_data / "tasks.json").read_text(encoding="utf-8") == '{"version":"original"}'
     assert env_file.read_text(encoding="utf-8") == 'SERVER_NAME="Original"\n'
+
+
+def test_only_the_first_school_of_a_server_manages_it(tmp_path, monkeypatch):
+    client = _client(tmp_path)
+    monkeypatch.setattr(server_ops, "_update_info", lambda force=False: {"supported": False})
+    owner = TestClient(app)
+    other = TestClient(app)
+    assert owner.post("/api/auth/register-school", json={"school_name": "ОСШГ №11", "password": "password11"}).status_code == 201
+    assert other.post("/api/auth/register-school", json={"school_name": "Demo", "password": "password11"}).status_code == 201
+    # The later school signs in fine but cannot download a backup with everyone's data.
+    denied = other.get("/api/server/backup")
+    assert denied.status_code == 403
+    assert "ОСШГ №11" in denied.json()["detail"]
+    assert other.post("/api/cluster/create").status_code == 403
+    assert owner.get("/api/server/backup").status_code == 200
+
+
+def test_a_school_from_another_cluster_member_does_not_own_the_server(tmp_path):
+    from app.school_store import SchoolStore as Store
+
+    remote = Store(tmp_path / "remote.db", node_id="remote")
+    remote.register_school("Чужая", "password11")
+    local = Store(tmp_path / "local.db", node_id="local")
+    local.apply_cluster_changes(remote.cluster_changes({}))
+    assert local.first_local_school_id() is None
+    mine = local.register_school("Своя", "password11")
+    assert local.first_local_school_id() == mine["id"]
