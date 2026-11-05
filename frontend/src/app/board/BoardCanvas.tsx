@@ -1642,7 +1642,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       const boardRect = canvasRef.current?.getBoundingClientRect();
       if (!boardRect) return;
       const selector = [
-        "button", "input", "textarea", "select", "[role=dialog]",
+        "button", "input", "textarea", "select", "[role=dialog]", "[aria-modal=true]",
         "[data-floating-panel]", "[data-graph-interactive=true]",
         "[data-radix-popper-content-wrapper]", "[data-testid=board-toolbar]",
         // Whole panels, not just their buttons: a tap between swatches or beside a slider is still UI.

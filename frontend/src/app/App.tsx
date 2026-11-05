@@ -1997,6 +1997,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       <AnimatePresence>
         {scoreOverlay && (
           <motion.div
+            data-floating-panel
             className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

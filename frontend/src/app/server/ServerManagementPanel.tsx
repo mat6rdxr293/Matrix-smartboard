@@ -254,7 +254,9 @@ export default function ServerManagementPanel({
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-2 backdrop-blur-sm sm:p-4" onMouseDown={(event) => {
+    // data-floating-panel: the whole screen under this window is UI, so the Android ink layer
+    // neither draws there nor takes the touches that scroll the window.
+    <div data-floating-panel className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-2 backdrop-blur-sm sm:p-4" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <div className="glass flex max-h-[92vh] w-full max-w-[820px] flex-col overflow-hidden rounded-[20px] border border-white/10 shadow-[0_18px_48px_rgba(0,0,0,0.32)]">
