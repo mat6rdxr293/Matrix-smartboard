@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
+import httpx
 import jwt as pyjwt
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -95,6 +96,20 @@ app.include_router(cluster_router)
 
 # Paths whose requests run the local AI; while they run they count towards this node's load.
 AI_LOAD_PATHS = ("/api/ai", "/api/ocr", "/api/lesson-generation/generate", "/api/lesson-generation/jobs")
+
+
+_last_url_check = 0.0
+
+
+@app.middleware("http")
+async def _follow_own_address(request: Request, call_next):
+    # Boards reach this server at its current address; if it moved, tell the rest of the cluster.
+    global _last_url_check
+    if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/cluster/") \
+            and time.time() - _last_url_check > 60 and app.state.cluster.enabled:
+        _last_url_check = time.time()
+        await asyncio.to_thread(app.state.cluster.note_own_url, str(request.base_url))
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -838,9 +853,37 @@ async def validate_lesson_generation_endpoint(payload: GeneratedLesson) -> dict:
     return {"ok": True, "lesson": resolved_lesson_payload(payload)}
 
 
+def _local_book_ids() -> set[str]:
+    return {str(book.get("id")) for book in (list_textbook_sources().get("books") or []) if isinstance(book, dict)}
+
+
+async def _remote_owner(book_id: str) -> Optional[dict]:
+    """The cluster member holding a textbook this server does not have, if any."""
+    if not app.state.cluster.enabled or book_id in await asyncio.to_thread(_local_book_ids):
+        return None
+    return await app.state.cluster.book_owner(book_id)
+
+
+def _forwarded(response: httpx.Response) -> Response:
+    return Response(content=response.content, status_code=response.status_code,
+                    media_type=response.headers.get("content-type"), headers={"Cache-Control": "private, max-age=86400"}
+                    if response.status_code == 200 and response.headers.get("content-type", "").startswith("image/") else None)
+
+
 @app.get("/api/lesson-generation/sources")
-async def lesson_generation_sources_endpoint() -> dict:
-    return list_textbook_sources()
+async def lesson_generation_sources_endpoint(local: bool = False) -> dict:
+    sources = list_textbook_sources()
+    if local or not app.state.cluster.enabled:
+        return sources
+    # Textbooks uploaded to other servers of the cluster are offered here too; their pages,
+    # search and lesson generation are served by the server that holds them.
+    books = list(sources.get("books") or [])
+    known = {str(book.get("id")) for book in books if isinstance(book, dict)}
+    for peer, book in await app.state.cluster.remote_books():
+        if book["id"] not in known:
+            known.add(book["id"])
+            books.append({**book, "server": peer["name"]})
+    return {**sources, "books": books}
 
 
 @app.post("/api/textbooks/upload", dependencies=[Depends(_rate_limit_dependency)])
@@ -857,7 +900,10 @@ async def upload_textbook_endpoint(file: UploadFile = File(...)) -> dict:
 
 
 @app.get("/api/textbooks/{book_id}/search")
-async def search_textbook_endpoint(book_id: str, q: str, limit: int = 6) -> dict:
+async def search_textbook_endpoint(book_id: str, q: str, limit: int = 6):
+    owner = await _remote_owner(book_id)
+    if owner is not None:
+        return _forwarded(await app.state.cluster.forward(owner, "GET", f"/api/textbooks/{book_id}/search", params={"q": q, "limit": limit}))
     try:
         return {"items": search_pages(book_id, q, limit=limit)}
     except ValueError as exc:
@@ -865,7 +911,12 @@ async def search_textbook_endpoint(book_id: str, q: str, limit: int = 6) -> dict
 
 
 @app.get("/api/textbooks/{book_id}/pages/{page_number}/image")
-async def textbook_page_image_endpoint(book_id: str, page_number: int, width: int = 1400) -> FileResponse:
+async def textbook_page_image_endpoint(book_id: str, page_number: int, width: int = 1400):
+    owner = await _remote_owner(book_id)
+    if owner is not None:
+        return _forwarded(await app.state.cluster.forward(
+            owner, "GET", f"/api/textbooks/{book_id}/pages/{page_number}/image", params={"width": width}
+        ))
     try:
         path = await asyncio.to_thread(render_page_image, book_id, page_number, width)
     except ValueError as exc:
@@ -934,13 +985,26 @@ async def _run_lesson_generation_job(job_id: str, payload: LessonGenerationReque
 
 @app.post("/api/lesson-generation/jobs", dependencies=[Depends(_rate_limit_dependency)])
 async def create_lesson_generation_job(payload: LessonGenerationRequest) -> dict:
+    owner = await _remote_owner(payload.book) if payload.book and payload.sourceType != "text" else None
+    if owner is not None:
+        # The textbook's text index lives on another server: that server generates the lesson.
+        response = await app.state.cluster.forward(owner, "POST", "/api/lesson-generation/jobs", json_body=payload.model_dump())
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("detail", "Ошибка генерации"))
+        return {"jobId": f"{owner['node_id']}~{response.json()['jobId']}"}
     job_id = progress_jobs.create("lesson")
     _spawn_progress_task(_run_lesson_generation_job(job_id, payload))
     return {"jobId": job_id}
 
 
 @app.get("/api/lesson-generation/jobs/{job_id}")
-async def get_lesson_generation_job(job_id: str) -> dict:
+async def get_lesson_generation_job(job_id: str):
+    if "~" in job_id:
+        node_id, remote_id = job_id.split("~", 1)
+        peer = app.state.cluster.peer(node_id)
+        if peer is None:
+            raise HTTPException(status_code=404, detail="Lesson job не найден")
+        return _forwarded(await app.state.cluster.forward(peer, "GET", f"/api/lesson-generation/jobs/{remote_id}"))
     job = progress_jobs.get(job_id)
     if job is None or job.get("kind") != "lesson":
         raise HTTPException(status_code=404, detail="Lesson job не найден")

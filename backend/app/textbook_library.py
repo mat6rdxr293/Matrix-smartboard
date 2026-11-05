@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,8 @@ from .settings import ROOT_DIR, get_openai_key, settings
 logger = logging.getLogger("textbook-library")
 
 ML_ROOT = ROOT_DIR / "ml"
-DATA_ROOT = ML_ROOT / "data"
+# Overridable so several servers on one machine keep their own textbooks.
+DATA_ROOT = Path(os.environ["MATRIX_ML_DATA_DIR"]) if os.environ.get("MATRIX_ML_DATA_DIR") else ML_ROOT / "data"
 TEXTBOOK_DIR = DATA_ROOT / "textbooks"
 RAW_DIR = DATA_ROOT / "raw"
 SECTIONS_DIR = DATA_ROOT / "sections"

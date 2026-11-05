@@ -108,22 +108,37 @@ export function switchToMember(member: ClusterMember) {
   if (member.name) write(SERVER_NAME_KEY, member.name);
 }
 
+/** Spreads boards: among similarly loaded members each board prefers its own one. */
+const SIMILAR_SCORE = 0.15;
+
+const preference = (deviceId: string, nodeId: string) => {
+  let hash = 2166136261;
+  for (const char of `${deviceId}|${nodeId}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  return hash;
+};
+
+const deviceIdForSpread = () => read("matrix.device.id") || "board";
+
 /**
  * Which member to use now: the current one unless it is down, or busy while another is free.
- * Returns null when the board should stay where it is.
+ * Returns null when the board should stay where it is. When several members are about equally
+ * free, boards pick among them by a hash of their device id, so a crowd leaving one busy server
+ * spreads out instead of landing together on the next.
  */
 export function chooseMember(
   members: ClusterMember[],
   scores: Map<string, number | null>,
   currentUrl: string,
+  deviceId: string = deviceIdForSpread(),
 ): ClusterMember | null {
   const current = members.find((member) => member.url === currentUrl);
   const currentScore = current ? scores.get(current.nodeId) : null;
-  const live = members
-    .filter((member) => member !== current && typeof scores.get(member.nodeId) === "number")
-    .sort((a, b) => (scores.get(a.nodeId)! - scores.get(b.nodeId)!) || a.nodeId.localeCompare(b.nodeId));
-  const best = live[0];
-  if (!best) return null;
+  const live = members.filter((member) => member !== current && typeof scores.get(member.nodeId) === "number");
+  if (!live.length) return null;
+  const lowest = Math.min(...live.map((member) => scores.get(member.nodeId)!));
+  const best = live
+    .filter((member) => scores.get(member.nodeId)! <= lowest + SIMILAR_SCORE)
+    .sort((a, b) => preference(deviceId, a.nodeId) - preference(deviceId, b.nodeId))[0];
   if (currentScore === null || currentScore === undefined) return best;
   if (currentScore > BUSY_SCORE && scores.get(best.nodeId)! < FREE_SCORE) return best;
   return null;

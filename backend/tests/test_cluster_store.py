@@ -184,3 +184,47 @@ def test_data_from_before_the_cluster_is_shared_too(tmp_path):
     sync(reopened, fresh)
     assert state(fresh) == state(reopened)
     assert state(fresh)["boards"][lesson["id"]] == ["o1", "o2"]
+
+
+def test_compacting_the_log_keeps_what_new_nodes_need(tmp_path):
+    a = node(tmp_path, "a")
+    school = a.register_school("Школа", "password11")
+    room = a.create_room(school["id"], "101")
+    lesson = a.create_lesson(school["id"], room["id"], 9, "algebra")
+    big = {"points": [{"x": i, "y": i} for i in range(200)], "color": "#000", "width": 2, "mode": "draw"}
+    a.append_board_operations(school["id"], lesson["id"], [{"client_operation_id": f"s{i}", "op": "add", "stroke": big} for i in range(5)])
+    for version in range(20):
+        a.put_document("storage:algebra", {"tasks": [version] * 50})
+    a.complete_lesson(school["id"], lesson["id"])
+    a.resume_lesson(school["id"], lesson["id"])
+
+    with a.connection() as c:
+        before = c.execute("SELECT SUM(LENGTH(data)) FROM cluster_log").fetchone()[0]
+        # Strokes live once, in board_operations; the log only points at them.
+        assert c.execute("SELECT COUNT(*) FROM cluster_log WHERE kind = 'board_op' AND data LIKE '%points%'").fetchone()[0] == 0
+    emptied = a.compact_cluster_log()
+    with a.connection() as c:
+        after = c.execute("SELECT SUM(LENGTH(data)) FROM cluster_log").fetchone()[0]
+    assert emptied >= 19 and after < before / 2
+
+    fresh = node(tmp_path, "fresh")
+    sync(a, fresh)
+    assert state(fresh) == state(a)
+    assert fresh.get_document("storage:algebra") == {"tasks": [19] * 50}
+    assert [op["stroke"]["points"][-1] for op in fresh.board_state(school["id"], lesson["id"])] == [{"x": 199, "y": 199}] * 5
+    assert fresh.cluster_vector() == a.cluster_vector()
+
+
+def test_a_node_that_moved_tells_the_others_its_new_address(tmp_path):
+    from pathlib import Path
+
+    from app.cluster import ClusterService
+
+    a, b = node(tmp_path, "a"), node(tmp_path, "b")
+    service = ClusterService(store=a, pin=lambda: "sha256/" + "a" * 64, name=lambda: "A", media_dir=Path(tmp_path))
+    service.create("https://10.0.0.5:8443")
+    pull(b, a)
+    service.note_own_url("https://127.0.0.1:8443/")  # a local request says nothing about the network address
+    service.note_own_url("https://10.0.0.9:8443/")
+    pull(b, a)
+    assert [p["url"] for p in b.cluster_peers() if p["node_id"] == "a"] == ["https://10.0.0.9:8443"]

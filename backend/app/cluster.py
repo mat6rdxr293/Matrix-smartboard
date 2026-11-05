@@ -39,6 +39,7 @@ CLOCK_WINDOW_S = 60
 PAIRING_TTL_S = 600
 SYNC_INTERVAL_S = 1.0
 PEER_TIMEOUT_S = 5.0
+COMPACT_EVERY_S = 3600
 AI_CAPACITY = 2  # simultaneous AI requests a node takes before it counts as fully loaded
 
 
@@ -113,6 +114,7 @@ class ClusterService:
     health: dict[str, PeerHealth] = field(default_factory=dict)
     pairing: dict[str, float] = field(default_factory=dict)
     pairing_failures: int = 0
+    _books_cache: tuple[float, list[tuple[dict, dict]]] = (0.0, [])
     _task: asyncio.Task | None = None
 
     # ----- configuration -------------------------------------------------------------------------
@@ -198,6 +200,19 @@ class ClusterService:
         self.start()
         return self.describe()
 
+    def note_own_url(self, url: str) -> None:
+        """Boards reach this node at ``url``. When that differs from the address the cluster knows
+        (the node's IP changed), the new address is announced so the other members follow."""
+        if not self.enabled:
+            return
+        url = url.rstrip("/")
+        host = httpx.URL(url).host
+        if not url.startswith("https://") or host in {"localhost", "127.0.0.1", "::1"} or url == self.self_url():
+            return
+        self.store.meta_set("cluster_self_url", url)
+        self.store.announce_peer(self.store.node_id, url, self.pin(), self.name())
+        logger.info("cluster: this node is now reached at %s", url)
+
     # ----- describing ----------------------------------------------------------------------------
 
     def members(self) -> list[dict]:
@@ -243,9 +258,18 @@ class ClusterService:
             self._task = None
 
     async def _run(self) -> None:
+        last_compaction = 0.0
         async with httpx.AsyncClient(verify=False, timeout=PEER_TIMEOUT_S) as client:
             while self.enabled:
                 await self.sync_once(client)
+                if time.time() - last_compaction > COMPACT_EVERY_S:
+                    last_compaction = time.time()
+                    try:
+                        emptied = await asyncio.to_thread(self.store.compact_cluster_log)
+                        if emptied:
+                            logger.info("cluster log: compacted %s changes", emptied)
+                    except Exception:  # noqa: BLE001 — compaction is housekeeping only
+                        logger.exception("cluster log compaction failed")
                 await asyncio.sleep(SYNC_INTERVAL_S)
 
     def _peer_pin(self, response: httpx.Response) -> str | None:
@@ -290,6 +314,50 @@ class ClusterService:
             if len(changes) < data.get("limit", 500) or not count:
                 break
         return applied
+
+    # ----- textbooks on other nodes ---------------------------------------------------------------
+
+    def _other_members(self) -> list[dict]:
+        return [p for p in self.store.cluster_peers() if p["node_id"] != self.store.node_id]
+
+    def peer(self, node_id: str) -> dict | None:
+        return next((p for p in self._other_members() if p["node_id"] == node_id), None)
+
+    async def remote_books(self) -> list[tuple[dict, dict]]:
+        """(member, book) for textbooks other members hold. Cached briefly: dialogs ask often."""
+        if not self.enabled:
+            return []
+        cached_at, cached = self._books_cache
+        if time.time() - cached_at < 30:
+            return cached
+        found: list[tuple[dict, dict]] = []
+        async with httpx.AsyncClient(verify=False, timeout=PEER_TIMEOUT_S) as client:
+            for peer in self._other_members():
+                if self.health.get(peer["node_id"]) and not self.health[peer["node_id"]].online:
+                    continue
+                try:
+                    response = await client.get(peer["url"].rstrip("/") + "/api/lesson-generation/sources", params={"local": "1"})
+                    if self._peer_pin(response) != peer["pin"] or response.status_code != 200:
+                        continue
+                    for book in response.json().get("books") or []:
+                        if isinstance(book, dict) and book.get("id"):
+                            found.append((peer, book))
+                except (httpx.HTTPError, ValueError):
+                    continue
+        self._books_cache = (time.time(), found)
+        return found
+
+    async def book_owner(self, book_id: str) -> dict | None:
+        return next((peer for peer, book in await self.remote_books() if book.get("id") == book_id), None)
+
+    async def forward(self, peer: dict, method: str, path: str, *, params: dict | None = None,
+                      json_body: Any = None, timeout: float = 30) -> httpx.Response:
+        """Sends a request on to another member's own endpoint, checking its key."""
+        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+            response = await client.request(method, peer["url"].rstrip("/") + path, params=params, json=json_body)
+        if self._peer_pin(response) != peer["pin"]:
+            raise ValueError("peer TLS key does not match its pin")
+        return response
 
     async def fetch_media(self, name: str) -> Path | None:
         """Gets a picture this node does not have from a member that does."""

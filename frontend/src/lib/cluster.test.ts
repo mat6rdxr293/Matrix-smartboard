@@ -17,7 +17,17 @@ describe("choosing a cluster member", () => {
   });
 
   it("leaves a busy server for a free one", () => {
-    expect(chooseMember(members, scores([[a, 0.95], [b, 0.4], [c, 0.2]]), a.url)).toBe(c);
+    expect(chooseMember(members, scores([[a, 0.95], [b, 0.45], [c, 0.1]]), a.url)).toBe(c);
+  });
+
+  it("spreads boards leaving one busy server over the equally free others", () => {
+    const picks = new Set(
+      Array.from({ length: 40 }, (_, i) => chooseMember(members, scores([[a, 0.95], [b, 0.1], [c, 0.12]]), a.url, `board-${i}`)?.nodeId),
+    );
+    expect(picks).toEqual(new Set([b.nodeId, c.nodeId]));
+    // The same board always prefers the same server, so it does not bounce between them.
+    const once = chooseMember(members, scores([[a, 0.95], [b, 0.1], [c, 0.12]]), a.url, "board-7");
+    expect(chooseMember(members, scores([[a, 0.95], [b, 0.1], [c, 0.12]]), a.url, "board-7")).toBe(once);
   });
 
   it("does not move when every other server is busy too", () => {

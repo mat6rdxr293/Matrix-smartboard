@@ -6,6 +6,7 @@ import logging
 import random
 import re
 import time
+import os
 from pathlib import Path
 from typing import Any, Callable, Literal
 
@@ -17,7 +18,8 @@ from .textbook_library import list_textbooks, search_context
 
 logger = logging.getLogger("lesson-generation")
 ML_ROOT = ROOT_DIR / "ml"
-ML_DATA_ROOT = ML_ROOT / "data"
+# Overridable so several servers on one machine keep their own textbooks.
+ML_DATA_ROOT = Path(os.environ["MATRIX_ML_DATA_DIR"]) if os.environ.get("MATRIX_ML_DATA_DIR") else ML_ROOT / "data"
 
 _SUPERSCRIPT = str.maketrans("0123456789+-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻")
 _SUBSCRIPT = str.maketrans("0123456789+-", "₀₁₂₃₄₅₆₇₈₉₊₋")

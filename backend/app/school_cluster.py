@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any, Iterable
 
-CHANGE_KINDS = {"school", "session", "session_delete", "room", "lesson", "board_op", "chat", "doc", "media", "peer"}
+CHANGE_KINDS = {"school", "session", "session_delete", "room", "lesson", "board_op", "chat", "doc", "media", "peer", "noop"}
 MAX_CHANGES_PER_PULL = 500
 
 
@@ -197,6 +197,9 @@ class ClusterMixin:
             row = connection.execute("SELECT COALESCE(MAX(seq), 0) AS seq FROM cluster_log WHERE origin = ?", (origin,)).fetchone()
             seq = int(row["seq"]) + 1
             hlc = hlc or self.clock.now()
+        if kind == "board_op":
+            # The strokes are already in board_operations; the log keeps a reference, not a second copy.
+            data = {key: value for key, value in data.items() if key != "payload_json"}
         connection.execute(
             "INSERT OR IGNORE INTO cluster_log(origin, seq, hlc, kind, data) VALUES (?, ?, ?, ?, ?)",
             (origin, seq, hlc, kind, json.dumps(data, ensure_ascii=False, separators=(",", ":"))),
@@ -220,10 +223,15 @@ class ClusterMixin:
                     "SELECT * FROM cluster_log WHERE origin = ? AND seq > ? ORDER BY seq LIMIT ?",
                     (origin, int(after.get(origin, 0)), limit - len(out)),
                 ).fetchall()
-                out.extend(
-                    {"origin": row["origin"], "seq": row["seq"], "hlc": row["hlc"], "kind": row["kind"], "data": json.loads(row["data"])}
-                    for row in rows
-                )
+                for row in rows:
+                    data = json.loads(row["data"])
+                    if row["kind"] == "board_op" and "payload_json" not in data:
+                        stored = connection.execute(
+                            "SELECT payload_json FROM board_operations WHERE lesson_id = ? AND client_operation_id = ?",
+                            (data["lesson_id"], data["client_operation_id"]),
+                        ).fetchone()
+                        data["payload_json"] = stored["payload_json"] if stored else "{}"
+                    out.append({"origin": row["origin"], "seq": row["seq"], "hlc": row["hlc"], "kind": row["kind"], "data": data})
         return out
 
     def apply_cluster_changes(self, changes: Iterable[dict]) -> int:
@@ -450,6 +458,39 @@ class ClusterMixin:
                     "INSERT INTO schema_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (key, value),
                 )
+
+    def _merge_noop(self, connection: sqlite3.Connection, data: dict) -> None:
+        """A change compacted away on the node it came from; only its place in the sequence remains."""
+
+    def compact_cluster_log(self) -> int:
+        """Replaces changes that later ones made pointless with placeholders, keeping every seq so
+        peers still see an unbroken sequence. Returns how many changes were emptied.
+
+        Documents and the member list are last-writer-wins and nothing depends on them, so only
+        their latest change matters; a session that expired a day ago is gone everywhere anyway.
+        Lessons are left alone: later board operations wait for the change that created their
+        lesson, and lessons are small."""
+        emptied = 0
+        day_ago = _wall_ms() - 86_400_000
+        with self.connection() as connection:
+            for kind, key in (("doc", "$.key"), ("peer", "$.node_id")):
+                result = connection.execute(
+                    f"""
+                    UPDATE cluster_log SET kind = 'noop', data = '{{}}'
+                    WHERE kind = ? AND hlc < (
+                        SELECT MAX(newer.hlc) FROM cluster_log AS newer
+                        WHERE newer.kind = ? AND json_extract(newer.data, '{key}') = json_extract(cluster_log.data, '{key}')
+                    )
+                    """,
+                    (kind, kind),
+                )
+                emptied += result.rowcount
+            result = connection.execute(
+                "UPDATE cluster_log SET kind = 'noop', data = '{}' WHERE kind = 'session' AND json_extract(data, '$.expires_at') < ?",
+                (day_ago,),
+            )
+            emptied += result.rowcount
+        return emptied
 
     def _merge_media(self, connection: sqlite3.Connection, data: dict) -> None:
         connection.execute(

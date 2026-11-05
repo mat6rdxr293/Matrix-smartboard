@@ -20,7 +20,8 @@ Every screenshot was taken in the real app on an Android tablet. This guide is a
 12. [Network and ports](#12-network-and-ports)
 13. [Updates and rollback](#13-updates-and-rollback)
 14. [Connecting more boards](#14-connecting-more-boards)
-15. [IT admin FAQ](#15-it-admin-faq)
+15. [A cluster of several servers](#15-a-cluster-of-several-servers)
+16. [IT admin FAQ](#16-it-admin-faq)
 
 ---
 
@@ -422,7 +423,56 @@ Done. The teacher sees the grade screen. From there the [teacher's guide](teache
 
 ---
 
-## 15. IT admin FAQ
+## 15. A cluster of several servers
+
+Several school servers can be joined into a **cluster**. They work as one server:
+
+- **the data is the same everywhere:** any server accepts lessons, boards and tasks, and the changes reach the others within about a second;
+- **the load is shared:** when a server is busy (usually with AI requests), boards move to a freer one by themselves;
+- **a server can fail:** boards move to a live server, stay signed in to the school account, and the lesson goes on. When the failed server returns, it catches up by itself.
+
+### How to build a cluster
+
+1. On the first server: lesson settings → "Server" → the "Server cluster" section → **"Create cluster"**.
+2. In the same place tap **"Add a server"**. An 8-digit code appears; it is valid for 10 minutes.
+3. Connect a board to the second server, open the same section there → **"Join a cluster"** → enter the first server's address and the code.
+
+The third and further servers join the same way, through any member: you can take the code on any of them.
+
+![The "Server cluster" section](images/80-cluster.webp)
+
+A green dot means the server answers, a red one that it does not. Its load is shown on the right.
+
+### What is synchronised
+
+| Data | How |
+|---|---|
+| Schools, sign-ins, rooms, lessons, boards, AI chat | On every server, at once |
+| Subject tasks and slides | On every server, at once |
+| Pictures on the board | Copied to a server the first time they are opened there |
+| Textbooks (PDF) | Stay on the server they were uploaded to, but are visible from all. Pages, search and lesson generation for such a textbook are done by the server that holds it |
+| Old board replay logs and per-subject AI history | Stay on their own server |
+
+### How a board chooses a server
+
+- Every 20 seconds the board compares the load of the cluster's servers.
+- If its server is more than 80% busy and another is under 50%, it moves to the other one.
+- If its server does not answer, it moves straight to the freest live one.
+- When several servers are about equally free, different boards pick different ones, so they do not overload one.
+- The board sends its unsent strokes to the new server; the server drops duplicates itself.
+
+### Good to know
+
+- **Addresses.** Servers must reach each other at the same addresses the boards use (port 8443). So build the cluster from a board connected by the ordinary school address, not `localhost`.
+- **Security.** All requests between servers are signed with the cluster's shared secret, and every server's key is checked against its pin. The pairing code is single-use, and five wrong tries void every code handed out.
+- **Network split.** If the network split and the halves worked separately, they converge by themselves once connected again. A room keeps one active lesson — the one started later. If a school or room with the same name was created on both sides, both are kept, and the name opens the one created earlier.
+- **Updates.** Update the servers one at a time, not all at once: while one updates, the boards work on the others.
+- **Backups.** Back up any server: the data is the same on all of them. Back up textbooks from every server that holds some.
+- **Leaving the cluster** ("Leave the cluster", tap twice). The data stays on the server but stops syncing.
+
+---
+
+## 16. IT admin FAQ
 
 **The search does not find the server.**
 1. Are the board and the server on the same network? Guest Wi-Fi is often isolated from the main network.

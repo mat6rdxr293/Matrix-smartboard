@@ -36,6 +36,7 @@ class Node:
             "SERVER_IDENTITY_DIR": str(self.root / "identity"),
             "SERVER_NAME": self.name,
             "MATRIX_MEDIA_DIR": str(self.root / "media"),
+            "MATRIX_ML_DATA_DIR": str(self.root / "ml"),
             "AI_BASE_URL": "",
             "OCR_BASE_URL": "",
         }
@@ -160,3 +161,34 @@ def test_requests_between_nodes_must_be_signed(nodes):
         r = a.call("POST", "/api/cluster/pair", json={"code": "00000000", "nodeId": "evil", "url": "https://1.2.3.4",
                                                      "pin": "sha256/" + "0" * 64, "name": "x"})
         assert r.status_code == 403
+
+
+def test_a_textbook_on_one_server_is_usable_from_another(nodes):
+    import pymupdf
+
+    a, b, _c = nodes
+    a.token = a.call("POST", "/api/auth/register-school", json={"school_name": "Школа", "password": "password11"}).json()["sessionToken"]
+    a.call("POST", "/api/cluster/create")
+    code = a.call("POST", "/api/cluster/pairing-code").json()["code"]
+    b.token = b.call("POST", "/api/auth/register-school", json={"school_name": "Своя", "password": "password11"}).json()["sessionToken"]
+    assert b.call("POST", "/api/cluster/join", json={"url": a.url, "code": code}).status_code == 200
+
+    doc = pymupdf.open()
+    for number in range(3):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"§{number + 1} Тема {number + 1}. " + "Квадратное уравнение. " * 40)
+    pdf = doc.tobytes()
+    uploaded = a.call("POST", "/api/textbooks/upload", files={"file": ("algebra.pdf", pdf, "application/pdf")})
+    assert uploaded.status_code == 200, uploaded.text
+    book_id = uploaded.json()["book"]["id"]
+
+    def offered_on_b():
+        books = b.call("GET", "/api/lesson-generation/sources").json()["books"]
+        return next((book for book in books if book["id"] == book_id and (book.get("totalPages") or 0) > 0), None)
+
+    book = eventually(offered_on_b, timeout=40)
+    assert book["server"] == "node-0"
+    image = eventually(lambda: (r := b.call("GET", f"/api/textbooks/{book_id}/pages/1/image?width=400")).status_code == 200 and r)
+    assert image.headers["content-type"] == "image/jpeg" and image.content[:2] == b"\xff\xd8"
+    # b holds no copy of the book itself.
+    assert not any((b.root / "ml").rglob("*.pdf"))
