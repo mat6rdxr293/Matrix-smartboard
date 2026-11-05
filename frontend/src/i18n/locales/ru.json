@@ -550,7 +550,21 @@
     "geometry": "Геометрия",
     "ruler": "Линейка",
     "protractor": "Транспортир",
-    "compass": "Циркуль"
+    "compass": "Циркуль",
+    "insert_image": "Вставить картинку",
+    "insert_image_textbook": "Учебник",
+    "insert_image_file": "Файл",
+    "insert_image_page": "с.",
+    "insert_image_section": "Параграф…",
+    "insert_image_choose": "Выбрать картинку",
+    "insert_image_uploading": "Загрузка…",
+    "insert_image_choose_hint": "Выберите PNG, JPEG или WebP с устройства.",
+    "insert_image_no_textbooks": "Учебников пока нет. Загрузите PDF в панели учителя.",
+    "insert_image_place": "Положить на доску",
+    "insert_image_upload_failed": "Не удалось загрузить картинку",
+    "insert_image_load_failed": "Не удалось показать картинку",
+    "delete_image": "Убрать картинку",
+    "resize_image": "Размер: тяните вправо или влево"
   },
   "defaults": {
     "slides": [

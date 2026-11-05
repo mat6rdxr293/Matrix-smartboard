@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBoardHistory, replayBoardOperations, type GraphElement } from "./boardDocument";
+import { applyBoardOperation, createBoardHistory, replayBoardOperations, type GraphElement } from "./boardDocument";
 import type { BoardReplayOp } from "./replayApi";
 
 const graph = (id = "g1"): GraphElement => ({
@@ -164,4 +164,35 @@ it("treats an AI handwriting batch as one undoable command", () => {
 
   state = replayBoardOperations(state, [{ op: "redo" }]);
   expect(state.document.strokes).toHaveLength(2);
+});
+
+describe("board images", () => {
+  const page = { id: "img-1", src: "/api/textbooks/b/pages/3/image", x: 10, y: 20, width: 600, height: 800, label: "с. 3" };
+
+  it("adds, moves and deletes images with undo and redo", () => {
+    let state = createBoardHistory();
+    state = applyBoardOperation(state, { op: "image_add", image: page });
+    const moved = { ...page, x: 200, width: 300, height: 400 };
+    state = applyBoardOperation(state, { op: "image_update", before: page, after: moved });
+    expect(state.document.images).toEqual([moved]);
+    state = applyBoardOperation(state, { op: "undo" });
+    expect(state.document.images).toEqual([page]);
+    state = applyBoardOperation(state, { op: "image_delete", image: page });
+    expect(state.document.images).toEqual([]);
+    state = applyBoardOperation(state, { op: "undo" });
+    expect(state.document.images).toEqual([page]);
+  });
+
+  it("clears images with the rest of the board and restores them on undo", () => {
+    let state = applyBoardOperation(createBoardHistory(), { op: "image_add", image: page });
+    state = applyBoardOperation(state, { op: "clear" });
+    expect(state.document.images).toEqual([]);
+    state = applyBoardOperation(state, { op: "undo" });
+    expect(state.document.images).toEqual([page]);
+  });
+
+  it("loads documents saved before images existed", () => {
+    const state = createBoardHistory({ strokes: [], graphs: [], solutions: [] });
+    expect(state.document.images).toEqual([]);
+  });
 });

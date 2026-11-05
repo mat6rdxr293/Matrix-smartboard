@@ -27,6 +27,8 @@ export type NativeBoardFrame = {
   appendStrokes?: NativeEncodedStroke[];
   preview?: Stroke | null;
   geometry: GeometryTool | null;
+  /** Placements of pictures sent earlier with loadImage, keyed by their source. */
+  images: { key: string; x: number; y: number; width: number; height: number }[];
 };
 
 /** `p` is base64 of little-endian Float32 x,y pairs: one JSON object per point exhausts Android's heap. */
@@ -43,6 +45,8 @@ export interface NativeBoardPlugin {
   enable(): Promise<void>;
   present(frame: NativeBoardFrame): Promise<void>;
   loadStrokes(chunk: NativeStrokeChunk): Promise<void>;
+  /** `data` is base64 JPEG; decoded off the UI thread and kept for frames that place `key`. */
+  loadImage(options: { key: string; data: string }): Promise<void>;
   replaceLiveStroke(options: { seq: number; points: { x: number; y: number }[] }): Promise<void>;
   setBlockers(options: { rects: BoardRect[] }): Promise<void>;
   disable(): Promise<void>;

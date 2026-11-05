@@ -44,6 +44,7 @@ from .textbook_library import (
     delete_textbook,
     enqueue_textbook,
     reindex_textbook,
+    render_page_image,
     search_pages,
 )
 
@@ -570,6 +571,8 @@ def _status_payload(request: Request | None = None) -> dict:
             "ocr": is_ocr_configured(),
             "lessons": True,
             "boardOperations": True,
+            # Older servers reject image operations, which would stall the board sync queue.
+            "boardImages": True,
             "pptx": True,
             "mdns": True,
         },
@@ -824,6 +827,35 @@ async def search_textbook_endpoint(book_id: str, q: str, limit: int = 6) -> dict
         return {"items": search_pages(book_id, q, limit=limit)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/textbooks/{book_id}/pages/{page_number}/image")
+async def textbook_page_image_endpoint(book_id: str, page_number: int, width: int = 1400) -> FileResponse:
+    try:
+        path = await asyncio.to_thread(render_page_image, book_id, page_number, width)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+BOARD_IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+MAX_BOARD_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+@app.post("/api/board/images", dependencies=[Depends(_rate_limit_dependency)])
+async def upload_board_image(file: UploadFile = File(...)) -> dict:
+    suffix = BOARD_IMAGE_TYPES.get((file.content_type or "").lower())
+    if not suffix:
+        raise HTTPException(status_code=400, detail="Нужна картинка PNG, JPEG или WebP")
+    content = await file.read(MAX_BOARD_IMAGE_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+    if len(content) > MAX_BOARD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Картинка больше 12 МБ")
+    stored_name = f"board-{int(time.time())}-{secrets.token_hex(8)}{suffix}"
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    (MEDIA_DIR / stored_name).write_bytes(content)
+    return {"src": f"/api/media/{stored_name}"}
 
 
 @app.post("/api/textbooks/{book_id}/reindex", dependencies=[Depends(_rate_limit_dependency)])

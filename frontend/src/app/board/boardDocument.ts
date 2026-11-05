@@ -40,7 +40,24 @@ export type AiSolutionBlock = {
   createdAt: number;
 };
 
-export type BoardDocument = { strokes: Stroke[]; graphs: GraphElement[]; solutions: AiSolutionBlock[] };
+/** A picture under the ink: an uploaded image or a textbook page. `src` is a path on the lesson's server. */
+export type BoardImage = {
+  id: string;
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+};
+
+export type BoardDocument = {
+  strokes: Stroke[];
+  graphs: GraphElement[];
+  solutions: AiSolutionBlock[];
+  /** Optional so documents saved before images existed still load. */
+  images?: BoardImage[];
+};
 
 type Snapshot = BoardDocument;
 type Command =
@@ -54,6 +71,9 @@ type Command =
   | { kind: "solution_add"; solution: AiSolutionBlock }
   | { kind: "solution_update"; before: AiSolutionBlock; after: AiSolutionBlock }
   | { kind: "solution_delete"; solution: AiSolutionBlock; index: number }
+  | { kind: "image_add"; image: BoardImage }
+  | { kind: "image_update"; before: BoardImage; after: BoardImage }
+  | { kind: "image_delete"; image: BoardImage; index: number }
   | { kind: "clear"; before: Snapshot };
 
 export type BoardHistory = {
@@ -73,6 +93,9 @@ export type BoardOperation =
   | { op: "solution_add"; solution: AiSolutionBlock }
   | { op: "solution_update"; before: AiSolutionBlock; after: AiSolutionBlock }
   | { op: "solution_delete"; solution: AiSolutionBlock }
+  | { op: "image_add"; image: BoardImage }
+  | { op: "image_update"; before: BoardImage; after: BoardImage }
+  | { op: "image_delete"; image: BoardImage }
   | { op: "undo" | "redo" | "clear" };
 
 const cloneStroke = (stroke: Stroke): Stroke => ({ ...stroke, points: stroke.points.map((point) => ({ ...point })) });
@@ -88,6 +111,7 @@ const cloneDocument = (document: BoardDocument): BoardDocument => ({
   strokes: document.strokes.map(cloneStroke),
   graphs: document.graphs.map(cloneGraph),
   solutions: (document.solutions ?? []).map(cloneSolution),
+  images: (document.images ?? []).map((image) => ({ ...image })),
 });
 
 export function createBoardHistory(document: BoardDocument = { strokes: [], graphs: [], solutions: [] }): BoardHistory {
@@ -125,10 +149,17 @@ function applyCommand(document: BoardDocument, command: Command): BoardDocument 
     );
   } else if (command.kind === "solution_delete") {
     next.solutions = next.solutions.filter((solution) => solution.id !== command.solution.id);
+  } else if (command.kind === "image_add") {
+    next.images = [...next.images!.filter((image) => image.id !== command.image.id), { ...command.image }];
+  } else if (command.kind === "image_update") {
+    next.images = next.images!.map((image) => image.id === command.after.id ? { ...command.after } : image);
+  } else if (command.kind === "image_delete") {
+    next.images = next.images!.filter((image) => image.id !== command.image.id);
   } else if (command.kind === "clear") {
     next.strokes = [];
     next.graphs = [];
     next.solutions = [];
+    next.images = [];
   }
   return next;
 }
@@ -169,6 +200,14 @@ function revertCommand(document: BoardDocument, command: Command): BoardDocument
     const existing = next.solutions.filter((solution) => solution.id !== command.solution.id);
     existing.splice(Math.min(command.index, existing.length), 0, cloneSolution(command.solution));
     next.solutions = existing;
+  } else if (command.kind === "image_add") {
+    next.images = next.images!.filter((image) => image.id !== command.image.id);
+  } else if (command.kind === "image_update") {
+    next.images = next.images!.map((image) => image.id === command.before.id ? { ...command.before } : image);
+  } else if (command.kind === "image_delete") {
+    const existing = next.images!.filter((image) => image.id !== command.image.id);
+    existing.splice(Math.min(command.index, existing.length), 0, { ...command.image });
+    next.images = existing;
   } else if (command.kind === "clear") {
     return cloneDocument(command.before);
   }
@@ -266,8 +305,19 @@ export function applyBoardOperation(state: BoardHistory, operation: BoardOperati
     const index = Math.max(0, state.document.solutions.findIndex((solution) => solution.id === operation.solution.id));
     return pushCommand(state, { kind: "solution_delete", solution: cloneSolution(operation.solution), index });
   }
+  if (operation.op === "image_add") {
+    return pushCommand(state, { kind: "image_add", image: { ...operation.image } });
+  }
+  if (operation.op === "image_update") {
+    return pushCommand(state, { kind: "image_update", before: { ...operation.before }, after: { ...operation.after } });
+  }
+  if (operation.op === "image_delete") {
+    const index = Math.max(0, (state.document.images ?? []).findIndex((image) => image.id === operation.image.id));
+    return pushCommand(state, { kind: "image_delete", image: { ...operation.image }, index });
+  }
   if (operation.op === "clear") {
-    if (!state.document.strokes.length && !state.document.graphs.length && !state.document.solutions.length) return state;
+    if (!state.document.strokes.length && !state.document.graphs.length && !state.document.solutions.length &&
+      !(state.document.images ?? []).length) return state;
     return pushCommand(state, { kind: "clear", before: cloneDocument(state.document) });
   }
   if (operation.op === "undo") {

@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/apiClient";
 import type { Stroke } from "@/app/board/boardEngine";
-import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
+import type { AiSolutionBlock, BoardImage, GraphElement } from "@/app/board/boardDocument";
 
 type BoardReplayMeta = {
   client_operation_id?: string;
@@ -17,6 +17,9 @@ export type BoardReplayOp = BoardReplayMeta & (
   | { op: "solution_add"; solution: AiSolutionBlock }
   | { op: "solution_update"; before: AiSolutionBlock; after: AiSolutionBlock }
   | { op: "solution_delete"; solution: AiSolutionBlock }
+  | { op: "image_add"; image: BoardImage }
+  | { op: "image_update"; before: BoardImage; after: BoardImage }
+  | { op: "image_delete"; image: BoardImage }
   | { op: "stroke_move"; indexes: number[]; dx: number; dy: number }
   | { op: "stroke_delete"; indexes: number[]; strokes: Stroke[] }
   | { op: "undo" | "redo" | "clear" }

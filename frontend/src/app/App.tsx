@@ -1744,6 +1744,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     initialGraphs={boardHistory.document.graphs}
                     onChangeGraphs={syncBoardGraphs}
                     initialSolutions={boardHistory.document.solutions}
+                    initialImages={boardHistory.document.images}
                     onChangeSolutions={syncBoardSolutions}
                     onCancelAiSolution={cancelAiSolution}
                     canUndo={boardHistory.undoStack.length > 0}

@@ -35,9 +35,10 @@ BOARD_OPERATION_TYPES = {
     "add", "stroke_batch_add", "stroke_move", "stroke_delete",
     "graph_add", "graph_update", "graph_delete",
     "solution_add", "solution_update", "solution_delete",
+    "image_add", "image_update", "image_delete",
     "undo", "redo", "clear",
 }
-BOARD_SCHEMA_VERSION = "6"
+BOARD_SCHEMA_VERSION = "7"
 MAX_BOARD_OPERATION_JSON_BYTES = 4_000_000
 
 
@@ -60,6 +61,27 @@ def _is_valid_board_stroke(stroke: object) -> bool:
         and 1 <= len(stroke["color"]) <= 32
         and stroke.get("mode") in {"draw", "erase"}
     )
+
+
+def _is_valid_board_image(image: object) -> bool:
+    """A picture placed on the board: a server-relative URL and its box in board units."""
+    if not isinstance(image, dict):
+        return False
+    image_id = image.get("id")
+    if not isinstance(image_id, str) or not image_id.strip() or len(image_id) > 120:
+        return False
+    src = image.get("src")
+    # Only this server's media and textbook routes: the board never loads arbitrary URLs.
+    if not isinstance(src, str) or len(src) > 300 or not (src.startswith("/api/media/") or src.startswith("/api/textbooks/")):
+        return False
+    if any(not _is_number(image.get(key)) for key in ("x", "y", "width", "height")):
+        return False
+    if any(abs(float(image[key])) > 1_000_000 for key in ("x", "y")):
+        return False
+    if not all(10 <= float(image[key]) <= 20_000 for key in ("width", "height")):
+        return False
+    label = image.get("label")
+    return label is None or (isinstance(label, str) and len(label) <= 200)
 
 
 def _is_valid_graph(graph: object) -> bool:
@@ -277,7 +299,7 @@ class SchoolStore:
                     lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL,
                     client_operation_id TEXT NOT NULL,
-                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
+                    op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'image_add', 'image_update', 'image_delete', 'undo', 'redo', 'clear')),
                     payload_json TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL,
                     UNIQUE(lesson_id, sequence),
@@ -319,7 +341,8 @@ class SchoolStore:
         ddl = row["sql"] if row and isinstance(row["sql"], str) else ""
         connection.execute("SAVEPOINT board_operations_v6")
         try:
-            if "stroke_batch_add" not in ddl:
+            # SQLite cannot alter a CHECK constraint, so a new operation type means rebuilding the table.
+            if "image_add" not in ddl:
                 legacy = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_operations_legacy'"
                 ).fetchone()
@@ -333,7 +356,7 @@ class SchoolStore:
                         lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                         sequence INTEGER NOT NULL,
                         client_operation_id TEXT NOT NULL,
-                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'undo', 'redo', 'clear')),
+                        op_type TEXT NOT NULL CHECK(op_type IN ('add', 'stroke_batch_add', 'stroke_move', 'stroke_delete', 'graph_add', 'graph_update', 'graph_delete', 'solution_add', 'solution_update', 'solution_delete', 'image_add', 'image_update', 'image_delete', 'undo', 'redo', 'clear')),
                         payload_json TEXT NOT NULL,
                         occurred_at INTEGER NOT NULL,
                         UNIQUE(lesson_id, sequence),
@@ -681,6 +704,19 @@ class SchoolStore:
                     if before["id"] != after["id"]:
                         raise ValueError("graph_update ids must match")
                     payload = {"before": before, "after": after}
+                elif op_type in {"image_add", "image_delete"}:
+                    image = operation.get("image")
+                    if not _is_valid_board_image(image):
+                        raise ValueError(f"{op_type} operation requires valid image")
+                    payload = {"image": image}
+                elif op_type == "image_update":
+                    before = operation.get("before")
+                    after = operation.get("after")
+                    if not _is_valid_board_image(before) or not _is_valid_board_image(after):
+                        raise ValueError("image_update operation requires valid before and after")
+                    if before["id"] != after["id"]:
+                        raise ValueError("image_update ids must match")
+                    payload = {"before": before, "after": after}
                 elif op_type in {"solution_add", "solution_delete"}:
                     solution = operation.get("solution")
                     if not _is_valid_solution(solution):
@@ -749,6 +785,11 @@ class SchoolStore:
             elif row["op_type"] in {"solution_add", "solution_delete"}:
                 item["solution"] = payload.get("solution")
             elif row["op_type"] == "solution_update":
+                item["before"] = payload.get("before")
+                item["after"] = payload.get("after")
+            elif row["op_type"] in {"image_add", "image_delete"}:
+                item["image"] = payload.get("image")
+            elif row["op_type"] == "image_update":
                 item["before"] = payload.get("before")
                 item["after"] = payload.get("after")
             result.append(item)

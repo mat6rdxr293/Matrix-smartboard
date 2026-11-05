@@ -4,7 +4,10 @@ import { cn } from "@/lib/utils";
 import { callOcr, type ProgressUpdate } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
-import type { AiSolutionBlock, GraphElement } from "@/app/board/boardDocument";
+import type { AiSolutionBlock, BoardImage, GraphElement } from "@/app/board/boardDocument";
+import { BoardImageHandles, BoardPictures } from "./BoardImagesLayer";
+import InsertImageDialog, { type InsertedImage } from "./InsertImageDialog";
+import { apiFetch } from "@/lib/apiClient";
 import { getSelectionBounds, selectGraphIds, selectStrokeIndices, translateBounds, translateStroke, type LassoBounds } from "@/app/board/lasso";
 import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
@@ -12,7 +15,7 @@ import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
 import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
-import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X, ChevronLeft, ChevronRight, Plus, ImagePlus } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
@@ -41,6 +44,7 @@ const PERFORMANCE_RENDER_WIDTH = 1920;
 const PERFORMANCE_RENDER_HEIGHT = 1080;
 const NATIVE_BLOCKER_PAUSE_MS = 1500;
 const TOOLBAR_REVEAL_STRIP_PX = 64;
+const NATIVE_IMAGE_MAX_EDGE = 2048;
 
 const PRIMARY_COLORS = [
   { name: "Красный", value: "#FF0000" },
@@ -95,6 +99,7 @@ export type BoardCanvasHandle = {
 };
 
 const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
+const EMPTY_IMAGES: BoardImage[] = [];
 const NOOP_SOLUTION_CHANGE = (_next: AiSolutionBlock[]) => undefined;
 
 const BoardCanvas = forwardRef(function BoardCanvas({
@@ -107,6 +112,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   initialGraphs,
   onChangeGraphs,
   initialSolutions = EMPTY_SOLUTIONS,
+  initialImages = EMPTY_IMAGES,
   onChangeSolutions = NOOP_SOLUTION_CHANGE,
   onCancelAiSolution,
   canUndo,
@@ -134,6 +140,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   initialGraphs: GraphElement[];
   onChangeGraphs: (next: GraphElement[]) => void;
   initialSolutions?: AiSolutionBlock[];
+  /** Pictures come from board history like everything else; this component only emits image operations. */
+  initialImages?: BoardImage[];
   onChangeSolutions?: (next: AiSolutionBlock[]) => void;
   onCancelAiSolution?: (id: string) => void;
   canUndo: boolean;
@@ -654,6 +662,64 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     setPan({ x: panX, y: panY });
   };
 
+  const images = initialImages;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [showInsertImage, setShowInsertImage] = useState(false);
+  // A server without image operations would reject the whole sync batch, strokes included.
+  const [imagesSupported, setImagesSupported] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/status", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((status) => { if (!cancelled) setImagesSupported(Boolean(status?.features?.boardImages)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "pan") setSelectedImageId(null);
+  }, [mode]);
+
+  const insertImage = ({ src, label, aspect }: InsertedImage) => {
+    const viewWidth = widthPx / zoomRef.current;
+    const viewHeight = heightPx / zoomRef.current;
+    const left = -panRef.current.x / zoomRef.current;
+    const top = -panRef.current.y / zoomRef.current;
+    // Fit the page into most of the view, so it is readable and still leaves room to write beside it;
+    // the bottom fifth stays free for the toolbar.
+    let width = Math.min(viewWidth * 0.6, 1000);
+    let height = width * aspect;
+    if (height > viewHeight * 0.8) {
+      height = viewHeight * 0.8;
+      width = height / aspect;
+    }
+    const image: BoardImage = {
+      id: `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      src,
+      label,
+      x: left + (viewWidth - width) / 2,
+      y: top + Math.max(16 / zoomRef.current, (viewHeight * 0.85 - height) / 2),
+      width,
+      height,
+    };
+    onReplayOp?.({ op: "image_add", image, ts: Date.now() });
+    setShowInsertImage(false);
+    // Leave it picked up, so it can be moved or resized straight away; the pen tool writes over it.
+    setMode("pan");
+    setSelectedImageId(image.id);
+  };
+
+  const commitImage = (before: BoardImage, after: BoardImage) => {
+    onReplayOp?.({ op: "image_update", before, after, ts: Date.now() });
+  };
+
+  const deleteImage = (image: BoardImage) => {
+    onReplayOp?.({ op: "image_delete", image, ts: Date.now() });
+    setSelectedImageId(null);
+  };
+
   const currentPage = pageInView(pan, zoom, heightPx);
   const totalPages = pageCount(strokesRef.current, currentPage);
   const goToPage = (page: number) => {
@@ -807,6 +873,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       zoom, pan,
       preview: linePreviewRef.current,
       geometry: geometryToolRef.current,
+      images: imagesRef.current.map(({ src, x, y, width, height }) => ({ key: src, x, y, width, height })),
       documentRevision: nativeDocumentRevisionRef.current,
       strokeCount: strokes.length,
       ...(grownStrokes.length ? { appendStrokes: grownStrokes.map(encodeNativeStroke) } : {}),
@@ -1482,7 +1549,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   useLayoutEffect(() => {
     scheduleRender();
-  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady, geometryTool]);
+  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady, geometryTool, images]);
 
   useEffect(() => {
     if (!isNativeApp() || !nativeBoardRequested()) return;
@@ -1580,6 +1647,37 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   useEffect(() => {
     scheduleRender();
   }, [nativeBoardReady]);
+
+  // Android cannot fetch through the WebView's pinned connection, so pictures are downloaded here,
+  // shrunk to a sane size and handed over once per source.
+  const nativeImagesSentRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!nativeBoardReady) {
+      nativeImagesSentRef.current.clear();
+      return;
+    }
+    for (const src of new Set(images.map((image) => image.src))) {
+      if (nativeImagesSentRef.current.has(src)) continue;
+      nativeImagesSentRef.current.add(src);
+      void (async () => {
+        try {
+          const res = await apiFetch(src, { cache: "force-cache" });
+          if (!res.ok) throw new Error(String(res.status));
+          const bitmap = await createImageBitmap(await res.blob());
+          const scale = Math.min(1, NATIVE_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close();
+          const data = canvas.toDataURL("image/jpeg", 0.88).split(",")[1] ?? "";
+          await NativeBoard.loadImage({ key: src, data });
+        } catch {
+          nativeImagesSentRef.current.delete(src); // try again on the next change
+        }
+      })();
+    }
+  }, [images, nativeBoardReady]);
 
 
 
@@ -1899,7 +1997,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   };
 
   const handleClear = () => {
-    if (strokesRef.current.length === 0 && graphsRef.current.length === 0 && solutionsRef.current.length === 0) return;
+    if (strokesRef.current.length === 0 && graphsRef.current.length === 0 && solutionsRef.current.length === 0 &&
+      imagesRef.current.length === 0) return;
     onReplayOp?.({ op: "clear", ts: Date.now() });
     strokesRef.current = [];
     syncGraphsToParent([]);
@@ -2173,6 +2272,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           <Plus size={18} />
         </Button>
       </div>
+      {showInsertImage && <InsertImageDialog onInsert={insertImage} onClose={() => setShowInsertImage(false)} />}
       {nativeFallbackReason && !nativeFallbackDismissed && (
         <div
           role="status"
@@ -2195,6 +2295,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             className="absolute inset-0 rounded-2xl border border-white/10 overflow-hidden"
             style={{ backgroundColor: nativeBoardReady ? "transparent" : bg }}
           >
+            {/* Android draws pictures under its own ink layer; in the WebView they would cover the ink. */}
+            {!nativeBoardReady && images.length > 0 && <BoardPictures images={images} zoom={zoom} pan={pan} />}
             <canvas
               ref={canvasRef}
               className={cn("block h-full w-full rounded-2xl", mode === "lasso" && "cursor-crosshair")}
@@ -2210,6 +2312,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                 if (!lowPowerMode) scheduleRender();
               }}
             />
+            {mode === "pan" && images.length > 0 && (
+              <BoardImageHandles images={images} zoom={zoom} pan={pan} selectedId={selectedImageId}
+                onSelect={setSelectedImageId} onCommit={commitImage} onDelete={deleteImage} deleteLabel={tl("delete_image")} resizeLabel={tl("resize_image")} />
+            )}
             {geometryTool && <GeometryOverlay tool={geometryTool} zoom={zoom} pan={pan} onChange={setGeometryTool} />}
             <div
               className="pointer-events-none absolute inset-0 overflow-visible"
@@ -2900,6 +3006,12 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                 />
           </BoardToolbarPopover>
         </div>
+        {imagesSupported && (
+          <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("insert_image")} title={tl("insert_image")}
+            onClick={() => setShowInsertImage(true)}>
+            <ImagePlus size={26} />
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="board-utility-button" aria-label={tl("snapshot")} title={tl("snapshot")} onClick={handleSnapshot}>
           <Save size={26} />
         </Button>

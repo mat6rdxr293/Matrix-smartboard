@@ -550,7 +550,21 @@
     "geometry": "Geometry",
     "ruler": "Ruler",
     "protractor": "Protractor",
-    "compass": "Compass"
+    "compass": "Compass",
+    "insert_image": "Insert picture",
+    "insert_image_textbook": "Textbook",
+    "insert_image_file": "File",
+    "insert_image_page": "p.",
+    "insert_image_section": "Section…",
+    "insert_image_choose": "Choose picture",
+    "insert_image_uploading": "Uploading…",
+    "insert_image_choose_hint": "Choose a PNG, JPEG or WebP from this device.",
+    "insert_image_no_textbooks": "No textbooks yet. Upload a PDF in the teacher panel.",
+    "insert_image_place": "Place on board",
+    "insert_image_upload_failed": "Could not upload the picture",
+    "insert_image_load_failed": "Could not show the picture",
+    "delete_image": "Remove picture",
+    "resize_image": "Size: drag right or left"
   },
   "defaults": {
     "slides": [

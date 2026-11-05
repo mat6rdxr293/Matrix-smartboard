@@ -550,7 +550,21 @@
     "geometry": "Геометрия",
     "ruler": "Сызғыш",
     "protractor": "Транспортир",
-    "compass": "Циркуль"
+    "compass": "Циркуль",
+    "insert_image": "Сурет қою",
+    "insert_image_textbook": "Оқулық",
+    "insert_image_file": "Файл",
+    "insert_image_page": "б.",
+    "insert_image_section": "Параграф…",
+    "insert_image_choose": "Сурет таңдау",
+    "insert_image_uploading": "Жүктелуде…",
+    "insert_image_choose_hint": "Құрылғыдан PNG, JPEG немесе WebP таңдаңыз.",
+    "insert_image_no_textbooks": "Оқулықтар әлі жоқ. Мұғалім панелінде PDF жүктеңіз.",
+    "insert_image_place": "Тақтаға қою",
+    "insert_image_upload_failed": "Суретті жүктеу мүмкін болмады",
+    "insert_image_load_failed": "Суретті көрсету мүмкін болмады",
+    "delete_image": "Суретті алып тастау",
+    "resize_image": "Өлшем: оңға немесе солға тартыңыз"
   },
   "defaults": {
     "slides": [

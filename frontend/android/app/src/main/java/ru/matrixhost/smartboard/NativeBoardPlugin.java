@@ -2,7 +2,10 @@ package ru.matrixhost.smartboard;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.util.Base64;
 import android.os.Build;
 import android.util.Log;
 import android.view.View;
@@ -141,6 +144,30 @@ public class NativeBoardPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             view.replaceLiveStroke(seq, points);
             call.resolve();
+        });
+    }
+
+    /** A picture for the board, already shrunk by JS; decoded here so the UI thread never waits on it. */
+    @PluginMethod
+    public void loadImage(PluginCall call) {
+        if (view == null) { call.reject("NativeBoard not enabled"); return; }
+        final String key = call.getString("key");
+        final String data = call.getString("data");
+        if (key == null || data == null) { call.reject("key and data are required"); return; }
+        frames.execute(() -> {
+            Bitmap bitmap;
+            try {
+                byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            } catch (IllegalArgumentException | OutOfMemoryError error) {
+                bitmap = null;
+            }
+            if (bitmap == null) { call.reject("Could not decode image"); return; }
+            final Bitmap decoded = bitmap;
+            getActivity().runOnUiThread(() -> {
+                view.putImage(key, decoded);
+                call.resolve();
+            });
         });
     }
 

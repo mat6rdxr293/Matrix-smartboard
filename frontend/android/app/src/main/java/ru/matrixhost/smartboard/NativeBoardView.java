@@ -145,6 +145,16 @@ public final class NativeBoardView extends View {
         }
     }
 
+    /** A picture under the ink, placed in board units; bitmaps arrive separately through putImage. */
+    private static final class ImagePlacement {
+        String key;
+        final RectF rect = new RectF();
+    }
+
+    private final java.util.HashMap<String, Bitmap> imageBitmaps = new java.util.HashMap<>();
+    private final ArrayList<ImagePlacement> imagePlacements = new ArrayList<>();
+    private final RectF imageRect = new RectF();
+
     private Geometry geometry;
     private float[] liveConstraint;
 
@@ -298,12 +308,46 @@ public final class NativeBoardView extends View {
         }
         previewStroke = parseStroke(state.optJSONObject("preview"));
         geometry = Geometry.parse(state.optJSONObject("geometry"));
+        JSONArray images = state.optJSONArray("images");
+        if (images != null) {
+            imagePlacements.clear();
+            for (int i = 0; i < images.length(); i++) {
+                JSONObject item = images.optJSONObject(i);
+                if (item == null || item.optString("key").isEmpty()) continue;
+                ImagePlacement placement = new ImagePlacement();
+                placement.key = item.optString("key");
+                float x = finite(item, "x", 0), y = finite(item, "y", 0);
+                placement.rect.set(x, y, x + finite(item, "width", 0), y + finite(item, "height", 0));
+                imagePlacements.add(placement);
+            }
+        }
         // JS sends only tails, so falling behind means a commit crossed a full document update.
         if (state.optInt("documentRevision", -1) == documentRevision
             && state.optInt("strokeCount", 0) > strokes.size() && listener != null) {
             listener.onResyncNeeded();
         }
         invalidate();
+    }
+
+    public void putImage(String key, Bitmap bitmap) {
+        Bitmap previous = imageBitmaps.put(key, bitmap);
+        if (previous != null && previous != bitmap) previous.recycle();
+        invalidate();
+    }
+
+    /** Pictures sit between the board background and the ink cache, so erasing ink never cuts into them. */
+    private void drawImages(Canvas canvas, float sx, float sy) {
+        if (imagePlacements.isEmpty()) return;
+        int save = canvas.save();
+        canvas.translate(board.left, board.top);
+        applyInkTransform(canvas, sx, sy);
+        for (ImagePlacement placement : imagePlacements) {
+            Bitmap bitmap = imageBitmaps.get(placement.key);
+            if (bitmap == null || bitmap.isRecycled()) continue;
+            imageRect.set(placement.rect);
+            canvas.drawBitmap(bitmap, null, imageRect, bitmapPaint);
+        }
+        canvas.restoreToCount(save);
     }
 
     public void replaceDocument(List<Stroke> document, int revision) {
@@ -761,6 +805,7 @@ public final class NativeBoardView extends View {
         canvas.drawRect(board, paint);
         if (boardWidth < 2 || boardHeight < 2) { canvas.restore(); return; }
 
+        drawImages(canvas, sx, sy);
         drawInk(canvas, sx, sy);
 
         paint.setColor(gridColor);

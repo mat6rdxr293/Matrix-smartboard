@@ -27,6 +27,7 @@ TEXTBOOK_DIR = DATA_ROOT / "textbooks"
 RAW_DIR = DATA_ROOT / "raw"
 SECTIONS_DIR = DATA_ROOT / "sections"
 LIBRARY_DIR = DATA_ROOT / "library"
+PAGE_IMAGE_DIR = DATA_ROOT / "page-images"
 INDEX_PATH = DATA_ROOT / "page-index.sqlite3"
 
 MAX_PDF_BYTES = 250 * 1024 * 1024
@@ -280,6 +281,43 @@ def _tesseract_state(extract) -> tuple[bool, str]:
         return extract.tesseract_ready()
     except Exception as exc:
         return False, str(exc)
+
+
+PAGE_IMAGE_WIDTHS = (800, 1400, 2000)
+
+
+def render_page_image(book_id: str, page_number: int, width: int = 1400) -> Path:
+    """JPEG of one textbook page for placing on the board, cached per width.
+
+    `page_number` is 1-based, as shown to teachers. Raises ValueError for an unknown book or page.
+    """
+    safe_id = Path(book_id).name
+    pdf_path = TEXTBOOK_DIR / f"{safe_id}.pdf"
+    if not pdf_path.exists():
+        raise ValueError("Учебник не найден")
+    # Only a few sizes, so the cache cannot be filled with arbitrary widths.
+    width = min(PAGE_IMAGE_WIDTHS, key=lambda candidate: abs(candidate - width))
+    PAGE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    target = PAGE_IMAGE_DIR / f"{safe_id}-p{page_number}-w{width}.jpg"
+    if target.exists() and target.stat().st_mtime >= pdf_path.stat().st_mtime:
+        return target
+    import PIL.Image
+    import pymupdf
+
+    doc = pymupdf.open(pdf_path)
+    try:
+        if not 1 <= page_number <= doc.page_count:
+            raise ValueError("Такой страницы нет")
+        page = doc[page_number - 1]
+        zoom = width / max(1.0, page.rect.width)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+        image = PIL.Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        tmp = target.with_suffix(".jpg.part")
+        image.save(tmp, format="JPEG", quality=86, optimize=True)
+        tmp.replace(target)
+    finally:
+        doc.close()
+    return target
 
 
 def _vision_ocr_available() -> bool:
