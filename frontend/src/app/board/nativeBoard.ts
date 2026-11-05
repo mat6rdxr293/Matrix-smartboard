@@ -46,7 +46,7 @@ export interface NativeBoardPlugin {
   present(frame: NativeBoardFrame): Promise<void>;
   loadStrokes(chunk: NativeStrokeChunk): Promise<void>;
   /** `data` is base64 JPEG; decoded off the UI thread and kept for frames that place `key`. */
-  loadImage(options: { key: string; data: string }): Promise<void>;
+  loadImage(options: { key: string; data: string; maxEdge: number }): Promise<void>;
   replaceLiveStroke(options: { seq: number; points: { x: number; y: number }[] }): Promise<void>;
   setBlockers(options: { rects: BoardRect[] }): Promise<void>;
   disable(): Promise<void>;

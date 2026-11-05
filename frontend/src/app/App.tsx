@@ -217,6 +217,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const boardReplayQueueRef = useRef<BoardReplayOp[]>([]);
   const boardReplayFlushRef = useRef<Promise<void> | null>(null);
   const boardReplayLoadedRef = useRef(false);
+  const [boardLoading, setBoardLoading] = useState(true);
   const [scoreOverlay, setScoreOverlay] = useState<{
     percent: number;
     color: string;
@@ -478,6 +479,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       }
       boardReplayQueueRef.current = queue;
       persistBoardReplayQueue(queue);
+      setBoardLoading(true);
       try {
         const data = await loadBoardReplay(lesson.id);
         if (!alive) return;
@@ -495,7 +497,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           setBoardHistory((previous) => replayBoardOperations(previous, pending));
         }
       } finally {
-        if (alive) boardReplayLoadedRef.current = true;
+        if (alive) {
+          boardReplayLoadedRef.current = true;
+          setBoardLoading(false);
+        }
       }
     };
     loadReplay();
@@ -1754,6 +1759,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     initialBgColor={boardBgColor}
                     onChangeBgColor={setBoardBgColor}
                     onReplayOp={onBoardReplayOp}
+                    contentLoading={boardLoading}
                     lowPowerOverride={ultraLite}
                     renderQualityMode={performanceMode}
                     taskOpen={taskOpen}

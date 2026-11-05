@@ -564,7 +564,9 @@
     "insert_image_upload_failed": "Could not upload the picture",
     "insert_image_load_failed": "Could not show the picture",
     "delete_image": "Remove picture",
-    "resize_image": "Size: drag right or left"
+    "resize_image": "Size: drag right or left",
+    "board_loading": "Loading the board…",
+    "board_loading_images": "Loading pictures…"
   },
   "defaults": {
     "slides": [

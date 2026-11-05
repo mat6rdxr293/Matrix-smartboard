@@ -42,9 +42,15 @@ const BALANCED_RENDER_WIDTH = 2560;
 const BALANCED_RENDER_HEIGHT = 1440;
 const PERFORMANCE_RENDER_WIDTH = 1920;
 const PERFORMANCE_RENDER_HEIGHT = 1080;
-const NATIVE_BLOCKER_PAUSE_MS = 1500;
 const TOOLBAR_REVEAL_STRIP_PX = 64;
 const NATIVE_IMAGE_MAX_EDGE = 2048;
+
+const blobToBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
 
 const PRIMARY_COLORS = [
   { name: "Красный", value: "#FF0000" },
@@ -113,6 +119,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   onChangeGraphs,
   initialSolutions = EMPTY_SOLUTIONS,
   initialImages = EMPTY_IMAGES,
+  contentLoading = false,
   onChangeSolutions = NOOP_SOLUTION_CHANGE,
   onCancelAiSolution,
   canUndo,
@@ -142,6 +149,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   initialSolutions?: AiSolutionBlock[];
   /** Pictures come from board history like everything else; this component only emits image operations. */
   initialImages?: BoardImage[];
+  /** True while the lesson's board is still being fetched, so an empty board is not mistaken for a loaded one. */
+  contentLoading?: boolean;
   onChangeSolutions?: (next: AiSolutionBlock[]) => void;
   onCancelAiSolution?: (id: string) => void;
   canUndo: boolean;
@@ -177,7 +186,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     isNativeApp() ? nativeBoardAutoDisabledReason() : null,
   );
   const [nativeFallbackDismissed, setNativeFallbackDismissed] = useState(false);
-  const nativeStrokeStartedAtRef = useRef(0);
 
   const rawPointerSupportedRef = useRef(false);
   const rawPointerHandlerRef = useRef<(event: PointerEvent) => void>(() => undefined);
@@ -643,10 +651,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     const shape = recognizeShape(stroke.points);
     if (shape) void NativeBoard.replaceLiveStroke({ seq, points: shape.points }).catch(() => undefined);
   };
-  nativeStrokeStartedRef.current = () => {
-    nativeStrokeStartedAtRef.current = Date.now();
-    onStartTimer();
-  };
+  nativeStrokeStartedRef.current = () => onStartTimer();
   nativeStrokeCommittedRef.current = ({ stroke }) => {
     if (!nativeReadyRef.current || !stroke?.points?.length) return;
     strokesRef.current.push(stroke);
@@ -1607,14 +1612,14 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     // React controls, graph edit handles and floating dialogs must remain clickable
     // above the ink view. Android receives their bounding rects, never JS touch events.
     const updateBlockers = () => {
-      // This walks the DOM, so it must not compete with the pen mid-stroke.
-      if (Date.now() - nativeStrokeStartedAtRef.current < NATIVE_BLOCKER_PAUSE_MS) return;
       const boardRect = canvasRef.current?.getBoundingClientRect();
       if (!boardRect) return;
       const selector = [
         "button", "input", "textarea", "select", "[role=dialog]",
         "[data-floating-panel]", "[data-graph-interactive=true]",
         "[data-radix-popper-content-wrapper]", "[data-testid=board-toolbar]",
+        // Whole panels, not just their buttons: a tap between swatches or beside a slider is still UI.
+        "[data-testid^=board-toolbar-popover]", "[data-testid=board-pager]", "[data-testid=native-fallback-notice]",
       ].join(",");
       const rects = Array.from(document.querySelectorAll<HTMLElement>(selector))
         .filter((el) => {
@@ -1639,9 +1644,26 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       }
       void NativeBoard.setBlockers({ rects }).catch(() => undefined);
     };
+    // A popover or dialog that has just opened must be clickable straight away, or Android takes
+    // the tap as ink. DOM changes schedule a refresh for the next frame; the interval only catches
+    // movement that changes no DOM, such as a CSS transition.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        updateBlockers();
+      });
+    };
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-visible", "hidden"] });
     updateBlockers();
-    const interval = window.setInterval(updateBlockers, 250);
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(updateBlockers, 400);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(interval);
+    };
   }, [nativeBoardReady, toolbarVisible]);
 
   useEffect(() => {
@@ -1651,6 +1673,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   // Android cannot fetch through the WebView's pinned connection, so pictures are downloaded here,
   // shrunk to a sane size and handed over once per source.
   const nativeImagesSentRef = useRef(new Set<string>());
+  const [pendingNativeImages, setPendingNativeImages] = useState(0);
   useEffect(() => {
     if (!nativeBoardReady) {
       nativeImagesSentRef.current.clear();
@@ -1659,21 +1682,19 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     for (const src of new Set(images.map((image) => image.src))) {
       if (nativeImagesSentRef.current.has(src)) continue;
       nativeImagesSentRef.current.add(src);
+      setPendingNativeImages((count) => count + 1);
       void (async () => {
         try {
           const res = await apiFetch(src, { cache: "force-cache" });
           if (!res.ok) throw new Error(String(res.status));
-          const bitmap = await createImageBitmap(await res.blob());
-          const scale = Math.min(1, NATIVE_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-          canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-          bitmap.close();
-          const data = canvas.toDataURL("image/jpeg", 0.88).split(",")[1] ?? "";
-          await NativeBoard.loadImage({ key: src, data });
+          // The file's own bytes: re-encoding through a canvas cost seconds on a slow board.
+          // Android decodes and downsamples it off its UI thread.
+          const data = await blobToBase64(await res.blob());
+          await NativeBoard.loadImage({ key: src, data, maxEdge: NATIVE_IMAGE_MAX_EDGE });
         } catch {
           nativeImagesSentRef.current.delete(src); // try again on the next change
+        } finally {
+          setPendingNativeImages((count) => Math.max(0, count - 1));
         }
       })();
     }
@@ -2272,6 +2293,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           <Plus size={18} />
         </Button>
       </div>
+      {(contentLoading || pendingNativeImages > 0) && (
+        <div role="status" data-testid="board-loading"
+          className="glass pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full px-4 py-2 text-sm text-frost/80 shadow-soft">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-frost/25 border-t-[rgb(var(--color-accent))]" />
+          {contentLoading ? tl("board_loading") : tl("board_loading_images")}
+        </div>
+      )}
       {showInsertImage && <InsertImageDialog onInsert={insertImage} onClose={() => setShowInsertImage(false)} />}
       {nativeFallbackReason && !nativeFallbackDismissed && (
         <div

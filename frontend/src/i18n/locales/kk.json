@@ -564,7 +564,9 @@
     "insert_image_upload_failed": "Суретті жүктеу мүмкін болмады",
     "insert_image_load_failed": "Суретті көрсету мүмкін болмады",
     "delete_image": "Суретті алып тастау",
-    "resize_image": "Өлшем: оңға немесе солға тартыңыз"
+    "resize_image": "Өлшем: оңға немесе солға тартыңыз",
+    "board_loading": "Тақта жүктелуде…",
+    "board_loading_images": "Суреттер жүктелуде…"
   },
   "defaults": {
     "slides": [

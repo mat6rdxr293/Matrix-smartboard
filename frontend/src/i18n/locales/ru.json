@@ -564,7 +564,9 @@
     "insert_image_upload_failed": "Не удалось загрузить картинку",
     "insert_image_load_failed": "Не удалось показать картинку",
     "delete_image": "Убрать картинку",
-    "resize_image": "Размер: тяните вправо или влево"
+    "resize_image": "Размер: тяните вправо или влево",
+    "board_loading": "Загружаю доску…",
+    "board_loading_images": "Загружаю картинки…"
   },
   "defaults": {
     "slides": [

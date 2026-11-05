@@ -17,6 +17,7 @@ import AndroidSetupWizard from "./setup/AndroidSetupWizard";
 import ServerConnectionGate from "./setup/ServerConnectionGate";
 import { currentServerName, needsAndroidSetup, reconnectSavedServer, type SavedServerConnectionResult } from "./setup/androidSetup";
 import { isNativeApp } from "@/lib/apiClient";
+import { NativeBoard } from "@/app/board/nativeBoard";
 
 type View = "loading" | "auth" | "roomSetup" | "grade" | "subject" | "boardProfile" | "history" | "lesson";
 type AndroidConnectionPhase = "setup" | "repair" | "checking" | "offline" | "ready";
@@ -46,6 +47,12 @@ export default function AppRoot() {
   });
   const [serverConnectionResult, setServerConnectionResult] = useState<SavedServerConnectionResult | null>(null);
   const nativeNavigation = isNativeApp();
+
+  // A WebView reload skips React cleanup, so the Android ink layer from the previous page would keep
+  // taking touches over whatever screen loads next. Only a mounted board turns it back on.
+  useEffect(() => {
+    if (isNativeApp()) void NativeBoard.disable().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     document.body.classList.toggle("native-app", nativeNavigation);

@@ -36,6 +36,10 @@ public class NativeBoardPlugin extends Plugin {
     private static final String UNHEALTHY_STARTS = "unhealthyStarts";
     private static final int MAX_UNHEALTHY_STARTS = 2;
 
+    // A WebView reload re-enables the board in the same process; only the first start of a process
+    // can follow a native crash, so only that one is counted.
+    private static boolean startCountedThisProcess;
+
     private NativeBoardView view;
     // One worker keeps frames in order while stroke parsing stays off the UI thread.
     private final ExecutorService frames = Executors.newSingleThreadExecutor();
@@ -55,7 +59,10 @@ public class NativeBoardPlugin extends Plugin {
             call.reject("Native board disabled after repeated failed starts", "AUTO_DISABLED");
             return;
         }
-        health().edit().putInt(UNHEALTHY_STARTS, unhealthy + 1).commit();
+        if (!startCountedThisProcess) {
+            startCountedThisProcess = true;
+            health().edit().putInt(UNHEALTHY_STARTS, unhealthy + 1).commit();
+        }
         getActivity().runOnUiThread(() -> {
             try {
                 if (view == null) {
@@ -153,12 +160,23 @@ public class NativeBoardPlugin extends Plugin {
         if (view == null) { call.reject("NativeBoard not enabled"); return; }
         final String key = call.getString("key");
         final String data = call.getString("data");
+        final int maxEdge = Math.max(256, call.getInt("maxEdge", 2048));
         if (key == null || data == null) { call.reject("key and data are required"); return; }
         frames.execute(() -> {
             Bitmap bitmap;
             try {
                 byte[] bytes = Base64.decode(data, Base64.DEFAULT);
-                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                // Read the size first and decode at a power-of-two reduction, so a large photo
+                // never lands in memory at full resolution.
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inSampleSize = 1;
+                while (Math.max(bounds.outWidth, bounds.outHeight) / (options.inSampleSize * 2) >= maxEdge) {
+                    options.inSampleSize *= 2;
+                }
+                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
             } catch (IllegalArgumentException | OutOfMemoryError error) {
                 bitmap = null;
             }
