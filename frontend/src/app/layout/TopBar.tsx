@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
+import { BookOpen, CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
 import ServerManagementPanel from "@/app/server/ServerManagementPanel";
+import { openHelp } from "@/app/help/helpStore";
 import { isNativeApp } from "@/lib/apiClient";
 
 export type ApiStatus = {
@@ -300,6 +301,16 @@ export default function TopBar({
                   >
                     <DoorOpen size={15} />
                     <span>{tl("change_room")}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openHelp("teacher")}
+                    aria-label={tl("help")}
+                    className="col-span-2 inline-flex h-10 items-center justify-start gap-2 rounded-xl border border-white/5 bg-white/[0.035] px-3 text-[11px] font-medium"
+                  >
+                    <BookOpen size={15} />
+                    <span>{tl("help")}</span>
                   </Button>
                 </div>
               </div>

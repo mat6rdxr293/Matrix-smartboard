@@ -1,8 +1,9 @@
 import { FormEvent, useState } from "react";
-import { ArrowRight, GraduationCap } from "lucide-react";
+import { ArrowRight, GraduationCap, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { openHelp } from "@/app/help/helpStore";
 import { useI18n } from "@/i18n";
 
 type AuthMode = "login" | "register";
@@ -53,6 +54,10 @@ export default function AuthScreen({ loading = false, error, onLogin, onRegister
           <p className="mt-10 max-w-[300px] text-[11px] leading-5 text-frost/35">
             {tl("auth_binding_note")}
           </p>
+          <button type="button" onClick={() => openHelp("admin", "9")}
+            className="mt-4 inline-flex items-center gap-2 text-[11px] font-medium text-accent hover:underline">
+            <BookOpen size={13} />{tl("help_open_admin")}
+          </button>
         </aside>
 
         <div className="flex min-h-[520px] items-center p-7 sm:p-10 lg:p-12">

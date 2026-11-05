@@ -1,4 +1,5 @@
-import { CircleCheck, CircleX, LoaderCircle, Minus, Network } from "lucide-react";
+import { BookOpen, CircleCheck, CircleX, LoaderCircle, Minus, Network } from "lucide-react";
+import { openHelp } from "@/app/help/helpStore";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import type { ConnectionCheckState, SavedServerConnectionResult } from "./androidSetup";
@@ -70,6 +71,10 @@ export default function ServerConnectionGate({ checking, serverName, result, onR
                 {tl("server_reconfigure")}
               </Button>
             </div>
+            <button type="button" onClick={() => openHelp("admin", "8")}
+              className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-frost/50 hover:text-frost">
+              <BookOpen size={14} />{tl("help_open_admin")}
+            </button>
           </>
         )}
       </section>

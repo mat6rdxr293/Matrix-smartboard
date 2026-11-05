@@ -6,6 +6,9 @@ import android.view.View;
 import android.view.MotionEvent;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.webkit.WebView;
+
+import androidx.activity.OnBackPressedCallback;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -54,6 +57,26 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         bridge.setWebViewClient(new PinnedBridgeWebViewClient(bridge, this));
         hideSystemBars();
+        // Back first asks the page: an open screen such as help closes instead of the whole app.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView web = bridge != null ? bridge.getWebView() : null;
+                if (web == null) {
+                    leave(this);
+                    return;
+                }
+                web.evaluateJavascript("Boolean(window.__matrixBack && window.__matrixBack())", result -> {
+                    if (!"true".equals(result)) leave(this);
+                });
+            }
+        });
+    }
+
+    private void leave(OnBackPressedCallback callback) {
+        callback.setEnabled(false);
+        getOnBackPressedDispatcher().onBackPressed();
+        callback.setEnabled(true);
     }
 
     @Override

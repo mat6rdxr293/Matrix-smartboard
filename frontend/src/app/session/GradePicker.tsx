@@ -1,4 +1,5 @@
-import { ChevronRight, Expand, History, LogOut, MapPin } from "lucide-react";
+import { BookOpen, ChevronRight, Expand, History, LogOut, MapPin } from "lucide-react";
+import { openHelp } from "@/app/help/helpStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
@@ -69,6 +70,15 @@ export default function GradePicker({ school, room, onSelectGrade, onOpenHistory
                 <Expand size={16} />
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openHelp("teacher")}
+              className="h-9 rounded-xl border border-white/10 bg-white/[0.025] px-3 text-[11px] text-frost/70 hover:bg-white/[0.06] hover:text-frost"
+            >
+              <BookOpen size={15} className="mr-1.5" />
+              {tl("help")}
+            </Button>
             <Button
               variant="ghost"
               size="sm"

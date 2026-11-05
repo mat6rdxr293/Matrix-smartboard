@@ -17,6 +17,8 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    // The in-app help reads the guides from ../docs/guide.
+    fs: { allow: [__dirname, path.resolve(__dirname, "../docs/guide")] },
     proxy: {
       "/api": {
         target: "http://localhost:8001",

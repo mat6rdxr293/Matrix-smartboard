@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } from "lucide-react";
+import { BookOpen, ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } from "lucide-react";
+import { openHelp } from "@/app/help/helpStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n, type LocaleCode } from "@/i18n";
@@ -272,6 +273,11 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
             <>
               <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">{tl("setup_title")}</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-frost/50">{tl("setup_description")}</p>
+              {/* Opens the admin guide at the section for the step on screen. */}
+              <button type="button" onClick={() => openHelp("admin", mode === "ssh" ? "5" : mode === "existing" ? "6" : "4")}
+                className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-accent hover:underline">
+                <BookOpen size={14} />{tl("help_open_admin")}
+              </button>
             </>
           )}
         </div>
