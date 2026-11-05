@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any, Iterable
 
-CHANGE_KINDS = {"school", "session", "session_delete", "room", "lesson", "board_op", "chat", "doc", "media"}
+CHANGE_KINDS = {"school", "session", "session_delete", "room", "lesson", "board_op", "chat", "doc", "media", "peer"}
 MAX_CHANGES_PER_PULL = 500
 
 
@@ -92,6 +92,13 @@ class ClusterMixin:
             CREATE TABLE IF NOT EXISTS cluster_docs (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
+                hlc TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cluster_peers (
+                node_id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                pin TEXT NOT NULL,
+                name TEXT NOT NULL,
                 hlc TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS cluster_tombstones (
@@ -406,6 +413,43 @@ class ClusterMixin:
             """,
             (data["key"], data["value"], data["hlc"]),
         )
+
+    def _merge_peer(self, connection: sqlite3.Connection, data: dict) -> None:
+        connection.execute(
+            """
+            INSERT INTO cluster_peers(node_id, url, pin, name, hlc) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(node_id) DO UPDATE SET url = excluded.url, pin = excluded.pin, name = excluded.name, hlc = excluded.hlc
+            WHERE excluded.hlc > cluster_peers.hlc
+            """,
+            (data["node_id"], data["url"], data["pin"], data["name"], data["hlc"]),
+        )
+
+    def announce_peer(self, node_id: str, url: str, pin: str, name: str) -> None:
+        """Adds or updates a cluster member; the list travels to every node like other data."""
+        with self.connection() as connection:
+            hlc = self.clock.now()
+            data = {"node_id": node_id, "url": url, "pin": pin, "name": name, "hlc": hlc}
+            self._merge_peer(connection, data)
+            self._log(connection, "peer", data, hlc=hlc)
+
+    def cluster_peers(self) -> list[dict]:
+        with self.connection() as connection:
+            return [dict(row) for row in connection.execute("SELECT * FROM cluster_peers ORDER BY name, node_id")]
+
+    def meta_get(self, key: str) -> str | None:
+        with self.connection() as connection:
+            row = connection.execute("SELECT value FROM schema_meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def meta_set(self, key: str, value: str | None) -> None:
+        with self.connection() as connection:
+            if value is None:
+                connection.execute("DELETE FROM schema_meta WHERE key = ?", (key,))
+            else:
+                connection.execute(
+                    "INSERT INTO schema_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
 
     def _merge_media(self, connection: sqlite3.Connection, data: dict) -> None:
         connection.execute(

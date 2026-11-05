@@ -31,6 +31,7 @@ from .school_routes import get_store as get_school_store
 from .school_routes import require_school, router as school_router
 from .server_ops import router as server_ops_router
 from .school_store import SchoolStore
+from .cluster import ClusterService, router as cluster_router
 from .server_identity import ServerIdentity
 from .progress_jobs import progress_jobs
 from .lesson_generation_contract import GeneratedLesson, contract_payload, resolved_lesson_payload
@@ -58,7 +59,11 @@ server_identity = ServerIdentity(settings.server_identity_dir)
 
 app = FastAPI()
 app.state.progress_tasks = set()
-app.state.school_store = SchoolStore(settings.practice_db_path, session_days=settings.school_session_days)
+# The node id of this server in a cluster is its Server ID, so it stays the same across restarts.
+server_identity.ensure()
+app.state.school_store = SchoolStore(
+    settings.practice_db_path, session_days=settings.school_session_days, node_id=server_identity.server_id()
+)
 app.include_router(school_router)
 app.include_router(server_ops_router)
 
@@ -77,7 +82,27 @@ TASKS_FILE = DATA_DIR / "tasks.json"
 SLIDES_FILE = DATA_DIR / "slides.json"
 SITE_BACKGROUND_FILE = DATA_DIR / "site_background.json"
 PRESENTATION_SOURCE_FILE = DATA_DIR / "presentation_source.json"
-MEDIA_DIR = DATA_DIR / "media"
+# Overridable so several servers on one machine (tests, a lab cluster) keep separate pictures.
+MEDIA_DIR = Path(os.environ["MATRIX_MEDIA_DIR"]) if os.environ.get("MATRIX_MEDIA_DIR") else DATA_DIR / "media"
+
+app.state.cluster = ClusterService(
+    store=app.state.school_store,
+    pin=lambda: server_identity.public_key_pin(),
+    name=lambda: get_server_name(),
+    media_dir=MEDIA_DIR,
+)
+app.include_router(cluster_router)
+
+# Paths whose requests run the local AI; while they run they count towards this node's load.
+AI_LOAD_PATHS = ("/api/ai", "/api/ocr", "/api/lesson-generation/generate", "/api/lesson-generation/jobs")
+
+
+@app.middleware("http")
+async def _count_ai_load(request: Request, call_next):
+    if request.method == "POST" and request.url.path.startswith(AI_LOAD_PATHS):
+        with app.state.cluster.load.ai_request():
+            return await call_next(request)
+    return await call_next(request)
 BOARD_REPLAY_FILE = DATA_DIR / "board_replay.json"
 BOARD_REPLAY_LOG_FILE = DATA_DIR / "board_replay.ndjson"
 AI_HISTORY_LOG_FILE = DATA_DIR / "ai_history.ndjson"
@@ -130,6 +155,7 @@ def _subject_ai_history_file(subject: Optional[str]) -> Path:
 @app.on_event("startup")
 async def _startup_log() -> None:
     server_identity.ensure()
+    app.state.cluster.start()
     has_key = bool(get_openai_key())
     logger.info("AI backend configured: %s", "yes" if is_ai_configured() else "no")
     logger.info("OPENAI_API_KEY loaded: %s", "yes" if has_key else "no")
@@ -566,6 +592,10 @@ def _status_payload(request: Request | None = None) -> dict:
         "tls": bool(request is not None and request.url.scheme == "https"),
         "ai": is_ai_configured(),
         "ocr": is_ocr_configured(),
+        # Background AI jobs keep running after their request returns, so they count too.
+        "load": {**app.state.cluster.load.snapshot(), "backgroundJobs": len(app.state.progress_tasks)},
+        "cluster": {"id": app.state.cluster.cluster_id, "nodeId": app.state.school_store.node_id}
+        if app.state.cluster.enabled else None,
         "features": {
             "ai": is_ai_configured(),
             "ocr": is_ocr_configured(),
@@ -575,6 +605,7 @@ def _status_payload(request: Request | None = None) -> dict:
             "boardImages": True,
             "pptx": True,
             "mdns": True,
+            "cluster": True,
         },
     }
 
@@ -598,7 +629,11 @@ async def media_endpoint(name: str) -> FileResponse:
     safe_name = Path(name).name
     path = MEDIA_DIR / safe_name
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Файл не найден")
+        # In a cluster the picture may have been uploaded to another node: fetch it once from there.
+        fetched = await app.state.cluster.fetch_media(safe_name)
+        if fetched is None:
+            raise HTTPException(status_code=404, detail="Файл не найден")
+        path = fetched
     media_type = None
     if path.suffix.lower() == ".pptx":
         media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -855,6 +890,7 @@ async def upload_board_image(file: UploadFile = File(...)) -> dict:
     stored_name = f"board-{int(time.time())}-{secrets.token_hex(8)}{suffix}"
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     (MEDIA_DIR / stored_name).write_bytes(content)
+    app.state.school_store.record_media(stored_name, len(content))
     return {"src": f"/api/media/{stored_name}"}
 
 
@@ -934,8 +970,11 @@ async def generate_lesson_endpoint(payload: LessonGenerationRequest) -> dict:
         raise HTTPException(status_code=503, detail="Не удалось сгенерировать урок. Попробуйте ещё раз.") from exc
 
 
-@app.get("/api/storage")
-async def load_storage(subject: Optional[str] = None) -> dict:
+def _storage_key(subject: Optional[str]) -> str:
+    return f"storage:{_normalize_subject(subject)}"
+
+
+def _storage_from_files(subject: Optional[str]) -> dict:
     tasks_file, slides_file, site_background_file, presentation_source_file = _subject_storage_files(subject)
     return {
         "tasks": _read_json(tasks_file),
@@ -945,15 +984,25 @@ async def load_storage(subject: Optional[str] = None) -> dict:
     }
 
 
+@app.get("/api/storage")
+async def load_storage(subject: Optional[str] = None) -> dict:
+    # Tasks and slides live in the replicated store so every server of a cluster has them; a
+    # subject saved before that is read from its old files.
+    stored = app.state.school_store.get_document(_storage_key(subject))
+    return stored if isinstance(stored, dict) else _storage_from_files(subject)
+
+
 @app.post("/api/storage")
 async def save_storage(payload: StoragePayload, subject: Optional[str] = None) -> dict:
-    tasks_file, slides_file, site_background_file, presentation_source_file = _subject_storage_files(subject)
-    _write_json(tasks_file, payload.tasks)
-    _write_json(slides_file, payload.slides)
-    if payload.siteBackground is not None:
-        _write_dict(site_background_file, payload.siteBackground)
-    if payload.presentationSource is not None:
-        _write_dict(presentation_source_file, payload.presentationSource)
+    previous = app.state.school_store.get_document(_storage_key(subject))
+    previous = previous if isinstance(previous, dict) else _storage_from_files(subject)
+    data = {
+        "tasks": payload.tasks,
+        "slides": payload.slides,
+        "siteBackground": payload.siteBackground if payload.siteBackground is not None else previous.get("siteBackground"),
+        "presentationSource": payload.presentationSource if payload.presentationSource is not None else previous.get("presentationSource"),
+    }
+    app.state.school_store.put_document(_storage_key(subject), data)
     return {"ok": True}
 
 

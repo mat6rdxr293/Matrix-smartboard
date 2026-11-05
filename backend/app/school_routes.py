@@ -243,6 +243,11 @@ def append_lesson_board_operations(
         )
         return {"ok": True, "inserted": inserted}
     except ResourceNotFound as exc:
+        cluster = getattr(request.app.state, "cluster", None)
+        if cluster is not None and cluster.enabled:
+            # The lesson may have been started on another server and not have arrived here yet;
+            # the board keeps its queue and retries.
+            raise HTTPException(status_code=503, detail="Урок ещё не пришёл с другого сервера", headers={"Retry-After": "2"}) from exc
         raise HTTPException(status_code=404, detail="Урок не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
