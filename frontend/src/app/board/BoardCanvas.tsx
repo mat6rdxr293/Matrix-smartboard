@@ -1650,7 +1650,17 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         // A picture raised over a graph hides ink, so writing is kept off it as it is off a graph.
         "[data-board-object]",
       ].join(",");
-      const rects: NativeRect[] = Array.from(document.querySelectorAll<HTMLElement>(selector))
+      // Anything positioned over the board that is not part of it (settings, menus, panels, dialogs,
+      // whatever is added later) is UI: the ink layer must neither draw there nor take its touches.
+      // The board's own layers live inside areaRef and are left to the rules above.
+      const area = areaRef.current;
+      const overlays = Array.from(document.querySelectorAll<HTMLElement>('[class*="absolute"], [class*="fixed"], body > *'))
+        .filter((el) => {
+          if (area && (area.contains(el) || el.contains(area))) return false;
+          const position = getComputedStyle(el).position;
+          return position === "absolute" || position === "fixed";
+        });
+      const rects: NativeRect[] = Array.from(new Set([...document.querySelectorAll<HTMLElement>(selector), ...overlays]))
         .filter((el) => {
           const style = getComputedStyle(el);
           return style.display !== "none" && style.visibility !== "hidden" &&
