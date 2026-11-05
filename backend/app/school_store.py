@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .curriculum import is_subject_allowed
+from .school_cluster import ClusterMixin, board_order
 
 
 class SchoolAlreadyExists(ValueError):
@@ -228,12 +229,12 @@ def _lesson_dict(row: sqlite3.Row) -> dict:
     return result
 
 
-class SchoolStore:
-    def __init__(self, path: str | Path, *, session_days: int = 30):
+class SchoolStore(ClusterMixin):
+    def __init__(self, path: str | Path, *, session_days: int = 30, node_id: str | None = None):
         self.path = Path(path)
         self.session_days = max(1, session_days)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        self._initialize(node_id)
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -249,7 +250,7 @@ class SchoolStore:
         finally:
             connection.close()
 
-    def _initialize(self) -> None:
+    def _initialize(self, node_id: str | None = None) -> None:
         with self.connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -341,6 +342,7 @@ class SchoolStore:
                 """
             )
             self._migrate_board_operations(connection)
+            self._initialize_cluster(connection, node_id)
 
     def _migrate_board_operations(self, connection: sqlite3.Connection) -> None:
         row = connection.execute(
@@ -422,6 +424,8 @@ class SchoolStore:
                     """,
                     (school_id, cleaned_name, _normalize_name(cleaned_name), salt, password_hash, created_at),
                 )
+                row = connection.execute("SELECT * FROM schools WHERE id = ?", (school_id,)).fetchone()
+                self._log(connection, "school", self._school_row(row))
         except sqlite3.IntegrityError as exc:
             raise SchoolAlreadyExists("school already exists") from exc
         return {"id": school_id, "name": cleaned_name, "createdAt": created_at}
@@ -448,6 +452,9 @@ class SchoolStore:
                 "INSERT INTO auth_sessions(token_hash, school_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
                 (token_hash, school_id, created_at, expires_at),
             )
+            # Sessions travel with the cluster, so a board stays signed in when it moves to another node.
+            self._log(connection, "session", {"token_hash": token_hash, "school_id": school_id,
+                                              "created_at": created_at, "expires_at": expires_at})
         return token
 
     def school_for_token(self, token: str | None) -> dict | None:
@@ -474,6 +481,8 @@ class SchoolStore:
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self.connection() as connection:
             connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
+            connection.execute("INSERT OR IGNORE INTO cluster_tombstones(token_hash) VALUES (?)", (token_hash,))
+            self._log(connection, "session_delete", {"token_hash": token_hash})
 
     def create_room(self, school_id: str, name: str) -> dict:
         cleaned_name = _clean_name(name, label="room name", max_length=80)
@@ -488,6 +497,8 @@ class SchoolStore:
                     """,
                     (room_id, school_id, cleaned_name, _normalize_name(cleaned_name), created_at),
                 )
+                row = connection.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+                self._log(connection, "room", dict(row))
         except sqlite3.IntegrityError as exc:
             raise RoomAlreadyExists("room already exists") from exc
         return {"id": room_id, "schoolId": school_id, "name": cleaned_name, "createdAt": created_at}
@@ -533,6 +544,9 @@ class SchoolStore:
         now = _now_ms()
         with self.connection() as connection:
             self._require_room(connection, school_id, room_id)
+            closed = [r["id"] for r in connection.execute(
+                "SELECT id FROM lessons WHERE room_id = ? AND status = 'active'", (room_id,)
+            )]
             connection.execute(
                 "UPDATE lessons SET status = 'completed', ended_at = ?, updated_at = ? WHERE room_id = ? AND status = 'active'",
                 (now, now, room_id),
@@ -544,8 +558,18 @@ class SchoolStore:
                 """,
                 (lesson_id, school_id, room_id, grade, subject_id, now, now),
             )
+            self._log_lessons(connection, [*closed, lesson_id])
             row = connection.execute("SELECT * FROM lessons WHERE id = ?", (lesson_id,)).fetchone()
         return _lesson_dict(row)
+
+    def _log_lessons(self, connection: sqlite3.Connection, lesson_ids: list[str]) -> None:
+        """Stamps changed lessons with a fresh clock reading and writes them to the cluster log.
+        The newest stamp decides which activation wins when nodes disagree."""
+        for lesson_id in lesson_ids:
+            hlc = self.clock.now()
+            connection.execute("UPDATE lessons SET hlc = ? WHERE id = ?", (hlc, lesson_id))
+            row = connection.execute("SELECT * FROM lessons WHERE id = ?", (lesson_id,)).fetchone()
+            self._log(connection, "lesson", self._lesson_row(row), hlc=hlc)
 
     def get_lesson(self, school_id: str, lesson_id: str) -> dict | None:
         with self.connection() as connection:
@@ -604,6 +628,7 @@ class SchoolStore:
                 "UPDATE lessons SET status = 'completed', ended_at = COALESCE(ended_at, ?), updated_at = ? WHERE id = ?",
                 (now, now, lesson_id),
             )
+            self._log_lessons(connection, [lesson_id])
         lesson = self.get_lesson(school_id, lesson_id)
         if lesson is None:
             raise ResourceNotFound("lesson not found")
@@ -613,6 +638,9 @@ class SchoolStore:
         now = _now_ms()
         with self.connection() as connection:
             lesson = self._require_lesson(connection, school_id, lesson_id)
+            closed = [r["id"] for r in connection.execute(
+                "SELECT id FROM lessons WHERE room_id = ? AND status = 'active' AND id != ?", (lesson["room_id"], lesson_id)
+            )]
             connection.execute(
                 """
                 UPDATE lessons SET status = 'completed', ended_at = COALESCE(ended_at, ?), updated_at = ?
@@ -624,6 +652,7 @@ class SchoolStore:
                 "UPDATE lessons SET status = 'active', ended_at = NULL, updated_at = ? WHERE id = ?",
                 (now, lesson_id),
             )
+            self._log_lessons(connection, [*closed, lesson_id])
         result = self.get_lesson(school_id, lesson_id)
         if result is None:
             raise ResourceNotFound("lesson not found")
@@ -636,10 +665,11 @@ class SchoolStore:
         with self.connection() as connection:
             self._require_lesson(connection, school_id, lesson_id)
             row = connection.execute(
-                "SELECT COALESCE(MAX(sequence), 0) AS value FROM board_operations WHERE lesson_id = ?",
+                "SELECT COALESCE(MAX(sequence), 0) AS value, COALESCE(MAX(lamport), 0) AS lamport FROM board_operations WHERE lesson_id = ?",
                 (lesson_id,),
             ).fetchone()
             sequence = int(row["value"])
+            lamport = int(row["lamport"])
             for operation in operations:
                 op_type = operation.get("op")
                 client_id = str(operation.get("client_operation_id") or "").strip()
@@ -746,13 +776,24 @@ class SchoolStore:
                 if not isinstance(occurred_at, int):
                     occurred_at = _now_ms()
                 sequence += 1
+                lamport += 1
+                device_id = operation.get("device_id")
+                device_id = device_id.strip()[:64] if isinstance(device_id, str) and device_id.strip() else None
+                client_seq = operation.get("client_seq")
+                client_seq = client_seq if isinstance(client_seq, int) and not isinstance(client_seq, bool) and client_seq >= 0 else None
                 connection.execute(
                     """
-                    INSERT INTO board_operations(lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO board_operations(lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at,
+                        lamport, device_id, client_seq, origin)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (lesson_id, sequence, client_id, op_type, payload_json, occurred_at),
+                    (lesson_id, sequence, client_id, op_type, payload_json, occurred_at, lamport, device_id, client_seq, self.node_id),
                 )
+                self._log(connection, "board_op", {
+                    "lesson_id": lesson_id, "client_operation_id": client_id, "op_type": op_type,
+                    "payload_json": payload_json, "occurred_at": occurred_at, "lamport": lamport,
+                    "device_id": device_id, "client_seq": client_seq, "origin": self.node_id,
+                })
                 inserted += 1
             if inserted:
                 connection.execute("UPDATE lessons SET updated_at = ? WHERE id = ?", (_now_ms(), lesson_id))
@@ -766,10 +807,11 @@ class SchoolStore:
                 (lesson_id,),
             ).fetchall()
         result = []
-        for row in rows:
+        # The cluster-wide order: the same on every node, and each board's own operations in its order.
+        for position, row in enumerate(board_order(rows), start=1):
             payload = json.loads(row["payload_json"])
             item = {
-                "sequence": row["sequence"],
+                "sequence": position,
                 "clientOperationId": row["client_operation_id"],
                 "op": row["op_type"],
                 "ts": row["occurred_at"],
@@ -831,11 +873,15 @@ class SchoolStore:
             now = _now_ms()
             connection.execute(
                 """
-                INSERT INTO chat_messages(lesson_id, sequence, client_message_id, role, text, mode, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO chat_messages(lesson_id, sequence, client_message_id, role, text, mode, status, created_at, origin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (lesson_id, sequence, client_message_id, role, text, mode, status, now),
+                (lesson_id, sequence, client_message_id, role, text, mode, status, now, self.node_id),
             )
+            self._log(connection, "chat", {
+                "lesson_id": lesson_id, "client_message_id": client_message_id, "role": role, "text": text,
+                "mode": mode, "status": status, "created_at": now, "origin": self.node_id,
+            })
             connection.execute("UPDATE lessons SET updated_at = ? WHERE id = ?", (now, lesson_id))
         return True
 
@@ -843,7 +889,7 @@ class SchoolStore:
         with self.connection() as connection:
             self._require_lesson(connection, school_id, lesson_id)
             rows = connection.execute(
-                "SELECT * FROM chat_messages WHERE lesson_id = ? ORDER BY sequence",
+                "SELECT * FROM chat_messages WHERE lesson_id = ? ORDER BY created_at, origin, sequence",
                 (lesson_id,),
             ).fetchall()
         return [

@@ -110,10 +110,11 @@ def test_existing_board_table_is_migrated_to_accept_images(tmp_path):
     # Recreate the table as schema 6 left it: same rows, CHECK without image operations.
     with sqlite3.connect(path) as connection:
         ddl = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'board_operations'").fetchone()[0]
-        rows = connection.execute("SELECT * FROM board_operations").fetchall()
+        columns = "id, lesson_id, sequence, client_operation_id, op_type, payload_json, occurred_at"
+        rows = connection.execute(f"SELECT {columns} FROM board_operations").fetchall()
         connection.execute("DROP TABLE board_operations")
         connection.execute(ddl.replace("'image_add', 'image_update', 'image_delete', ", ""))
-        connection.executemany("INSERT INTO board_operations VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+        connection.executemany(f"INSERT INTO board_operations({columns}) VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     app.state.school_store = SchoolStore(path)
     response = client.post(

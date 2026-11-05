@@ -57,6 +57,10 @@ class BoardOperationInput(BaseModel):
     dx: float | None = None
     dy: float | None = None
     ts: int | None = None
+    # Which board sent it and that board's own running count: keeps a board's operations in order
+    # across the servers of a cluster.
+    device_id: str | None = Field(default=None, max_length=64)
+    client_seq: int | None = Field(default=None, ge=0)
 
 
 class BoardOperationsPayload(BaseModel):
