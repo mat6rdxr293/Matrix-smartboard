@@ -6,9 +6,9 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
-trap 'rm -rf "${work:?}"' EXIT
+trap 'status=$?; if [[ $status -ne 0 && -f "$work/update.log" ]]; then cat "$work/update.log" >&2; fi; rm -rf "${work:?}"' EXIT
 
-git_quiet() { git -c init.defaultBranch=main -c user.name=test -c user.email=test@example.invalid "$@" >/dev/null 2>&1; }
+git_quiet() { git -c init.defaultBranch=main -c user.name=test -c user.email=test@example.invalid "$@" >/dev/null 2>&1 || { echo "git $* failed" >&2; return 1; }; }
 
 make_updater() {
   local health="$1"
