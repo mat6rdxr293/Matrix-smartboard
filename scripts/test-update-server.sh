@@ -11,7 +11,9 @@ trap 'status=$?; if [[ $status -ne 0 && -f "$work/update.log" ]]; then cat "$wor
 git_quiet() { git -c init.defaultBranch=main -c user.name=test -c user.email=test@example.invalid "$@" >/dev/null 2>&1 || { echo "git $* failed" >&2; return 1; }; }
 
 make_updater() {
-  local health="$1"
+  # "ok": the updated server is healthy. "rollback": it is not, but the old version is again.
+  local mode="$1"
+  rm -f "$work/health-calls"
   sed \
     -e "s#^APP_DIR=.*#APP_DIR=\"$work/app\"#" \
     -e "s#^CONF_FILE=.*#CONF_FILE=\"$work/none.conf\"#" \
@@ -21,9 +23,12 @@ make_updater() {
     -e 's#^  install -m 755 .*#  :#' \
     -e 's#^    launchctl kickstart .*#    :#' \
     -e 's#^    systemctl restart .*#    :#' \
-    -e "s#^    if curl -kfsS .*#    if $health; then#" \
-    -e 's#^    sleep 2$#    :#' \
     "$project_root/deploy/update-server.sh" > "$work/update.sh"
+  # Redefine the health check before the update runs, so no real server is ever contacted.
+  local stub="wait_health() { local n; n=\$(cat '$work/health-calls' 2>/dev/null || echo 0); echo \$((n + 1)) > '$work/health-calls'; [[ '$mode' == ok || \$n -ge 1 ]]; }"
+  awk -v stub="$stub" '/^echo "Updating / { print stub } { print }' "$work/update.sh" > "$work/update.tmp"
+  mv "$work/update.tmp" "$work/update.sh"
+  grep -q "^wait_health() { local n" "$work/update.sh" || { echo "health stub not installed" >&2; exit 1; }
   chmod +x "$work/update.sh"
 }
 
@@ -56,14 +61,16 @@ expect() {
 }
 
 setup_repo
-make_updater true
+make_updater ok
 "$work/update.sh" --worker
 expect backend/app/code.txt v2
 expect backend/app/data/slides.json '{"slides":"teacher"}'
 
 setup_repo
-make_updater false
-"$work/update.sh" --worker || [[ $? -eq 4 ]]
+make_updater rollback
+status=0
+"$work/update.sh" --worker || status=$?
+[[ $status -eq 4 ]] || { echo "FAIL: rollback exited $status, expected 4" >&2; exit 1; }
 expect backend/app/code.txt v1
 expect backend/app/data/slides.json '{"slides":"teacher"}'
 
