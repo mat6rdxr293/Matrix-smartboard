@@ -80,6 +80,9 @@ def _is_valid_board_image(image: object) -> bool:
         return False
     if not all(10 <= float(image[key]) <= 20_000 for key in ("width", "height")):
         return False
+    # Stacking order among pictures; absent on pictures placed before it existed.
+    if not _is_valid_layer(image.get("z")):
+        return False
     label = image.get("label")
     return label is None or (isinstance(label, str) and len(label) <= 200)
 
@@ -119,7 +122,12 @@ def _is_valid_graph(graph: object) -> bool:
             return False
         if not isinstance(item.get("visible"), bool):
             return False
-    return True
+    return _is_valid_layer(graph.get("z"))
+
+
+def _is_valid_layer(z: object) -> bool:
+    """Optional stacking order among pictures or graphs; items saved before it existed have none."""
+    return z is None or (_is_number(z) and abs(float(z)) <= 1_000_000)
 
 
 def _is_valid_solution(solution: object) -> bool:

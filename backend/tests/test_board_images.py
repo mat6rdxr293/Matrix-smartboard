@@ -35,6 +35,19 @@ def test_image_operations_round_trip_in_order(tmp_path):
     assert saved[1]["after"]["x"] == 200
 
 
+def test_image_stacking_order_is_kept(tmp_path):
+    client, lesson = registered_client(tmp_path)
+    before = image()
+    after = image(z=1.5)
+    operations = [
+        {"client_operation_id": "z-1", "op": "image_add", "image": before, "ts": 1},
+        {"client_operation_id": "z-2", "op": "image_update", "before": before, "after": after, "ts": 2},
+    ]
+    assert client.post(f"/api/lessons/{lesson['id']}/board/operations", json={"operations": operations}).status_code == 200
+    saved = client.get(f"/api/lessons/{lesson['id']}/board").json()["operations"]
+    assert saved[1]["after"]["z"] == 1.5
+
+
 def test_image_operations_reject_foreign_urls_and_bad_boxes(tmp_path):
     client, lesson = registered_client(tmp_path)
     for bad in (
@@ -42,6 +55,7 @@ def test_image_operations_reject_foreign_urls_and_bad_boxes(tmp_path):
         image(src="javascript:alert(1)"),
         image(width=0),
         image(id=""),
+        image(z="top"),
     ):
         response = client.post(
             f"/api/lessons/{lesson['id']}/board/operations",

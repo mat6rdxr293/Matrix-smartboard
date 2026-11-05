@@ -15,20 +15,32 @@ public class MainActivity extends BridgeActivity {
 
     void setNativeBoardView(NativeBoardView view) { nativeBoard = view; }
 
+    private final int[] boardLocation = new int[2];
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        if (nativeBoard == null) return super.dispatchTouchEvent(event);
         int action = event.getActionMasked();
-        if (action == MotionEvent.ACTION_DOWN) {
-            nativePointerCaptured = nativeBoard != null && nativeBoard.canCapture(event);
-            // Deliver every pen sample as it arrives instead of batching them to the next frame.
-            if (nativePointerCaptured) nativeBoard.requestUnbufferedDispatch(event);
-        }
-        if (nativePointerCaptured && nativeBoard != null) {
-            nativeBoard.handle(event);
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                nativePointerCaptured = false;
+        // Window coordinates include anything above the content (a status bar or a window caption),
+        // while the board works in its own view's coordinates, so shift the event into them.
+        nativeBoard.getLocationInWindow(boardLocation);
+        MotionEvent local = MotionEvent.obtain(event);
+        local.offsetLocation(-boardLocation[0], -boardLocation[1]);
+        try {
+            if (action == MotionEvent.ACTION_DOWN) {
+                nativePointerCaptured = nativeBoard.canCapture(local);
+                // Deliver every pen sample as it arrives instead of batching them to the next frame.
+                if (nativePointerCaptured) nativeBoard.requestUnbufferedDispatch(event);
             }
-            return true;
+            if (nativePointerCaptured) {
+                nativeBoard.handle(local);
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    nativePointerCaptured = false;
+                }
+                return true;
+            }
+        } finally {
+            local.recycle();
         }
         return super.dispatchTouchEvent(event);
     }

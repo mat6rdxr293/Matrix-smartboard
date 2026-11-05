@@ -35,7 +35,8 @@ export type NativeBoardFrame = {
 export type NativeEncodedStroke = { c: string; w: number; e: boolean; p: string };
 export type NativeStrokeChunk = { revision: number; first: boolean; last: boolean; strokes: NativeEncodedStroke[] };
 
-export type BoardRect = { left: number; top: number; width: number; height: number };
+/** `covers: false` marks a strip that takes touches but shows the board, so live ink may pass over it. */
+export type BoardRect = { left: number; top: number; width: number; height: number; covers?: boolean };
 export type NativeStrokeEvent = { stroke: Stroke };
 /** The pen has rested mid-stroke; `seq` ties a replaceLiveStroke reply to this very stroke. */
 export type NativeStrokeHoldEvent = { seq: number; stroke: Stroke };

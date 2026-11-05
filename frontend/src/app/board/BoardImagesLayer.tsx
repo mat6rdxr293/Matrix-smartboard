@@ -1,7 +1,7 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { MoveHorizontal, Trash2 } from "lucide-react";
+import { BringToFront, MoveHorizontal, SendToBack, Trash2 } from "lucide-react";
 import { backendAssetUrl } from "@/lib/apiClient";
-import type { BoardImage } from "./boardDocument";
+import { imagesInLayerOrder, type BoardImage, type GraphElement } from "./boardDocument";
 
 type View = { zoom: number; pan: { x: number; y: number } };
 
@@ -16,7 +16,7 @@ const box = (image: BoardImage, { zoom, pan }: View) => ({
 export function BoardPictures({ images, zoom, pan }: View & { images: BoardImage[] }) {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" data-testid="board-pictures">
-      {images.map((image) => (
+      {imagesInLayerOrder(images).map((image) => (
         <img
           key={image.id}
           src={backendAssetUrl(image.src)}
@@ -41,15 +41,21 @@ type Drag = { kind: "move" | "resize"; start: { x: number; y: number }; image: B
  * once, when the gesture ends.
  */
 export function BoardImageHandles({
-  images, zoom, pan, selectedId, onSelect, onCommit, onDelete, deleteLabel, resizeLabel,
+  images, graphs = [], zoom, pan, selectedId, onSelect, onCommit, onDelete, onRestack, deleteLabel, resizeLabel, upLabel, downLabel,
 }: View & {
+  /** Graphs share the stack with the pictures; they decide which picture a touch picks up. */
+  graphs?: GraphElement[];
   images: BoardImage[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onCommit: (before: BoardImage, after: BoardImage) => void;
   onDelete: (image: BoardImage) => void;
+  /** Moves the picture one place up (1) or down (-1) among the pictures. */
+  onRestack: (image: BoardImage, direction: 1 | -1) => void;
   deleteLabel: string;
   resizeLabel: string;
+  upLabel: string;
+  downLabel: string;
 }) {
   const dragRef = useRef<Drag | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +113,8 @@ export function BoardImageHandles({
     <div className="absolute inset-0 overflow-hidden" data-testid="board-image-handles"
       style={{ pointerEvents: "none", touchAction: "none" }}
       onPointerDown={() => onSelect(null)}>
-      {images.map((image) => {
+      {/* Later elements sit on top, so the topmost picture under a touch is the one picked up. */}
+      {imagesInLayerOrder(images, graphs).map((image) => {
         const selected = image.id === selectedId;
         return (
           <div
@@ -115,7 +122,8 @@ export function BoardImageHandles({
             ref={selected ? previewRef : undefined}
             data-board-image={image.id}
             className={selected ? "absolute rounded-sm outline outline-2 outline-offset-2 outline-[rgb(var(--color-accent))]" : "absolute"}
-            style={{ ...box(image, { zoom, pan }), pointerEvents: "auto", cursor: "move", touchAction: "none" }}
+            // The picked-up picture keeps its bar reachable even when another one covers it.
+            style={{ ...box(image, { zoom, pan }), pointerEvents: "auto", cursor: "move", touchAction: "none", zIndex: selected ? 1 : undefined }}
             onPointerDown={begin(image, "move")}
             {...gesture}
           >
@@ -134,6 +142,19 @@ export function BoardImageHandles({
                 >
                   <MoveHorizontal size={18} />
                 </div>
+                {([[1, upLabel, BringToFront], [-1, downLabel, SendToBack]] as const).map(([direction, label, Icon]) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    className="grid h-9 w-9 place-items-center rounded-full text-frost hover:bg-white/10"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => onRestack(image, direction)}
+                  >
+                    <Icon size={16} />
+                  </button>
+                ))}
                 <button
                   type="button"
                   aria-label={deleteLabel}

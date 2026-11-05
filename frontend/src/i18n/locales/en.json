@@ -565,6 +565,10 @@
     "insert_image_load_failed": "Could not show the picture",
     "delete_image": "Remove picture",
     "resize_image": "Size: drag right or left",
+    "image_layer_up": "Bring forward",
+    "image_layer_down": "Send backward",
+    "graph_layer_up": "Bring forward",
+    "graph_layer_down": "Send backward",
     "board_loading": "Loading the board…",
     "board_loading_images": "Loading pictures…"
   },

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { callOcr, type ProgressUpdate } from "@/app/ai/api";
 import { drawStrokes, type Stroke } from "@/app/board/boardEngine";
 import type { BoardReplayOp } from "@/app/board/replayApi";
-import type { AiSolutionBlock, BoardImage, GraphElement } from "@/app/board/boardDocument";
+import { boardStack, liftedImageIds, newPictureLayer, restackOnBoard, topLayer, type AiSolutionBlock, type BoardImage, type GraphElement } from "@/app/board/boardDocument";
 import { BoardImageHandles, BoardPictures } from "./BoardImagesLayer";
 import InsertImageDialog, { type InsertedImage } from "./InsertImageDialog";
 import { apiFetch } from "@/lib/apiClient";
@@ -19,7 +19,7 @@ import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mou
 import { AnimatePresence, motion } from "framer-motion";
 import { useI18n } from "@/i18n";
 import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfiles";
-import { isNativeApp } from "@/lib/apiClient";
+import { backendAssetUrl, isNativeApp } from "@/lib/apiClient";
 import { SHAPE_HOLD_MS, SHAPE_HOLD_TOLERANCE, recognizeShape } from "./shapeRecognition";
 import { pageCount, pageInView, panForPage, strokesOnPage } from "./pages";
 import { applyConstraint, constraintForStroke, createGeometryTool, type GeometryTool, type StrokeConstraint } from "./geometry";
@@ -33,7 +33,7 @@ import {
   nativeBoardRequested,
   nativeStrokeChunks,
   setNativeBoardEnabled,
-  type NativeBoardFrame, type NativeStrokeEvent, type NativeStrokeHoldEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
+  type BoardRect as NativeRect, type NativeBoardFrame, type NativeStrokeEvent, type NativeStrokeHoldEvent, type NativeViewportEvent } from "@/app/board/nativeBoard";
 import type { PluginListenerHandle } from "@capacitor/core";
 
 type RenderQualityMode = "quality" | "balanced" | "performance";
@@ -107,6 +107,15 @@ export type BoardCanvasHandle = {
 const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
 const EMPTY_IMAGES: BoardImage[] = [];
 const NOOP_SOLUTION_CHANGE = (_next: AiSolutionBlock[]) => undefined;
+
+/** Pictures drawn under the ink: all of them except those raised over a graph. */
+const picturesUnderInk = (images: BoardImage[], graphs: GraphElement[]) => {
+  const stack = boardStack(images, graphs);
+  const lifted = liftedImageIds(stack);
+  return stack.flatMap((entry) => (entry.kind === "image" && !lifted.has(entry.item.id) ? [entry.item] : []));
+};
+
+const geometryArtwork = { ruler: "line", protractor: "protractor", compass: "compass" } as const;
 
 const BoardCanvas = forwardRef(function BoardCanvas({
   onOcrText,
@@ -233,7 +242,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const [showPenSlider, setShowPenSlider] = useState(false);
   const [showPenPalette, setShowPenPalette] = useState(false);
   const [showEraserSlider, setShowEraserSlider] = useState(false);
-  const [showLineSlider, setShowLineSlider] = useState(false);
+  const [showGeometryMenu, setShowGeometryMenu] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearSlideValue, setClearSlideValue] = useState(0);
   const penTimerRef = useRef<number | null>(null);
@@ -298,7 +307,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const eraserPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const toolbarPinned =
     (showPenPalette && mode === "draw") ||
-    (showLineSlider && mode === "line") ||
+    showGeometryMenu ||
     (showEraserSlider && mode === "erase") ||
     showBoardSettings ||
     showClearConfirm;
@@ -708,6 +717,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       y: top + Math.max(16 / zoomRef.current, (viewHeight * 0.85 - height) / 2),
       width,
       height,
+      z: newPictureLayer(imagesRef.current, graphsRef.current),
     };
     onReplayOp?.({ op: "image_add", image, ts: Date.now() });
     setShowInsertImage(false);
@@ -718,6 +728,13 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   const commitImage = (before: BoardImage, after: BoardImage) => {
     onReplayOp?.({ op: "image_update", before, after, ts: Date.now() });
+  };
+
+  const liftedImages = useMemo(() => liftedImageIds(boardStack(images, profileConfig.graphTools ? graphs : [])), [images, graphs, profileConfig.graphTools]);
+
+  const restackPicture = (image: BoardImage, direction: 1 | -1) => {
+    const moved = restackOnBoard(imagesRef.current, graphsRef.current, image.id, direction);
+    if (moved?.kind === "image") commitImage(image, moved.item);
   };
 
   const deleteImage = (image: BoardImage) => {
@@ -758,6 +775,11 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     onReplayOp?.({ op: "graph_update", before, after, ts: Date.now() });
   };
 
+  const restackGraph = (graph: GraphElement, direction: 1 | -1) => {
+    const moved = restackOnBoard(imagesRef.current, graphsRef.current, graph.id, direction);
+    if (moved?.kind === "graph") commitGraphUpdate(graph, moved.item);
+  };
+
   const graphVisibleWorld = () => {
     const scale = zoomRef.current || 1;
     const currentPan = panRef.current;
@@ -783,6 +805,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       id, x: safeX - 210, y: safeY - 150, width: 420, height: 300,
       xLabel: "x", yLabel: "y", xMin: -10, xMax: 10, yMin: -10, yMax: 10,
       expressions: [{ id: crypto.randomUUID(), expression: "x", color: "#4DA3FF", visible: true }],
+      z: topLayer(imagesRef.current, graphsRef.current),
     });
     onReplayOp?.({ op: "graph_add", graph, ts: Date.now() });
     syncGraphsToParent([...graphsRef.current, graph]);
@@ -878,7 +901,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       zoom, pan,
       preview: linePreviewRef.current,
       geometry: geometryToolRef.current,
-      images: imagesRef.current.map(({ src, x, y, width, height }) => ({ key: src, x, y, width, height })),
+      // Pictures raised over a graph are drawn by the WebView among the graphs instead.
+      images: picturesUnderInk(imagesRef.current, profileConfig.graphTools ? graphsRef.current : []).map(({ src, x, y, width, height }) => ({ key: src, x, y, width, height })),
       documentRevision: nativeDocumentRevisionRef.current,
       strokeCount: strokes.length,
       ...(grownStrokes.length ? { appendStrokes: grownStrokes.map(encodeNativeStroke) } : {}),
@@ -1028,7 +1052,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   // Set at touch-down: a stroke started against a ruler edge or the compass pencil follows it.
   const strokeConstraintRef = useRef<StrokeConstraint | null>(null);
 
+  // The toolbar button wears the last tool picked, and brings that one back.
+  const [geometryKind, setGeometryKind] = useState<GeometryTool["kind"]>("ruler");
   const toggleGeometryTool = (kind: GeometryTool["kind"]) => {
+    setGeometryKind(kind);
     if (geometryTool?.kind === kind) {
       setGeometryTool(null);
       return;
@@ -1258,7 +1285,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     setShowAllPens(false);
     setShowPenSlider(false);
     setShowEraserSlider(false);
-    setShowLineSlider(false);
+    setShowGeometryMenu(false);
     setShowClearConfirm(false);
     setShowBoardSettings(false);
     setShowAllBg(false);
@@ -1554,7 +1581,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
 
   useLayoutEffect(() => {
     scheduleRender();
-  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady, geometryTool, images]);
+  }, [grid, widthPx, heightPx, zoom, pan, gridColor, mode, color, width, humanitiesPreset, inputMode, boardLock, eraserWidth, isDarkBg, bg, renderRatio, lowPowerMode, nativeBoardReady, geometryTool, images, graphs]);
 
   useEffect(() => {
     if (!isNativeApp() || !nativeBoardRequested()) return;
@@ -1620,8 +1647,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         "[data-radix-popper-content-wrapper]", "[data-testid=board-toolbar]",
         // Whole panels, not just their buttons: a tap between swatches or beside a slider is still UI.
         "[data-testid^=board-toolbar-popover]", "[data-testid=board-pager]", "[data-testid=native-fallback-notice]",
+        // A picture raised over a graph hides ink, so writing is kept off it as it is off a graph.
+        "[data-board-object]",
       ].join(",");
-      const rects = Array.from(document.querySelectorAll<HTMLElement>(selector))
+      const rects: NativeRect[] = Array.from(document.querySelectorAll<HTMLElement>(selector))
         .filter((el) => {
           const style = getComputedStyle(el);
           return style.display !== "none" && style.visibility !== "hidden" &&
@@ -1640,6 +1669,8 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           top: boardRect.bottom - TOOLBAR_REVEAL_STRIP_PX,
           width: boardRect.width,
           height: TOOLBAR_REVEAL_STRIP_PX,
+          // Nothing is drawn there, so live ink may still show through it.
+          covers: false,
         });
       }
       void NativeBoard.setBlockers({ rects }).catch(() => undefined);
@@ -2259,9 +2290,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     eraserTimerRef.current = window.setTimeout(() => setShowEraserSlider(false), 5000);
   };
 
-  const scheduleLineHide = () => {
+  const scheduleGeometryHide = () => {
     if (lineTimerRef.current) window.clearTimeout(lineTimerRef.current);
-    lineTimerRef.current = window.setTimeout(() => setShowLineSlider(false), 5000);
+    lineTimerRef.current = window.setTimeout(() => setShowGeometryMenu(false), 5000);
   };
 
   const closeBoardSettings = () => {
@@ -2324,7 +2355,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             style={{ backgroundColor: nativeBoardReady ? "transparent" : bg }}
           >
             {/* Android draws pictures under its own ink layer; in the WebView they would cover the ink. */}
-            {!nativeBoardReady && images.length > 0 && <BoardPictures images={images} zoom={zoom} pan={pan} />}
+            {!nativeBoardReady && images.length > 0 && <BoardPictures images={picturesUnderInk(images, profileConfig.graphTools ? graphs : [])} zoom={zoom} pan={pan} />}
             <canvas
               ref={canvasRef}
               className={cn("block h-full w-full rounded-2xl", mode === "lasso" && "cursor-crosshair")}
@@ -2341,8 +2372,9 @@ const BoardCanvas = forwardRef(function BoardCanvas({
               }}
             />
             {mode === "pan" && images.length > 0 && (
-              <BoardImageHandles images={images} zoom={zoom} pan={pan} selectedId={selectedImageId}
-                onSelect={setSelectedImageId} onCommit={commitImage} onDelete={deleteImage} deleteLabel={tl("delete_image")} resizeLabel={tl("resize_image")} />
+              <BoardImageHandles images={images} graphs={graphs} zoom={zoom} pan={pan} selectedId={selectedImageId}
+                onSelect={setSelectedImageId} onCommit={commitImage} onDelete={deleteImage} onRestack={restackPicture}
+                deleteLabel={tl("delete_image")} resizeLabel={tl("resize_image")} upLabel={tl("image_layer_up")} downLabel={tl("image_layer_down")} />
             )}
             {geometryTool && <GeometryOverlay tool={geometryTool} zoom={zoom} pan={pan} onChange={setGeometryTool} />}
             <div
@@ -2352,10 +2384,29 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                 transformOrigin: "0 0",
               }}
             >
-              {profileConfig.graphTools && graphs.map((graph) => (
+              {boardStack(images, profileConfig.graphTools ? graphs : []).map((entry, layer) => entry.kind === "image" ? (
+                liftedImages.has(entry.item.id) && (
+                  // Over a graph, so over the ink as well: it hides writing under it, as a graph does.
+                  <img
+                    key={entry.item.id}
+                    data-board-object="image"
+                    src={backendAssetUrl(entry.item.src)}
+                    alt={entry.item.label ?? ""}
+                    draggable={false}
+                    className="absolute select-none"
+                    style={{
+                      left: entry.item.x, top: entry.item.y, width: entry.item.width, height: entry.item.height,
+                      objectFit: "fill", zIndex: 10 + Math.min(layer, 50),
+                      pointerEvents: mode === "pan" ? "none" : "auto",
+                    }}
+                  />
+                )
+              ) : (() => { const graph = entry.item; return (
                 <GraphElementView
                   key={graph.id}
                   graph={graph}
+                  layer={layer}
+                  onRestack={restackGraph}
                   selected={selectedGraphId === graph.id}
                   backgroundColor={bg}
                   isDarkBackground={isDarkBg}
@@ -2367,7 +2418,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   onDelete={deleteGraph}
                   interactionDisabled={mode === "pan" || mode === "lasso"}
                 />
-              ))}
+              ); })())}
               {solutions.map((solution) => (
                 <AiSolutionBlockView
                   key={solution.id}
@@ -2473,7 +2524,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
               setMode("draw");
               setShowPenSlider(true);
               setShowPenPalette(true);
-              setShowLineSlider(false);
+              setShowGeometryMenu(false);
               schedulePenHide();
               closeBoardSettings();
             }}
@@ -2576,50 +2627,48 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             variant="ghost"
             size="sm"
             className={cn("board-tool-button board-tool-embedded board-tool-unframed", mode === "line" && !humanitiesPreset && "is-active")}
-            aria-label={tl("line")}
-            aria-pressed={mode === "line"}
-            title={tl("line")}
+            aria-label={tl("ruler")}
+            aria-pressed={geometryTool !== null}
+            title={tl("ruler")}
             onClick={() => {
               setHumanitiesPreset(null);
-              setMode("line");
-              setShowLineSlider(true);
+              // The pen draws along the tools, so geometry always pairs with the pen.
+              setMode("draw");
+              if (!geometryTool) toggleGeometryTool(geometryKind);
+              setShowGeometryMenu(true);
               setShowPenPalette(false);
               setShowAllPens(false);
               setShowPenSlider(false);
-              scheduleLineHide();
+              scheduleGeometryHide();
               closeBoardSettings();
             }}
           >
-            <BoardToolIcon tool="line" />
+            <BoardToolIcon tool={geometryArtwork[geometryTool?.kind ?? geometryKind]} />
           </Button>
           <BoardToolbarPopover
             anchorRef={lineToolbarAnchorRef}
-            open={showLineSlider && mode === "line"}
-            testId="board-toolbar-popover-line"
+            open={showGeometryMenu}
+            testId="board-toolbar-popover-geometry"
             className="surface-popover rounded-xl px-2 py-2 shadow-glass backdrop-blur"
           >
-            <div onPointerDown={scheduleLineHide} onPointerUp={scheduleLineHide} onPointerMove={scheduleLineHide}>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-frost/60">{tl("thickness")}</span>
-                  <input
-                    type="range"
-                    min={2}
-                    max={12}
-                    value={width}
-                    onChange={(e) => {
-                      setWidth(Number(e.target.value));
-                      scheduleLineHide();
-                    }}
-                  />
-                  <span
-                    className="inline-block rounded-full"
-                    style={{
-                      width: `${Math.max(6, width)}px`,
-                      height: `${Math.max(6, width)}px`,
-                      backgroundColor: color,
-                    }}
-                  />
-                </div>
+            <div className="flex items-center gap-1" onPointerDown={scheduleGeometryHide} onPointerUp={scheduleGeometryHide}>
+              {(["ruler", "protractor", "compass"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  aria-label={tl(kind)}
+                  aria-pressed={geometryTool?.kind === kind}
+                  title={tl(kind)}
+                  className={cn(
+                    "grid h-[84px] w-[84px] place-items-center rounded-2xl transition",
+                    geometryTool?.kind === kind ? "bg-[rgb(var(--color-accent)/0.22)] ring-1 ring-[rgb(var(--color-accent)/0.7)]" : "hover:bg-white/10",
+                  )}
+                  // Tapping the tool already on the board takes it away.
+                  onClick={() => toggleGeometryTool(kind)}
+                >
+                  <BoardToolIcon tool={geometryArtwork[kind]} size={76} />
+                </button>
+              ))}
             </div>
           </BoardToolbarPopover>
         </div>
@@ -2637,7 +2686,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             setShowEraserSlider(true);
             setShowPenPalette(false);
             setShowAllPens(false);
-            setShowLineSlider(false);
+            setShowGeometryMenu(false);
             scheduleEraserHide();
             closeBoardSettings();
           }}
@@ -2689,7 +2738,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                 setShowPenSlider(false);
                 setShowPenPalette(false);
                 setShowAllPens(false);
-                setShowLineSlider(false);
+                setShowGeometryMenu(false);
                 closeBoardSettings();
               }}
             >
@@ -2704,7 +2753,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
               onClick={() => {
                 setHumanitiesPreset("underline");
                 setMode("line");
-                setShowLineSlider(false);
+                setShowGeometryMenu(false);
                 setShowPenPalette(false);
                 setShowAllPens(false);
                 setShowPenSlider(false);
@@ -2730,7 +2779,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
               setShowPenPalette(false);
               setShowAllPens(false);
               setShowEraserSlider(false);
-              setShowLineSlider(false);
+              setShowGeometryMenu(false);
               closeBoardSettings();
             }}
           >
@@ -2751,7 +2800,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             setShowPenPalette(false);
             setShowAllPens(false);
             setShowEraserSlider(false);
-            setShowLineSlider(false);
+            setShowGeometryMenu(false);
             closeBoardSettings();
           }}
         >
@@ -2771,7 +2820,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
             setShowPenPalette(false);
             setShowAllPens(false);
             setShowEraserSlider(false);
-            setShowLineSlider(false);
+            setShowGeometryMenu(false);
             closeBoardSettings();
           }}
         >
@@ -2874,17 +2923,6 @@ const BoardCanvas = forwardRef(function BoardCanvas({
                   >
                     ...
                   </button>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
-                  <span className="text-xs text-frost/70">{tl("geometry")}</span>
-                  <div className="flex gap-1">
-                    {(["ruler", "protractor", "compass"] as const).map((kind) => (
-                      <Button key={kind} size="sm" variant={geometryTool?.kind === kind ? "accent" : "outline"}
-                        aria-pressed={geometryTool?.kind === kind} onClick={() => toggleGeometryTool(kind)}>
-                        {tl(kind)}
-                      </Button>
-                    ))}
-                  </div>
                 </div>
                 {isNativeApp() && (
                   <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">

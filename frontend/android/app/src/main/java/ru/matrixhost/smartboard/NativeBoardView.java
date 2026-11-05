@@ -161,6 +161,10 @@ public final class NativeBoardView extends View {
     private final RectF board = new RectF();
     private final ArrayList<Stroke> strokes = new ArrayList<>();
     private final ArrayList<RectF> blockers = new ArrayList<>();
+    /** Blockers with UI drawn on them, which live ink must not paint over. */
+    private final ArrayList<RectF> coveringBlockers = new ArrayList<>();
+    /** The blockers in screen pixels, replaced whole so the wet layer's thread reads a stable copy. */
+    private volatile float[] wetCutouts = new float[0];
     private Listener listener;
     private Stroke liveStroke;
     private Stroke previewStroke;
@@ -397,14 +401,33 @@ public final class NativeBoardView extends View {
 
     public void setBlockers(JSONArray array) {
         blockers.clear();
-        if (array == null) return;
+        coveringBlockers.clear();
+        if (array == null) {
+            updateWetCutouts();
+            return;
+        }
         for (int i = 0; i < array.length(); i++) {
             JSONObject rect = array.optJSONObject(i);
             if (rect == null) continue;
             float x = finite(rect, "left", 0), y = finite(rect, "top", 0);
             float w = finite(rect, "width", 0), h = finite(rect, "height", 0);
-            if (w > 0 && h > 0) blockers.add(new RectF(x, y, x+w, y+h));
+            if (w > 0 && h > 0) {
+                RectF r = new RectF(x, y, x+w, y+h);
+                blockers.add(r);
+                if (rect.optBoolean("covers", true)) coveringBlockers.add(r);
+            }
         }
+        updateWetCutouts();
+    }
+
+    private void updateWetCutouts() {
+        float sx = scaleX(), sy = scaleY();
+        float[] cut = new float[coveringBlockers.size() * 4];
+        for (int i = 0; i < coveringBlockers.size(); i++) {
+            RectF r = coveringBlockers.get(i);
+            cut[i * 4] = r.left * sx; cut[i * 4 + 1] = r.top * sy; cut[i * 4 + 2] = r.right * sx; cut[i * 4 + 3] = r.bottom * sy;
+        }
+        wetCutouts = cut;
     }
 
     public boolean canCapture(MotionEvent event) {
@@ -515,7 +538,7 @@ public final class NativeBoardView extends View {
     private void wetSegment(float x0, float y0, float x1, float y1, long eventTime) {
         float sx = scaleX(), sy = scaleY();
         wetInk.draw(new WetInkLayer.Segment(x0, y0, x1, y1, liveStroke.width * sx * zoom, liveStroke.color,
-            boardLeft*sx, boardTop*sy, (boardLeft+boardWidth)*sx, (boardTop+boardHeight)*sy, eventTime));
+            boardLeft*sx, boardTop*sy, (boardLeft+boardWidth)*sx, (boardTop+boardHeight)*sy, wetCutouts, eventTime));
         wetLastX = x1;
         wetLastY = y1;
     }
@@ -559,6 +582,7 @@ public final class NativeBoardView extends View {
                 primaryDownY = e.getY();
                 liveStroke = newStroke();
                 strokeSeq++;
+                updateWetCutouts(); // the view may have been resized since the blockers arrived
                 liveSnapped = false;
                 liveConstraint = liveStroke.erase || geometry == null ? null
                     : geometry.constraint(worldX(e.getX()), worldY(e.getY()));

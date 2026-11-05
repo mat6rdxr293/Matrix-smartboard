@@ -29,13 +29,16 @@ final class WetInkLayer {
         final float x0, y0, x1, y1, width;
         final int color;
         final float clipLeft, clipTop, clipRight, clipBottom;
+        /** Screen-pixel rects of UI over the board (left, top, right, bottom, ...), never drawn on. */
+        final float[] cutouts;
         final long eventTime;
 
         Segment(float x0, float y0, float x1, float y1, float width, int color,
-                float clipLeft, float clipTop, float clipRight, float clipBottom, long eventTime) {
+                float clipLeft, float clipTop, float clipRight, float clipBottom, float[] cutouts, long eventTime) {
             this.x0 = x0; this.y0 = y0; this.x1 = x1; this.y1 = y1;
             this.width = width; this.color = color;
             this.clipLeft = clipLeft; this.clipTop = clipTop; this.clipRight = clipRight; this.clipBottom = clipBottom;
+            this.cutouts = cutouts;
             this.eventTime = eventTime;
         }
     }
@@ -61,6 +64,10 @@ final class WetInkLayer {
             public void onDrawFrontBufferedLayer(@NonNull Canvas canvas, int bufferWidth, int bufferHeight, @NonNull Segment s) {
                 canvas.save();
                 canvas.clipRect(s.clipLeft, s.clipTop, s.clipRight, s.clipBottom);
+                // This layer sits above the WebView, so without these cuts a stroke dragged onto the
+                // toolbar would be drawn over it until the pen lifts.
+                float[] c = s.cutouts;
+                for (int i = 0; i + 3 < c.length; i += 4) canvas.clipOutRect(c[i], c[i + 1], c[i + 2], c[i + 3]);
                 paint.setColor(s.color);
                 paint.setStrokeWidth(s.width);
                 canvas.drawLine(s.x0, s.y0, s.x1, s.y1, paint);

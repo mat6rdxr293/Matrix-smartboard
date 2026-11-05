@@ -21,28 +21,48 @@ export default function BoardToolbarPopover({
 
   useLayoutEffect(() => {
     if (!open) return;
+    let last = "";
     const update = () => {
       const anchor = anchorRef.current;
       const panel = panelRef.current;
       if (!anchor || !panel) return;
       const a = anchor.getBoundingClientRect();
       const p = panel.getBoundingClientRect();
+      // Tool artwork rises above its button when active; keep the panel clear of it too.
+      let anchorTop = a.top;
+      anchor.querySelectorAll(".board-tool-art").forEach((art) => {
+        anchorTop = Math.min(anchorTop, art.getBoundingClientRect().top);
+      });
       const gap = 8;
       const viewportGap = 8;
       let left = align === "right" ? a.right - p.width : a.left;
       left = Math.min(Math.max(viewportGap, left), Math.max(viewportGap, window.innerWidth - p.width - viewportGap));
-      let top = a.top - p.height - gap;
+      let top = anchorTop - p.height - gap;
       if (top < viewportGap) top = Math.min(window.innerHeight - p.height - viewportGap, a.bottom + gap);
-      setPosition({ left, top: Math.max(viewportGap, top), ready: true });
+      top = Math.max(viewportGap, top);
+      const key = `${Math.round(left)}:${Math.round(top)}`;
+      if (key === last) return;
+      last = key;
+      setPosition({ left, top, ready: true });
     };
     update();
-    const frame = requestAnimationFrame(update);
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    // The toolbar slides in and its icons lift, and the panel can change size, so follow them
+    // every frame while open instead of measuring once.
+    let frame = 0;
+    let stopped = false;
+    let inFrame = false;
+    const follow = () => {
+      // A scheduler that runs the callback straight away would otherwise recurse forever.
+      if (stopped || inFrame) return;
+      inFrame = true;
+      update();
+      frame = requestAnimationFrame(follow);
+      inFrame = false;
+    };
+    frame = requestAnimationFrame(follow);
     return () => {
+      stopped = true;
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
     };
   }, [align, anchorRef, open]);
 

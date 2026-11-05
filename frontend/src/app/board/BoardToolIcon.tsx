@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export type BoardToolArtwork = "pen" | "line" | "eraser" | "graph";
+export type BoardToolArtwork = "pen" | "line" | "eraser" | "graph" | "protractor" | "compass";
 
 function PenArtwork({ id }: { id: string }) {
   return (
@@ -105,14 +105,81 @@ function GraphArtwork({ id }: { id: string }) {
   );
 }
 
+function ProtractorArtwork({ id }: { id: string }) {
+  const ticks = Array.from({ length: 13 }, (_, i) => {
+    const a = Math.PI - (i * Math.PI) / 12;
+    const outer = 25;
+    const inner = i % 3 === 0 ? 19 : 21.5;
+    return `M${32 + outer * Math.cos(a)} ${50 - outer * Math.sin(a)}L${32 + inner * Math.cos(a)} ${50 - inner * Math.sin(a)}`;
+  }).join("");
+  return (
+    <>
+      <defs>
+        <linearGradient id={`${id}-plate`} x1="8" y1="22" x2="56" y2="54" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f6f9fc" />
+          <stop offset=".45" stopColor="#dce4ed" />
+          <stop offset="1" stopColor="#bac6d3" />
+        </linearGradient>
+        <linearGradient id={`${id}-base`} x1="6" y1="50" x2="58" y2="56" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#c8d3df" />
+          <stop offset="1" stopColor="#94a3b3" />
+        </linearGradient>
+      </defs>
+      {/* Stood on its straight edge, so it is as tall as the ruler and fits the same slot. */}
+      <g transform="translate(8 0) rotate(90 32 32)">
+        <path d="M5.5 50a26.5 26.5 0 0 1 53 0v3.2c0 1.5-1.2 2.8-2.8 2.8H8.3c-1.5 0-2.8-1.3-2.8-2.8V50Z" fill={`url(#${id}-plate)`} />
+        <path d="M5.5 50h53v3.2c0 1.5-1.2 2.8-2.8 2.8H8.3c-1.5 0-2.8-1.3-2.8-2.8V50Z" fill={`url(#${id}-base)`} opacity=".85" />
+        <path d="M22.5 50a9.5 9.5 0 0 1 19 0Z" fill="#9fadbc" opacity=".55" />
+        <path d={ticks} stroke="#5c6978" strokeWidth="1.8" strokeLinecap="round" opacity=".88" />
+        <path d="M32 50v-5" stroke="#5c6978" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M11.5 44.5a21 21 0 0 1 13-17" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" opacity=".6" />
+      </g>
+    </>
+  );
+}
+
+function CompassArtwork({ id }: { id: string }) {
+  return (
+    <>
+      <defs>
+        <linearGradient id={`${id}-leg`} x1="18" y1="12" x2="46" y2="58" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f8fafc" />
+          <stop offset=".48" stopColor="#c2cbd5" />
+          <stop offset="1" stopColor="#8f9cab" />
+        </linearGradient>
+        <linearGradient id={`${id}-knob`} x1="26" y1="2" x2="38" y2="16" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#ffffff" />
+          <stop offset="1" stopColor="#b9c3ce" />
+        </linearGradient>
+      </defs>
+      <g>
+        <rect x="29" y="2.5" width="6" height="7" rx="2" fill={`url(#${id}-knob)`} />
+        {/* Needle leg on the left, pencil leg on the right, hinged at the top. */}
+        <path d="M28.2 13.5 17.5 54.5l2.6.8 11.2-40.4-3.1-1.4Z" fill={`url(#${id}-leg)`} />
+        <path d="M18.2 54.6 17 60.5l3.8-5.2-2.6-.7Z" fill="#23272d" />
+        <path d="M35.8 13.5 44.6 47l-3 .9-8.6-33 2.8-1.4Z" fill={`url(#${id}-leg)`} />
+        <path d="M40.9 46.4h5.8l-.2 4.6h-5.4l-.2-4.6Z" fill="#e8edf2" />
+        <path d="M41.2 51h5.1l-2.5 8.5L41.2 51Z" fill="#23272d" />
+        <path d="M43.2 56.3h1.2l-.6 3.2-.6-3.2Z" fill="#050607" />
+        <path d="M23.5 34.5h17" stroke="#94a3b3" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="32" cy="13.5" r="6" fill={`url(#${id}-knob)`} />
+        <circle cx="32" cy="13.5" r="2.2" fill="#5c6978" opacity=".85" />
+        <path d="M28.6 11.2c.9-1.3 2.2-2 3.8-2" stroke="#ffffff" strokeWidth="1.4" strokeLinecap="round" opacity=".9" />
+      </g>
+    </>
+  );
+}
+
 const artwork: Record<BoardToolArtwork, (props: { id: string }) => ReactNode> = {
   pen: PenArtwork,
   line: RulerArtwork,
   eraser: EraserArtwork,
   graph: GraphArtwork,
+  protractor: ProtractorArtwork,
+  compass: CompassArtwork,
 };
 
-export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtwork; className?: string }) {
+export default function BoardToolIcon({ tool, className, size = 64 }: { tool: BoardToolArtwork; className?: string; size?: number }) {
   const gradientId = `board-tool-${tool}-${useId().replace(/:/g, "")}`;
   const Artwork = artwork[tool];
 
@@ -120,7 +187,8 @@ export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtw
     <span
       aria-hidden="true"
       data-tool-artwork={tool}
-      className={cn("board-tool-art pointer-events-none inline-flex h-16 w-16 shrink-0", className)}
+      className={cn("board-tool-art pointer-events-none inline-flex shrink-0", size === 64 && "h-16 w-16", className)}
+      style={size === 64 ? undefined : { width: size, height: size }}
     >
       <svg
         viewBox="0 0 64 64"
@@ -128,7 +196,9 @@ export default function BoardToolIcon({ tool, className }: { tool: BoardToolArtw
         aria-hidden="true"
         focusable="false"
         data-testid={`board-tool-icon-${tool}`}
-        className="h-16 w-16"
+        className={size === 64 ? "h-16 w-16" : undefined}
+        width={size}
+        height={size}
       >
         <Artwork id={gradientId} />
       </svg>

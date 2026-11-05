@@ -211,7 +211,7 @@ it("renders toolbar settings outside the horizontally scrolling toolbar", () => 
 
   const cases: Array<[RegExp, string]> = [
     [/ручка|қалам/i, "pen"],
-    [/линия|сызық/i, "line"],
+    [/^линейка$|^сызғыш$/i, "geometry"],
     [/ластик|өшіргіш/i, "eraser"],
     [/^доска$|^тақта$/i, "board"],
     [/очистить доску|тақтаны тазарту/i, "clear"],
@@ -241,7 +241,7 @@ it("uses the two-level toolbar shell and local artwork for the drawing tools", (
 
 it("shows large icon-only controls without visible tool captions", () => {
   mount();
-  const namedButtons = ["Панели", "Ручка", "Линия", "График", "Перемещение", "Лок", "Ластик", "Доска", "Снимок"];
+  const namedButtons = ["Панели", "Ручка", "Линейка", "График", "Перемещение", "Лок", "Ластик", "Доска", "Снимок"];
 
   for (const name of namedButtons) {
     const button = screen.getByRole("button", { name });
@@ -249,7 +249,7 @@ it("shows large icon-only controls without visible tool captions", () => {
     expect(button).toHaveAttribute("title", name);
   }
   expect(screen.getByRole("button", { name: "Ручка" })).toHaveClass("board-tool-button", "board-tool-embedded", "board-tool-unframed");
-  expect(screen.getByRole("button", { name: "Линия" })).toHaveClass("board-tool-embedded");
+  expect(screen.getByRole("button", { name: "Линейка" })).toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "Ластик" })).toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "График" })).not.toHaveClass("board-tool-embedded");
   expect(screen.getByRole("button", { name: "Панели" })).toHaveClass("board-utility-button");

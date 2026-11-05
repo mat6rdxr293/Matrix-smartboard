@@ -565,6 +565,10 @@
     "insert_image_load_failed": "Суретті көрсету мүмкін болмады",
     "delete_image": "Суретті алып тастау",
     "resize_image": "Өлшем: оңға немесе солға тартыңыз",
+    "image_layer_up": "Қабатты жоғары",
+    "image_layer_down": "Қабатты төмен",
+    "graph_layer_up": "Қабатты жоғары",
+    "graph_layer_down": "Қабатты төмен",
     "board_loading": "Тақта жүктелуде…",
     "board_loading_images": "Суреттер жүктелуде…"
   },

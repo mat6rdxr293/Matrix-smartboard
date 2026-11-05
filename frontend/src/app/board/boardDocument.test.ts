@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyBoardOperation, createBoardHistory, replayBoardOperations, type GraphElement } from "./boardDocument";
+import { applyBoardOperation, createBoardHistory, boardStack, liftedImageIds, newPictureLayer, replayBoardOperations, restackOnBoard, topLayer, type BoardImage, type GraphElement } from "./boardDocument";
 import type { BoardReplayOp } from "./replayApi";
 
 const graph = (id = "g1"): GraphElement => ({
@@ -194,5 +194,53 @@ describe("board images", () => {
   it("loads documents saved before images existed", () => {
     const state = createBoardHistory({ strokes: [], graphs: [], solutions: [] });
     expect(state.document.images).toEqual([]);
+  });
+});
+
+describe("picture and graph stacking", () => {
+  const picture = (id: string, z?: number): BoardImage => ({ id, src: `/api/media/${id}.png`, x: 0, y: 0, width: 100, height: 100, z });
+  const chart = (id: string, z?: number): GraphElement => ({ ...graph(id), z });
+  const order = (images: BoardImage[], graphs: GraphElement[]) => boardStack(images, graphs).map((entry) => entry.item.id);
+  const restack = (images: BoardImage[], graphs: GraphElement[], id: string, direction: 1 | -1) => {
+    const moved = restackOnBoard(images, graphs, id, direction);
+    if (!moved) return { images, graphs };
+    return moved.kind === "image"
+      ? { images: images.map((item) => (item.id === id ? moved.item : item)), graphs }
+      : { images, graphs: graphs.map((item) => (item.id === id ? moved.item : item)) };
+  };
+
+  it("keeps old boards as they were: pictures in the order added, graphs above them", () => {
+    expect(order([picture("a"), picture("b")], [chart("g")])).toEqual(["a", "b", "g"]);
+    expect(liftedImageIds(boardStack([picture("a")], [chart("g")])).size).toBe(0);
+  });
+
+  it("raises a picture over a graph and lowers it back", () => {
+    const up = restack([picture("a")], [chart("g")], "a", 1);
+    expect(order(up.images, up.graphs)).toEqual(["g", "a"]);
+    expect([...liftedImageIds(boardStack(up.images, up.graphs))]).toEqual(["a"]);
+    const down = restack(up.images, up.graphs, "a", -1);
+    expect(order(down.images, down.graphs)).toEqual(["a", "g"]);
+  });
+
+  it("moves a graph under a picture", () => {
+    const down = restack([picture("a")], [chart("g")], "g", -1);
+    expect(order(down.images, down.graphs)).toEqual(["g", "a"]);
+  });
+
+  it("moves one place at a time and stops at the ends", () => {
+    const start = { images: [picture("a"), picture("b"), picture("c")], graphs: [] as GraphElement[] };
+    const once = restack(start.images, start.graphs, "a", 1);
+    expect(order(once.images, once.graphs)).toEqual(["b", "a", "c"]);
+    expect(restackOnBoard(start.images, [], "c", 1)).toBeNull();
+    expect(restackOnBoard(start.images, [], "a", -1)).toBeNull();
+  });
+
+  it("puts a new picture under the graphs and a new graph on top", () => {
+    const images = [picture("a"), picture("b")];
+    const graphs = [chart("g")];
+    const z = newPictureLayer(images, graphs);
+    expect(order([...images, picture("n", z)], graphs)).toEqual(["a", "b", "n", "g"]);
+    expect(topLayer(images, graphs)).toBe(1001);
+    expect(newPictureLayer([], [])).toBe(0);
   });
 });

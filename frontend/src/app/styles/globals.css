@@ -240,6 +240,13 @@ textarea,
   --embedded-scale-y: 1.16;
 }
 
+.board-tool-button.board-tool-embedded [data-tool-artwork="protractor"],
+.board-tool-button.board-tool-embedded [data-tool-artwork="compass"] {
+  --embedded-y: 14.8px;
+  --embedded-scale-x: 1.04;
+  --embedded-scale-y: 1.16;
+}
+
 .board-tool-button.board-tool-embedded [data-tool-artwork="eraser"] {
   --embedded-y: 9px;
   --embedded-scale-x: 1.08;

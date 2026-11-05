@@ -565,6 +565,10 @@
     "insert_image_load_failed": "Не удалось показать картинку",
     "delete_image": "Убрать картинку",
     "resize_image": "Размер: тяните вправо или влево",
+    "image_layer_up": "Выше слоем",
+    "image_layer_down": "Ниже слоем",
+    "graph_layer_up": "Выше слоем",
+    "graph_layer_down": "Ниже слоем",
     "board_loading": "Загружаю доску…",
     "board_loading_images": "Загружаю картинки…"
   },

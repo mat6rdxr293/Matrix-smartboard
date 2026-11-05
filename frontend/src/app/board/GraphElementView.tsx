@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Minus, MoveDiagonal2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { BringToFront, ChevronDown, ChevronUp, Minus, MoveDiagonal2, Plus, RotateCcw, SendToBack, Trash2 } from "lucide-react";
 import { useI18n } from "@/i18n";
 import type { GraphElement } from "./boardDocument";
 import { buildGraphPathSegments, segmentsToSvgPath } from "./graphPlot";
@@ -21,6 +21,10 @@ type Props = {
   onSelect: () => void;
   onPreview: (graph: GraphElement) => void;
   onCommit: (before: GraphElement, after: GraphElement) => void;
+  /** Moves the graph one place up (1) or down (-1) among the graphs. */
+  onRestack?: (graph: GraphElement, direction: 1 | -1) => void;
+  /** Place in the stack among graphs, bottom first. */
+  layer?: number;
   onDelete: (graph: GraphElement) => void;
   interactionDisabled?: boolean;
 };
@@ -28,7 +32,7 @@ type Props = {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 export default function GraphElementView(props: Props) {
-  const { graph, selected, backgroundColor, isDarkBackground, zoom, visibleWorld, onSelect, onPreview, onCommit, onDelete, interactionDisabled = false } = props;
+  const { graph, selected, backgroundColor, isDarkBackground, zoom, visibleWorld, onSelect, onPreview, onCommit, onDelete, onRestack, layer = 0, interactionDisabled = false } = props;
   const { tl } = useI18n();
   const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [editingLabel, setEditingLabel] = useState<"x" | "y" | null>(null);
@@ -533,7 +537,8 @@ export default function GraphElementView(props: Props) {
         top: 0,
         width: graph.width,
         height: graph.height,
-        zIndex: selected ? 30 : 10,
+        // Stacked by layer, not lifted when picked, so "lower" shows straight away.
+        zIndex: 10 + Math.min(layer, 50),
         transform: `translate3d(${graph.x}px, ${graph.y}px, 0)`,
         willChange: "transform",
         backfaceVisibility: "hidden",
@@ -715,7 +720,9 @@ export default function GraphElementView(props: Props) {
       {selected && (
         <div
           className="absolute left-0 top-0 flex w-full items-center justify-between rounded-t-lg border-b border-white/15 bg-ink px-1"
-          style={{ height: controlSize }}
+          // Without touch-action a finger drag here turns into a scroll after a millimetre and the
+          // browser cancels the drag.
+          style={{ height: controlSize, touchAction: "none" }}
           onPointerDown={startDrag}
           onPointerMove={moveDrag}
           onPointerUp={endDrag}
@@ -724,6 +731,12 @@ export default function GraphElementView(props: Props) {
         >
           <span className="px-2 text-[10px] font-semibold text-frost/70">{tl("graph")}</span>
           <div className="flex items-center gap-1" onPointerDown={(event) => event.stopPropagation()}>
+            {onRestack && ([[1, tl("graph_layer_up"), BringToFront], [-1, tl("graph_layer_down"), SendToBack]] as const).map(([direction, label, Icon]) => (
+              <button key={direction} type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-graphite"
+                style={{ width: controlSize, height: controlSize }} onClick={() => onRestack(graph, direction)} aria-label={label} title={label}>
+                <Icon size={14} />
+              </button>
+            ))}
             <button data-testid="graph-zoom-in" type="button" className="flex items-center justify-center rounded-md border border-white/15 bg-graphite" style={{ width: controlSize, height: controlSize }} onClick={() => commitZoom(0.5)} aria-label="Приблизить график">
               <Plus size={14} />
             </button>
@@ -777,7 +790,7 @@ export default function GraphElementView(props: Props) {
         <button
           type="button"
           className="absolute bottom-0 right-0 flex cursor-nwse-resize items-center justify-center rounded-tl-md border border-white/20 bg-ink"
-          style={{ width: controlSize, height: controlSize }}
+          style={{ width: controlSize, height: controlSize, touchAction: "none" }}
           onPointerDown={startResize}
           onPointerMove={moveResize}
           onPointerUp={endResize}

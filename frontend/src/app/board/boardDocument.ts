@@ -20,6 +20,8 @@ export type GraphElement = {
   yMin: number;
   yMax: number;
   expressions: GraphExpression[];
+  /** Stacking among graphs: higher is on top. */
+  z?: number;
 };
 
 export type AiSolutionStep = {
@@ -49,7 +51,82 @@ export type BoardImage = {
   width: number;
   height: number;
   label?: string;
+  /** Stacking among pictures: higher is on top. Pictures without one stack in the order they were added. */
+  z?: number;
 };
+
+/**
+ * Pictures and graphs share one stack, so a picture can be raised over a graph and back.
+ * Items saved before stacking existed have no `z`: pictures then keep the order they were
+ * added in, and graphs sit above every picture, as they always did.
+ */
+export type StackEntry =
+  | { kind: "image"; item: BoardImage; layer: number }
+  | { kind: "graph"; item: GraphElement; layer: number };
+
+const GRAPH_DEFAULT_LAYER = 1000;
+
+/** Everything in the stack, bottom to top. */
+export function boardStack(images: BoardImage[], graphs: GraphElement[]): StackEntry[] {
+  const entries: (StackEntry & { order: number })[] = [
+    ...images.map((item, index) => ({ kind: "image" as const, item, layer: item.z ?? index, order: index })),
+    ...graphs.map((item, index) => ({ kind: "graph" as const, item, layer: item.z ?? GRAPH_DEFAULT_LAYER + index, order: images.length + index })),
+  ];
+  return entries.sort((a, b) => a.layer - b.layer || a.order - b.order).map(({ order: _order, ...entry }) => entry as StackEntry);
+}
+
+/**
+ * Pictures with a graph under them. They are drawn among the graphs, over the ink like the graphs
+ * are; the others stay under the ink so writing on them shows.
+ */
+export function liftedImageIds(stack: StackEntry[]): Set<string> {
+  const lifted = new Set<string>();
+  let graphBelow = false;
+  for (const entry of stack) {
+    if (entry.kind === "graph") graphBelow = true;
+    else if (graphBelow) lifted.add(entry.item.id);
+  }
+  return lifted;
+}
+
+/** Pictures bottom to top. */
+export const imagesInLayerOrder = (images: BoardImage[], graphs: GraphElement[] = []) =>
+  boardStack(images, graphs).flatMap((entry) => (entry.kind === "image" ? [entry.item] : []));
+
+/** A layer above everything: where a new graph goes. */
+export const topLayer = (images: BoardImage[], graphs: GraphElement[]) => {
+  const stack = boardStack(images, graphs);
+  return stack.length ? stack[stack.length - 1].layer + 1 : 0;
+};
+
+/** Where a new picture goes: above the other pictures but under every graph, so it stays under the ink. */
+export function newPictureLayer(images: BoardImage[], graphs: GraphElement[]): number {
+  const stack = boardStack(images, graphs);
+  const firstGraph = stack.findIndex((entry) => entry.kind === "graph");
+  if (firstGraph < 0) return stack.length ? stack[stack.length - 1].layer + 1 : 0;
+  const graphLayer = stack[firstGraph].layer;
+  const below = firstGraph > 0 ? stack[firstGraph - 1].layer : graphLayer - 2;
+  return below + 1 < graphLayer ? below + 1 : (below + graphLayer) / 2;
+}
+
+/**
+ * The picture or graph moved one place up (`1`) or down (`-1`) the shared stack, past its
+ * neighbour only; null when it is already at that end.
+ */
+export function restackOnBoard(images: BoardImage[], graphs: GraphElement[], id: string, direction: 1 | -1): StackEntry | null {
+  const stack = boardStack(images, graphs);
+  const at = stack.findIndex((entry) => entry.item.id === id);
+  const neighbour = stack[at + direction];
+  if (at < 0 || !neighbour) return null;
+  const beyond = stack[at + direction * 2];
+  let z = beyond ? (neighbour.layer + beyond.layer) / 2 : neighbour.layer + direction;
+  // Equal layers fall back to insertion order, so step just past the neighbour instead.
+  if (z === neighbour.layer) z = neighbour.layer + direction * 0.001;
+  const entry = stack[at];
+  return entry.kind === "image"
+    ? { kind: "image", item: { ...entry.item, z }, layer: z }
+    : { kind: "graph", item: { ...entry.item, z }, layer: z };
+}
 
 export type BoardDocument = {
   strokes: Stroke[];
