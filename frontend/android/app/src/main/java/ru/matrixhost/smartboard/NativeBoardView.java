@@ -203,18 +203,20 @@ public final class NativeBoardView extends View {
     private int documentRevision = -1;
 
     /**
-     * The board is drawn into its own surface at most this many pixels on the long side; the
-     * display's scaler stretches it to the panel for free. A 4K board on a weak GPU otherwise
+     * The board is drawn into its own surface at most this many pixels on the long side (2560x1440
+     * on a 4K panel); the display's scaler stretches it to the panel for free. A 4K board on a weak GPU otherwise
      * spends every frame filling eight million pixels, and the WebView's own repaints (a clock
      * tick) no longer redraw the board underneath them.
      */
-    private static final int MAX_RENDER_SIDE = 1920;
+    private static final int MAX_RENDER_SIDE = 2560;
     private SurfaceView surface;
     private boolean surfaceReady;
     private boolean frameScheduled;
     /** Surface pixels per view pixel; 1 when the board draws straight into this view. */
     private float renderRatio = 1f;
     private final Runnable renderFrame = this::renderSurface;
+    /** Canvas pixels per board unit for the strokes being drawn now. */
+    private float pixelsPerUnit = 1f;
 
     private WetInkLayer wetInk;
     private boolean liveIsWet;
@@ -842,6 +844,7 @@ public final class NativeBoardView extends View {
     private void drawIntoCache(Stroke stroke) {
         int save = inkCanvas.save();
         applyInkTransform(inkCanvas, cachedScaleX, cachedScaleY);
+        pixelsPerUnit = cachedScaleX * zoom;
         drawStroke(inkCanvas, stroke);
         inkCanvas.restoreToCount(save);
     }
@@ -875,6 +878,7 @@ public final class NativeBoardView extends View {
     }
 
     private void drawInk(Canvas canvas, float sx, float sy) {
+        pixelsPerUnit = sx * zoom;
         boolean cached = ensureInkBitmap(Math.round(board.width()), Math.round(board.height()));
         if (!cached) {
             // Clear-mode strokes erase ink on this off-screen layer, not the board background.
@@ -966,13 +970,15 @@ public final class NativeBoardView extends View {
         if (stroke.size == 0) return;
         Paint p = stroke.erase ? clearPaint : paint;
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(stroke.width);
+        // A line thinner than a canvas pixel is drawn faint, and the scaler fades it further.
+        float width = stroke.erase ? stroke.width : Math.max(stroke.width, 1f / Math.max(1e-3f, pixelsPerUnit));
+        p.setStrokeWidth(width);
         p.setStrokeJoin(Paint.Join.ROUND);
         p.setStrokeCap(Paint.Cap.ROUND);
         if (!stroke.erase) { p.setXfermode(null); p.setColor(stroke.color); }
         if (stroke.size == 1) {
             p.setStyle(Paint.Style.FILL);
-            canvas.drawCircle(stroke.xy[0], stroke.xy[1], Math.max(0.5f, stroke.width/2f), p);
+            canvas.drawCircle(stroke.xy[0], stroke.xy[1], Math.max(0.5f, width/2f), p);
         } else canvas.drawPath(stroke.path, p);
     }
 }
