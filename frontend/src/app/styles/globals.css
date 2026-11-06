@@ -448,6 +448,13 @@ body.lite-mode .backdrop-blur-md {
   -webkit-backdrop-filter: none !important;
 }
 
+body.native-app *,
+body.native-app *::before,
+body.native-app *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 body.lite-mode .thinking-shimmer {
   animation-duration: 4.2s;
 }
