@@ -22,7 +22,7 @@ import { getBoardProfileConfig, type BoardProfile } from "@/app/board/boardProfi
 import { backendAssetUrl, isNativeApp } from "@/lib/apiClient";
 import { SHAPE_HOLD_MS, SHAPE_HOLD_TOLERANCE, recognizeShape } from "./shapeRecognition";
 import { pageCount, pageInView, panForPage, strokesOnPage } from "./pages";
-import { applyConstraint, constraintForStroke, createGeometryTool, type GeometryTool, type StrokeConstraint } from "./geometry";
+import { applyConstraint, constrainedPoints, constraintForStroke, createGeometryTool, type GeometryTool, type StrokeConstraint } from "./geometry";
 import GeometryOverlay from "./GeometryOverlay";
 import {
   NATIVE_HEALTHY_AFTER_MS,
@@ -1106,8 +1106,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (!last) return;
     if (shapeHoldRef.current?.stroke === last && shapeHoldRef.current.snapped) return;
     const constraint = strokeConstraintRef.current;
-    if (constraint) points = points.map((point) => applyConstraint(constraint, point));
     const startPoint = last.points[last.points.length - 1];
+    if (constraint) {
+      let from = startPoint ?? null;
+      points = points.flatMap((point) => {
+        const added = constrainedPoints(constraint, from, point);
+        if (added.length) from = added[added.length - 1];
+        return added;
+      });
+    }
     let prev = startPoint;
     const appended: { x: number; y: number }[] = [];
     for (const point of points) {

@@ -4,6 +4,7 @@ import {
   RULER_LENGTH,
   RULER_WIDTH,
   applyConstraint,
+  constrainedPoints,
   constraintForStroke,
   createGeometryTool,
   hitsGeometryTool,
@@ -65,5 +66,22 @@ describe("geometry tools", () => {
   it("settles rotations near multiples of 15 degrees", () => {
     expect(snapAngle((44 * Math.PI) / 180)).toBeCloseTo(Math.PI / 4);
     expect(snapAngle((40 * Math.PI) / 180)).toBeCloseTo((40 * Math.PI) / 180);
+  });
+
+  it("keeps a compass stroke on the arc when the pen slips towards the centre", () => {
+    const c = { kind: "circle" as const, cx: 0, cy: 0, r: 100 };
+    // The pen jumps from 0° to 120° (it slid past the centre): the gap is filled along the arc.
+    const added = constrainedPoints(c, { x: 100, y: 0 }, { x: -30, y: 52 });
+    expect(added.length).toBeGreaterThan(30);
+    let prev = { x: 100, y: 0 };
+    for (const p of added) {
+      expect(Math.hypot(p.x, p.y)).toBeCloseTo(100);
+      expect(Math.hypot(p.x - prev.x, p.y - prev.y)).toBeLessThan(6);
+      prev = p;
+    }
+    // Right at the centre the angle means nothing, so nothing is drawn.
+    expect(constrainedPoints(c, { x: 100, y: 0 }, { x: 3, y: -2 })).toEqual([]);
+    // Ruler strokes are projected as before.
+    expect(constrainedPoints({ kind: "line", ax: 0, ay: 0, bx: 10, by: 0 }, null, { x: 5, y: 7 })).toEqual([{ x: 5, y: 0 }]);
   });
 });

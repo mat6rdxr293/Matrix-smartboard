@@ -453,9 +453,37 @@ public final class NativeBoardView extends View {
         pointTo(liveStroke, liveConstraint, x, y);
     }
 
+    /** Closer to the compass centre than this share of the radius, the pen's angle means nothing. */
+    private static final float CIRCLE_DEAD_ZONE = 0.25f;
+    /** Longest arc step of a compass stroke, so a jump in angle never draws a chord. */
+    private static final double ARC_STEP = Math.toRadians(3);
+
     private void pointTo(Stroke stroke, float[] constraint, float x, float y) {
         if (stroke == null) return;
         float wx = worldX(x), wy = worldY(y);
+        if (constraint != null && constraint[0] == 1) {
+            // Mirrors constrainedPoints() in geometry.ts: fill the gap along the arc, the short way.
+            float cx = constraint[1], cy = constraint[2], r = constraint[3];
+            if (Math.hypot(wx - cx, wy - cy) < r * CIRCLE_DEAD_ZONE) return;
+            double to = Math.atan2(wy - cy, wx - cx);
+            if (stroke.size == 0) {
+                stroke.point((float) (cx + Math.cos(to) * r), (float) (cy + Math.sin(to) * r));
+                return;
+            }
+            double start = Math.atan2(stroke.xy[stroke.size*2-1] - cy, stroke.xy[stroke.size*2-2] - cx);
+            double delta = to - start;
+            while (delta > Math.PI) delta -= 2 * Math.PI;
+            while (delta <= -Math.PI) delta += 2 * Math.PI;
+            int steps = Math.max(1, (int) Math.ceil(Math.abs(delta) / ARC_STEP));
+            for (int i = 1; i <= steps && stroke.size < 4000; i++) {
+                double angle = start + delta * i / steps;
+                float px = (float) (cx + Math.cos(angle) * r), py = (float) (cy + Math.sin(angle) * r);
+                float dx = stroke.xy[stroke.size*2-2]-px, dy = stroke.xy[stroke.size*2-1]-py;
+                if (dx*dx+dy*dy < 0.35f) continue;
+                stroke.point(px, py);
+            }
+            return;
+        }
         if (constraint != null) {
             float[] snapped = Geometry.apply(constraint, wx, wy);
             wx = snapped[0];

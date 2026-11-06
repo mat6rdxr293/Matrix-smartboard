@@ -93,6 +93,34 @@ export function applyConstraint(constraint: StrokeConstraint, p: Point): Point {
   return { x: constraint.ax + t * dx, y: constraint.ay + t * dy };
 }
 
+/** Points closer to the compass centre than this share of the radius say nothing about the angle. */
+const CIRCLE_DEAD_ZONE = 0.25;
+/** Longest arc step between two points of a compass stroke, so arcs never turn into chords. */
+const ARC_STEP = (3 * Math.PI) / 180;
+
+/**
+ * Points to add to a constrained stroke whose last point is `from` when the pen reaches `raw`.
+ * On a compass the pen's angle can jump when it slips towards the centre; joining the two
+ * projections straight would cut a chord across the circle, so the gap is filled along the arc
+ * the short way round. A pen right at the centre adds nothing.
+ */
+export function constrainedPoints(constraint: StrokeConstraint, from: Point | null, raw: Point): Point[] {
+  if (constraint.kind !== "circle") return [applyConstraint(constraint, raw)];
+  const { cx, cy, r } = constraint;
+  if (Math.hypot(raw.x - cx, raw.y - cy) < r * CIRCLE_DEAD_ZONE) return [];
+  const to = Math.atan2(raw.y - cy, raw.x - cx);
+  if (!from) return [{ x: cx + Math.cos(to) * r, y: cy + Math.sin(to) * r }];
+  const start = Math.atan2(from.y - cy, from.x - cx);
+  let delta = to - start;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta <= -Math.PI) delta += 2 * Math.PI;
+  const steps = Math.max(1, Math.ceil(Math.abs(delta) / ARC_STEP));
+  return Array.from({ length: steps }, (_, i) => {
+    const angle = start + (delta * (i + 1)) / steps;
+    return { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r };
+  });
+}
+
 /** Rotations within this many degrees of a multiple of 15° settle on it. */
 export const snapAngle = (angle: number) => {
   const step = Math.PI / 12;
