@@ -208,7 +208,8 @@ public final class NativeBoardView extends View {
      * spends every frame filling eight million pixels, and the WebView's own repaints (a clock
      * tick) no longer redraw the board underneath them.
      */
-    private static final int MAX_RENDER_SIDE = 2560;
+    static final int DEFAULT_MAX_RENDER_SIDE = 2560;
+    private int maxRenderSide = DEFAULT_MAX_RENDER_SIDE;
     private SurfaceView surface;
     private boolean surfaceReady;
     private boolean frameScheduled;
@@ -250,6 +251,12 @@ public final class NativeBoardView extends View {
      * Moves drawing into a surface below the window (API 26+ for a hardware canvas). Returns the
      * surface to add under this view, or null to keep drawing in the view itself.
      */
+    /** `am start ... --ei boardMaxSide 3840` draws the board at full 4K to compare on a device. */
+    public void setMaxRenderSide(int side) {
+        maxRenderSide = side > 0 ? side : DEFAULT_MAX_RENDER_SIDE;
+        applyRenderSize();
+    }
+
     public SurfaceView createSurface() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || surface != null) return surface;
         surface = new SurfaceView(getContext());
@@ -272,7 +279,7 @@ public final class NativeBoardView extends View {
 
     private void applyRenderSize() {
         if (surface == null || getWidth() <= 0 || getHeight() <= 0) return;
-        renderRatio = Math.min(1f, MAX_RENDER_SIDE / (float) Math.max(getWidth(), getHeight()));
+        renderRatio = Math.min(1f, maxRenderSide / (float) Math.max(getWidth(), getHeight()));
         surface.getHolder().setFixedSize(Math.max(1, Math.round(getWidth() * renderRatio)), Math.max(1, Math.round(getHeight() * renderRatio)));
         inkDirty = true;
     }

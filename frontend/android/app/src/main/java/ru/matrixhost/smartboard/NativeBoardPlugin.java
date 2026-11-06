@@ -97,6 +97,7 @@ public class NativeBoardPlugin extends Plugin {
                             notifyListeners("strokeHold", data);
                         }
                     });
+                    view.setMaxRenderSide(getActivity().getIntent().getIntExtra("boardMaxSide", NativeBoardView.DEFAULT_MAX_RENDER_SIDE));
                     android.view.SurfaceView boardSurface = view.createSurface();
                     if (boardSurface != null) {
                         // Under the window: the transparent WebView shows it through, and the
