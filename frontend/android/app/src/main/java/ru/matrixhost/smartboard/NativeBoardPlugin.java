@@ -97,6 +97,13 @@ public class NativeBoardPlugin extends Plugin {
                             notifyListeners("strokeHold", data);
                         }
                     });
+                    android.view.SurfaceView boardSurface = view.createSurface();
+                    if (boardSurface != null) {
+                        // Under the window: the transparent WebView shows it through, and the
+                        // board view above it only takes touches.
+                        parent.addView(boardSurface, parent.indexOfChild(web),
+                            new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    }
                     parent.addView(view, parent.indexOfChild(web),
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                     WetInkLayer wetInk = createWetInk();

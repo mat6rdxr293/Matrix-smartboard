@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
@@ -14,7 +15,11 @@ import android.util.Base64;
 import android.util.Log;
 import android.view.Choreographer;
 import android.view.MotionEvent;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
+
+import androidx.annotation.NonNull;
 
 import com.getcapacitor.JSObject;
 
@@ -197,6 +202,20 @@ public final class NativeBoardView extends View {
     private float cachedZoom, cachedPanX, cachedPanY, cachedScaleX, cachedScaleY;
     private int documentRevision = -1;
 
+    /**
+     * The board is drawn into its own surface at most this many pixels on the long side; the
+     * display's scaler stretches it to the panel for free. A 4K board on a weak GPU otherwise
+     * spends every frame filling eight million pixels, and the WebView's own repaints (a clock
+     * tick) no longer redraw the board underneath them.
+     */
+    private static final int MAX_RENDER_SIDE = 1920;
+    private SurfaceView surface;
+    private boolean surfaceReady;
+    private boolean frameScheduled;
+    /** Surface pixels per view pixel; 1 when the board draws straight into this view. */
+    private float renderRatio = 1f;
+    private final Runnable renderFrame = this::renderSurface;
+
     private WetInkLayer wetInk;
     private boolean liveIsWet;
     private float wetLastX, wetLastY;
@@ -224,6 +243,67 @@ public final class NativeBoardView extends View {
     }
 
     public void setListener(Listener value) { listener = value; }
+
+    /**
+     * Moves drawing into a surface below the window (API 26+ for a hardware canvas). Returns the
+     * surface to add under this view, or null to keep drawing in the view itself.
+     */
+    public SurfaceView createSurface() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || surface != null) return surface;
+        surface = new SurfaceView(getContext());
+        surface.getHolder().setFormat(PixelFormat.OPAQUE);
+        surface.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override public void surfaceCreated(@NonNull SurfaceHolder holder) { surfaceReady = true; applyRenderSize(); invalidate(); }
+            @Override public void surfaceChanged(@NonNull SurfaceHolder holder, int format, int width, int height) { surfaceReady = true; invalidate(); }
+            @Override public void surfaceDestroyed(@NonNull SurfaceHolder holder) { surfaceReady = false; }
+        });
+        surface.setVisibility(getVisibility());
+        setWillNotDraw(true);
+        applyRenderSize();
+        return surface;
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        applyRenderSize();
+    }
+
+    private void applyRenderSize() {
+        if (surface == null || getWidth() <= 0 || getHeight() <= 0) return;
+        renderRatio = Math.min(1f, MAX_RENDER_SIDE / (float) Math.max(getWidth(), getHeight()));
+        surface.getHolder().setFixedSize(Math.max(1, Math.round(getWidth() * renderRatio)), Math.max(1, Math.round(getHeight() * renderRatio)));
+        inkDirty = true;
+    }
+
+    @Override public void invalidate() {
+        if (surface == null) { super.invalidate(); return; }
+        if (frameScheduled) return;
+        frameScheduled = true;
+        postOnAnimation(renderFrame);
+    }
+
+    @Override public void postInvalidateOnAnimation() {
+        if (surface == null) super.postInvalidateOnAnimation();
+        else invalidate();
+    }
+
+    private void renderSurface() {
+        frameScheduled = false;
+        if (!surfaceReady || !active || surface == null) return;
+        SurfaceHolder holder = surface.getHolder();
+        Canvas canvas;
+        try {
+            canvas = holder.lockHardwareCanvas();
+        } catch (RuntimeException error) {
+            return; // the surface went away between the callback and this frame
+        }
+        if (canvas == null) return;
+        try {
+            render(canvas, scaleX() * renderRatio, scaleY() * renderRatio);
+        } finally {
+            holder.unlockCanvasAndPost(canvas);
+        }
+    }
 
     /** Null keeps the live stroke in this view, which is the path for API < 29 or a renderer failure. */
     public void setWetInk(WetInkLayer layer) {
@@ -257,6 +337,7 @@ public final class NativeBoardView extends View {
         dropExtraPens();
         pinching = false;
         setVisibility(value ? VISIBLE : GONE);
+        if (surface != null) surface.setVisibility(value ? VISIBLE : GONE);
         if (wetInk != null) wetInk.view().setVisibility(value ? VISIBLE : GONE);
         invalidate();
     }
@@ -745,7 +826,7 @@ public final class NativeBoardView extends View {
 
     private void commitToDocument(Stroke stroke) {
         strokes.add(stroke);
-        if (inkCanvas != null && !inkDirty && cacheMatchesView(scaleX(), scaleY())) drawIntoCache(stroke);
+        if (inkCanvas != null && !inkDirty && cacheMatchesView(scaleX() * renderRatio, scaleY() * renderRatio)) drawIntoCache(stroke);
     }
 
     private boolean cacheMatchesView(float sx, float sy) {
@@ -844,8 +925,13 @@ public final class NativeBoardView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        if (surface != null) return; // drawn into the surface instead
+        render(canvas, scaleX(), scaleY());
+    }
+
+    /** Draws the board with {@code sx}, {@code sy} canvas pixels per CSS pixel. */
+    private void render(Canvas canvas, float sx, float sy) {
         if (!active) return;
-        float sx = scaleX(), sy = scaleY();
         board.set(boardLeft*sx, boardTop*sy, (boardLeft+boardWidth)*sx, (boardTop+boardHeight)*sy);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(appBg);
