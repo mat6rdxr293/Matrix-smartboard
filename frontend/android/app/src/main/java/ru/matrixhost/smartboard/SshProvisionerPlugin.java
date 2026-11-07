@@ -192,7 +192,9 @@ public class SshProvisionerPlugin extends Plugin {
     }
 
     private static String windowsInstallCommand(String serverUrl, int backendPort, boolean installLocalAi, String serverName) {
+        // UTF-8 out, as the app reads it: the console code page garbles Russian Windows messages.
         String script = "$ErrorActionPreference='Stop'; "
+            + "try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}; "
             + "$env:MATRIX_PORT=" + powershellQuote(Integer.toString(backendPort)) + "; "
             + "$env:MATRIX_PUBLIC_BASE_URL=" + powershellQuote(serverUrl) + "; "
             + "$env:MATRIX_INSTALL_OLLAMA=" + powershellQuote(installLocalAi ? "1" : "0") + "; "

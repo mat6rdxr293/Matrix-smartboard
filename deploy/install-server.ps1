@@ -2,6 +2,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# The board reads this output as UTF-8; the console default (an OEM code page) garbles Russian
+# error messages from Windows.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+$OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 $RepoZipUrl = "https://github.com/mat6rdxr293/Matrix-smartboard/archive/refs/heads/main.zip"
 $RootDir = Join-Path $env:ProgramData "MatrixSmartboard"
@@ -78,36 +82,60 @@ function Say([string]$Text) {
 function Format-MB([double]$Bytes) { return "{0:N0} MB" -f ($Bytes / 1MB) }
 
 # Downloads with a line of progress every few seconds, so a long download over SSH is visibly alive.
+# A dropped connection is resumed where it stopped (HTTP Range), up to a few times.
 function Get-FileWithProgress([string]$Url, [string]$Path, [string]$Label) {
     Add-Type -AssemblyName System.Net.Http
-    $client = New-Object System.Net.Http.HttpClient
-    $client.Timeout = [TimeSpan]::FromMinutes(90)
-    try {
-        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-        if (-not $response.IsSuccessStatusCode) { throw "$Label download failed: HTTP $([int]$response.StatusCode)" }
-        $total = $response.Content.Headers.ContentLength
-        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-        $output = [IO.File]::Create($Path)
+    Remove-Item -Force $Path -ErrorAction SilentlyContinue
+    $done = [long]0
+    $total = $null
+    $attempts = 8
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromMinutes(90)
         try {
-            $buffer = New-Object byte[] 1048576
-            $done = 0
-            $tick = [Diagnostics.Stopwatch]::StartNew()
-            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                $output.Write($buffer, 0, $read)
-                $done += $read
-                if ($tick.Elapsed.TotalSeconds -ge 5) {
-                    $tick.Restart()
-                    if ($total) { Say "Downloading ${Label}: $(Format-MB $done) of $(Format-MB $total) ($([int](100 * $done / $total))%)" }
-                    else { Say "Downloading ${Label}: $(Format-MB $done)" }
-                }
+            $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $Url)
+            if ($done -gt 0) { $request.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue($done, $null) }
+            $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            if (-not $response.IsSuccessStatusCode) { throw "HTTP $([int]$response.StatusCode)" }
+            if ($done -gt 0 -and [int]$response.StatusCode -ne 206) {
+                # The server ignored the range: start over.
+                Say "Server cannot resume ${Label}; starting the download again"
+                $done = [long]0
+                Remove-Item -Force $Path -ErrorAction SilentlyContinue
             }
+            if (-not $total) {
+                $length = $response.Content.Headers.ContentLength
+                if ($length) { $total = $done + $length }
+            }
+            $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+            if ($stream.CanTimeout) { $stream.ReadTimeout = 60000 }
+            $output = New-Object IO.FileStream($Path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
+            try {
+                $buffer = New-Object byte[] 1048576
+                $tick = [Diagnostics.Stopwatch]::StartNew()
+                while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $output.Write($buffer, 0, $read)
+                    $done += $read
+                    if ($tick.Elapsed.TotalSeconds -ge 5) {
+                        $tick.Restart()
+                        if ($total) { Say "Downloading ${Label}: $(Format-MB $done) of $(Format-MB $total) ($([int](100 * $done / $total))%)" }
+                        else { Say "Downloading ${Label}: $(Format-MB $done)" }
+                    }
+                }
+            } finally {
+                $output.Dispose()
+                $stream.Dispose()
+            }
+            if ($total -and $done -lt $total) { throw "connection closed at $(Format-MB $done) of $(Format-MB $total)" }
+            Say "Downloaded ${Label}: $(Format-MB $done)"
+            return
+        } catch {
+            if ($attempt -ge $attempts) { throw "$Label download failed after $attempts attempts: $($_.Exception.Message)" }
+            Say "Download of $Label interrupted at $(Format-MB $done): $($_.Exception.Message). Resuming in 5 s (attempt $($attempt + 1) of $attempts)"
+            Start-Sleep -Seconds 5
         } finally {
-            $output.Dispose()
-            $stream.Dispose()
+            $client.Dispose()
         }
-        Say "Downloaded ${Label}: $(Format-MB $done)"
-    } finally {
-        $client.Dispose()
     }
 }
 
