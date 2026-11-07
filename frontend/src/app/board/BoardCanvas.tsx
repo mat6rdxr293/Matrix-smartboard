@@ -1701,6 +1701,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     // the tap as ink. DOM changes schedule a refresh for the next frame; the interval only catches
     // movement that changes no DOM, such as a CSS transition.
     let frame = 0;
+    let styleTimer = 0;
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(() => {
@@ -1708,13 +1709,28 @@ const BoardCanvas = forwardRef(function BoardCanvas({
         updateBlockers();
       });
     };
-    const observer = new MutationObserver(schedule);
+    // An animation rewrites an element's inline style on every frame. Measuring all of the UI that
+    // often took a large share of each frame on a 4K board, so style-only changes are caught up with
+    // at most every 100 ms; anything added, removed or shown still counts on the next frame.
+    const onMutations = (records: MutationRecord[]) => {
+      if (records.some((r) => r.type !== "attributes" || r.attributeName !== "style")) {
+        schedule();
+        return;
+      }
+      if (styleTimer) return;
+      styleTimer = window.setTimeout(() => {
+        styleTimer = 0;
+        schedule();
+      }, 100);
+    };
+    const observer = new MutationObserver(onMutations);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-visible", "hidden"] });
     updateBlockers();
     const interval = window.setInterval(updateBlockers, 400);
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
+      window.clearTimeout(styleTimer);
       window.clearInterval(interval);
     };
   }, [nativeBoardReady, toolbarVisible]);

@@ -1,6 +1,6 @@
 import { apiFetch, apiUrl, backendAssetUrl, isNativeApp } from "@/lib/apiClient";
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import TopBar from "@/app/layout/TopBar";
+import TopBar, { TAB_PILL_SECONDS } from "@/app/layout/TopBar";
 import Slides, { type Slide } from "@/app/presentation/Slides";
 import OfficePresentationFrame from "@/app/presentation/OfficePresentationFrame";
 import PresentationErrorBoundary from "@/app/presentation/PresentationErrorBoundary";
@@ -160,6 +160,22 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [connectionState, setConnectionState] = useState<"online" | "offline" | "syncing">("online");
   const [pendingOperations, setPendingOperations] = useState(0);
   const [tab, setTab] = useState<TabId>("tasks");
+  // Building a tab's page (the board above all) takes the main thread for a good part of the pill's
+  // slide, which then stalls. The pill moves first; the page follows once it has arrived.
+  const [pillTab, setPillTab] = useState<TabId>("tasks");
+  const tabSwitchTimerRef = useRef<number | null>(null);
+  useEffect(() => setPillTab(tab), [tab]);
+  useEffect(() => () => {
+    if (tabSwitchTimerRef.current !== null) window.clearTimeout(tabSwitchTimerRef.current);
+  }, []);
+  const switchTab = (id: TabId) => {
+    setPillTab(id);
+    if (tabSwitchTimerRef.current !== null) window.clearTimeout(tabSwitchTimerRef.current);
+    tabSwitchTimerRef.current = window.setTimeout(() => {
+      tabSwitchTimerRef.current = null;
+      setTab(id);
+    }, TAB_PILL_SECONDS * 1000 + 20);
+  };
   useEffect(() => {
     if (tab !== "teacher") setTeacherUnlocked(false);
   }, [tab]);
@@ -1358,19 +1374,36 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       const min = 240;
       const max = Math.max(min, Math.floor(window.innerWidth * 0.55));
 
+      // While dragging only the handle moves (a transform); the panel and the board take the new
+      // width once, on release. Resizing them on every move relaid the page and the board each time.
+      const handle = e.currentTarget;
+      let next = startW;
+      handle.style.zIndex = "30";
+      handle.style.willChange = "transform";
+      handle.style.background = "rgb(255 255 255 / 0.08)";
+      handle.style.borderRadius = "9999px";
+
       const handleMove = (ev: PointerEvent) => {
-        const next = clamp(startW + (ev.clientX - startX), min, max);
-        if (target === "tasks") setTasksSidebarWidth(next);
-        else setSlidesSidebarWidth(next);
+        next = clamp(startW + (ev.clientX - startX), min, max);
+        handle.style.transform = `translate3d(${next - startW}px, 0, 0)`;
       };
 
       const handleUp = () => {
         window.removeEventListener("pointermove", handleMove);
         window.removeEventListener("pointerup", handleUp);
+        window.removeEventListener("pointercancel", handleUp);
+        handle.style.transform = "";
+        handle.style.zIndex = "";
+        handle.style.willChange = "";
+        handle.style.background = "";
+        handle.style.borderRadius = "";
+        if (target === "tasks") setTasksSidebarWidth(next);
+        else setSlidesSidebarWidth(next);
       };
 
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp);
+      window.addEventListener("pointercancel", handleUp);
     };
 
   const toggleFreeBoardMode = () => {
@@ -1618,9 +1651,9 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           seconds={timerSeconds}
           onToggleRunning={() => setTimerRunning((v) => !v)}
           onReset={() => setTimerSeconds(0)}
-          currentTab={tab}
+          currentTab={pillTab}
           tabs={tabs}
-          onChangeTab={(id) => setTab(id as TabId)}
+          onChangeTab={(id) => switchTab(id as TabId)}
           slideshowOpen={slideshowOpen}
           onToggleSlideshow={() => setSlideshowOpen((v) => !v)}
           slideshowDisabled={tab !== "slides"}
@@ -1643,26 +1676,23 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
             <div className="relative flex h-full min-h-0 flex-col gap-2">
               <div className="relative min-h-0 flex-1">
               <div className="flex h-full min-h-0 overflow-hidden">
-                <motion.div
-                  className="h-full shrink-0 overflow-hidden"
-                  initial={false}
-                  animate={{
-                    width: boardExpanded ? 0 : tasksSidebarWidth,
-                    opacity: boardExpanded ? 0 : 1,
-                  }}
-                  transition={{
-                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: boardExpanded ? 0.14 : 0.2, ease: "easeOut" },
-                  }}
+                {/* The column takes its new width at once and only the panel slides. Animating the
+                    width relaid the page and resized the board on every frame, which a 4K board
+                    could not keep up with; a slide is a transform the GPU moves on its own. */}
+                <div
+                  className="relative z-20 h-full shrink-0"
+                  style={{ width: boardExpanded ? 0 : tasksSidebarWidth }}
                   aria-hidden={boardExpanded}
-                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
                 >
                   <motion.div
-                    className="glass h-full rounded-2xl p-4 shadow-soft"
-                    style={{ width: tasksSidebarWidth }}
+                    className="glass absolute inset-y-0 left-0 rounded-2xl p-4 shadow-soft"
+                    style={{ width: tasksSidebarWidth, pointerEvents: boardExpanded ? "none" : "auto" }}
                     initial={false}
-                    animate={{ x: boardExpanded ? -14 : 0 }}
-                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                    animate={{ x: boardExpanded ? -(tasksSidebarWidth + 24) : 0, opacity: boardExpanded ? 0 : 1 }}
+                    transition={{
+                      x: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                      opacity: { duration: boardExpanded ? 0.24 : 0.2, ease: "easeOut" },
+                    }}
                   >
                     <div className="mb-3">
                       <h3 className="text-sm font-semibold uppercase tracking-wider text-frost/70">
@@ -1727,24 +1757,18 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                       </div>
                     </div>
                   </motion.div>
-                </motion.div>
+                </div>
 
-                <motion.div
-                  className="relative flex h-full shrink-0 items-stretch justify-center overflow-hidden"
-                  initial={false}
-                  animate={{ width: boardExpanded ? 0 : 24, opacity: boardExpanded ? 0 : 1 }}
-                  transition={{
-                    width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: 0.16, ease: "easeOut" },
-                  }}
+                <div
+                  className="relative z-20 flex h-full shrink-0 items-stretch justify-center"
                   onPointerDown={boardExpanded ? undefined : startSidebarResize("tasks")}
-                  style={{ pointerEvents: boardExpanded ? "none" : "auto" }}
+                  style={{ width: boardExpanded ? 0 : 24, pointerEvents: boardExpanded ? "none" : "auto", opacity: boardExpanded ? 0 : 1 }}
                 >
                   <div
                     className="h-full w-2 cursor-col-resize rounded-full bg-white/5 hover:bg-white/10"
                     style={{ touchAction: "none" }}
                   />
-                </motion.div>
+                </div>
 
                 <div className="h-full min-w-0 flex-1">
                   <BoardCanvas

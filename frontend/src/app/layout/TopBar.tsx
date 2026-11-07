@@ -3,6 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
 import { motion } from "framer-motion";
+
+/** The page under a tab is swapped only after the pill has moved; see App. */
+export const TAB_PILL_SECONDS = 0.22;
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
@@ -148,7 +151,7 @@ export default function TopBar({
                 <motion.span
                   layoutId="topbar-tab-pill"
                   className="absolute inset-0 rounded-[11px] bg-accent"
-                  transition={{ type: "spring", stiffness: 480, damping: 38 }}
+                  transition={{ duration: TAB_PILL_SECONDS, ease: [0.22, 1, 0.36, 1] }}
                 />
               )}
               <span className="relative z-10">{tab.label}</span>
