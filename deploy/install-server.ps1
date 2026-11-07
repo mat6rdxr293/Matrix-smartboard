@@ -155,6 +155,35 @@ function Wait-Installer([Diagnostics.Process]$Process, [string]$Label, [int]$Tim
     return $Process.ExitCode
 }
 
+# Expand-Archive in Windows PowerShell takes many minutes over a large archive and prints nothing.
+# tar.exe (built into Windows 10 1803+) is far quicker; either way the unpacked size is reported
+# every 15 s.
+function Expand-ZipWithProgress([string]$Zip, [string]$Destination, [string]$Label) {
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+    if (Test-Path $tar) {
+        $process = Start-Process -FilePath $tar -PassThru -NoNewWindow -ArgumentList @("-xf", "`"$Zip`"", "-C", "`"$Destination`"")
+    } else {
+        $process = Start-Process -FilePath "powershell.exe" -PassThru -NoNewWindow -ArgumentList @(
+            "-NoProfile", "-NonInteractive", "-Command",
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory('$($Zip.Replace("'","''"))', '$($Destination.Replace("'","''"))')"
+        )
+    }
+    $null = $process.Handle
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    Say "Unpacking ${Label}"
+    while (-not $process.WaitForExit(15000)) {
+        if ($clock.Elapsed.TotalMinutes -ge 30) {
+            try { $process.Kill() } catch {}
+            throw "Unpacking $Label did not finish in 30 minutes"
+        }
+        $size = (Get-ChildItem -Path $Destination -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        Say "Unpacking ${Label}: $(Format-MB ([double]$size)) so far ($([int]$clock.Elapsed.TotalSeconds) s)"
+    }
+    if ($process.ExitCode -ne 0) { throw "Unpacking $Label failed (exit $($process.ExitCode))" }
+    Say "Unpacked ${Label} in $([int]$clock.Elapsed.TotalSeconds) s"
+}
+
 # Fallback only: winget often waits forever in an SSH session (no desktop, store agreements).
 function Install-WingetPackage([string]$Id) {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
@@ -274,10 +303,9 @@ if ($InstallOllama) {
         $OllamaZip = Join-Path $env:TEMP "ollama-windows-$Arch.zip"
         try {
             Get-FileWithProgress "https://ollama.com/download/ollama-windows-$Arch.zip" $OllamaZip "Ollama"
-            Write-Output "Unpacking Ollama"
             $OllamaDir = Join-Path $RootDir "ollama"
             if (Test-Path $OllamaDir) { Remove-Item -Recurse -Force $OllamaDir }
-            Expand-Archive -Path $OllamaZip -DestinationPath $OllamaDir -Force
+            Expand-ZipWithProgress $OllamaZip $OllamaDir "Ollama"
         } catch {
             Write-Output "Direct Ollama install failed: $($_.Exception.Message)"
             Install-WingetPackage "Ollama.Ollama"
