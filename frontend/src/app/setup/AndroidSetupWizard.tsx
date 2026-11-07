@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { BookOpen, ChevronLeft, LoaderCircle, Network, ServerCog, ShieldCheck, Terminal } from "lucide-react";
 import { openHelp } from "@/app/help/helpStore";
 import { Button } from "@/components/ui/button";
@@ -6,16 +6,15 @@ import { Input } from "@/components/ui/input";
 import { useI18n, type LocaleCode } from "@/i18n";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  discoverServers,
   finishAndroidSetup,
   probeServerIdentity,
   SshProvisioner,
   testServer,
   trustServerIdentity,
-  type DiscoveredServer,
   type RemoteSshPlatform,
   type ServerStatus,
 } from "./androidSetup";
+import { useServerDiscovery } from "./useServerDiscovery";
 
 type Mode = "language" | "choose" | "existing" | "ssh";
 type Props = { onDone: () => void; skipLanguage?: boolean };
@@ -38,8 +37,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   const { setLocale, tl } = useI18n();
   const [mode, setMode] = useState<Mode>(() => skipLanguage ? "choose" : "language");
   const [serverUrl, setServerUrl] = useState("");
-  const [discovered, setDiscovered] = useState<DiscoveredServer[]>([]);
-  const [discovering, setDiscovering] = useState(false);
+  const { discovered, discovering, scan, stop: stopScan, reset: resetDiscovered } = useServerDiscovery();
   const [manualFallbackVisible, setManualFallbackVisible] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null);
@@ -58,7 +56,6 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [languagePromptIndex, setLanguagePromptIndex] = useState(0);
-  const scanRunRef = useRef(0);
 
   const resetError = () => setError(null);
 
@@ -92,45 +89,13 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
   }, [mode]);
 
   const scanServers = async () => {
-    const runId = ++scanRunRef.current;
-    setDiscovering(true);
     resetError();
-
-    const mergeDiscovered = (next: DiscoveredServer[]) => {
-      if (runId !== scanRunRef.current) return;
-      setDiscovered((current) => {
-        const merged = new Map(current.map((server) => [`${server.serverId}|${server.serverUrl}`, server]));
-        next.forEach((server) => merged.set(`${server.serverId}|${server.serverUrl}`, server));
-        return Array.from(merged.values());
-      });
-    };
-
-    try {
-      // Keep discovery alive for about 15 seconds. Three separate windows let
-      // a server appear after the first ~5 s instead of hiding results until
-      // the entire search has finished.
-      for (let pass = 0; pass < 3; pass += 1) {
-        if (runId !== scanRunRef.current) return;
-        try {
-          mergeDiscovered(await discoverServers(5000));
-        } catch {
-          // Restricted Wi-Fi may block multicast. Keep searching and expose
-          // manual entry separately instead of turning discovery into an error.
-        }
-        if (pass < 2 && runId === scanRunRef.current) {
-          // Give Android NSD a moment to fully stop the previous browser before
-          // starting the next discovery window.
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
-        }
-      }
-    } finally {
-      if (runId === scanRunRef.current) setDiscovering(false);
-    }
+    await scan();
   };
 
   useEffect(() => {
     if (mode !== "existing") return;
-    setDiscovered([]);
+    resetDiscovered();
     setServerUrl("");
     setPendingTrust(null);
     setManualEntryOpen(false);
@@ -143,7 +108,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
 
     return () => {
       window.clearTimeout(fallbackTimer);
-      scanRunRef.current += 1;
+      stopScan();
     };
   }, [mode]);
 

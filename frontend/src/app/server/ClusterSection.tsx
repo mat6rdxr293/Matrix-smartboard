@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link2, LogOut, Network, Plus } from "lucide-react";
+import { Link2, LoaderCircle, LogOut, Network, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
-import { apiFetch } from "@/lib/apiClient";
+import { apiFetch, isNativeApp } from "@/lib/apiClient";
+import { currentServerUrl } from "@/app/setup/androidSetup";
+import { useServerDiscovery } from "@/app/setup/useServerDiscovery";
 import { refreshClusterMembers } from "@/lib/cluster";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +38,18 @@ export default function ClusterSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
+
+  // The servers on this network, as in the first-run setup, so joining needs no typed address.
+  const { discovered, discovering, scan, stop: stopScan } = useServerDiscovery();
+  const canDiscover = isNativeApp();
+  useEffect(() => {
+    if (!joining || !canDiscover) return;
+    void scan();
+    return stopScan;
+  }, [joining, canDiscover, scan, stopScan]);
+  const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
+  const ownHost = hostOf(currentServerUrl());
+  const others = discovered.filter((server) => hostOf(server.serverUrl) !== ownHost);
 
   const load = () => call<ClusterState>("/api/cluster").then(setState).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
@@ -96,6 +110,46 @@ export default function ClusterSection() {
         <div className="mt-3 rounded-lg border border-accent/25 bg-accent/[0.06] p-3 text-center">
           <div className="font-mono text-2xl font-bold tracking-[0.3em] text-frost">{code}</div>
           <div className="mt-1 text-[11px] text-frost/50">{tl("cluster_code_hint")}</div>
+        </div>
+      )}
+
+      {joining && !state?.enabled && canDiscover && (
+        <div className="mt-3" data-testid="cluster-discovery">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold text-frost/60">{tl("setup_servers_in_network")}</div>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" disabled={discovering} onClick={() => void scan()}>
+              <RefreshCw size={12} className={discovering ? "mr-1.5 animate-spin" : "mr-1.5"} />{tl("setup_search_again")}
+            </Button>
+          </div>
+          <div className="mt-1.5 space-y-1.5">
+            {others.map((server) => {
+              const selected = joinUrl.trim() === server.serverUrl;
+              return (
+                <button
+                  key={`${server.serverId}|${server.serverUrl}`}
+                  type="button"
+                  onClick={() => setJoinUrl(server.serverUrl)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition",
+                    selected ? "border-accent/50 bg-accent/[0.08]" : "border-white/[0.07] bg-black/10 hover:border-accent/30",
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-semibold text-frost">{server.name}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-frost/40">{server.serverUrl}</span>
+                  </span>
+                  <span className="shrink-0 text-[9px] font-medium uppercase tracking-[0.12em] text-accent">{server.tls ? "TLS" : "HTTP"}</span>
+                </button>
+              );
+            })}
+            {others.length === 0 && (
+              <div className="flex h-12 items-center justify-center gap-2 rounded-lg border border-white/[0.07] bg-black/10 px-3 text-center text-[11px] text-frost/40">
+                {discovering
+                  ? <><LoaderCircle size={14} className="animate-spin text-accent/80" />{tl("setup_search_up_to_15_seconds")}</>
+                  : tl("setup_servers_not_found")}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
