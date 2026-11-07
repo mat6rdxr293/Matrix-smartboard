@@ -611,6 +611,8 @@ def _status_payload(request: Request | None = None) -> dict:
         "load": {**app.state.cluster.load.snapshot(), "backgroundJobs": len(app.state.progress_tasks)},
         "cluster": {"id": app.state.cluster.cluster_id, "nodeId": app.state.school_store.node_id}
         if app.state.cluster.enabled else None,
+        # A board may add this server to its cluster without signing in here (see ClusterService).
+        "clusterInviteOpen": app.state.cluster.open_to_invite(),
         "features": {
             "ai": is_ai_configured(),
             "ocr": is_ocr_configured(),

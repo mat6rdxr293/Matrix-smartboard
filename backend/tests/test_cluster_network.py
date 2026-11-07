@@ -150,6 +150,30 @@ def test_three_servers_share_one_school(nodes):
     eventually(lambda: all(board(n, lesson["id"]) == expected for n in nodes))
 
 
+def test_an_empty_server_joins_by_invitation_and_a_used_one_does_not(nodes):
+    a, b, c = nodes
+    a.token = a.call("POST", "/api/auth/register-school", json={"school_name": "Школа", "password": "password11"}).json()["sessionToken"]
+    a.call("POST", "/api/cluster/create")
+    assert a.call("GET", "/api/status").json()["clusterInviteOpen"] is False
+
+    # b is fresh: a board adds it with a code from a and no sign-in on b.
+    assert b.call("GET", "/api/status").json()["clusterInviteOpen"] is True
+    invite = a.call("POST", "/api/cluster/pairing-code").json()
+    assert invite["url"] == a.url and invite["ownerSchool"]
+    joined = b.call("POST", "/api/cluster/join", json={"url": invite["url"], "code": invite["code"], "ownerSchool": invite["ownerSchool"]})
+    assert joined.status_code == 200, joined.text
+    assert b.call("GET", "/api/status").json()["clusterInviteOpen"] is False
+    # The school that added it manages it: its sign-in replicates to b.
+    b.token = a.token
+    eventually(lambda: b.call("GET", "/api/cluster").status_code == 200)
+
+    # c has a school of its own, so it takes no invitation without a sign-in there.
+    c.call("POST", "/api/auth/register-school", json={"school_name": "Своя", "password": "password11"})
+    assert c.call("GET", "/api/status").json()["clusterInviteOpen"] is False
+    code = a.call("POST", "/api/cluster/pairing-code").json()["code"]
+    assert c.call("POST", "/api/cluster/join", json={"url": a.url, "code": code}).status_code == 401
+
+
 def test_requests_between_nodes_must_be_signed(nodes):
     a = nodes[0]
     a.token = a.call("POST", "/api/auth/register-school", json={"school_name": "Школа", "password": "password11"}).json()["sessionToken"]

@@ -41,6 +41,10 @@ SYNC_INTERVAL_S = 1.0
 PEER_TIMEOUT_S = 5.0
 COMPACT_EVERY_S = 3600
 AI_CAPACITY = 2  # simultaneous AI requests a node takes before it counts as fully loaded
+# A server with no school of its own takes a cluster invitation without a sign-in for this long after
+# it starts: long enough to install it and add it from a board, short enough that an unattended empty
+# server on the network is not left open to anyone's cluster.
+OPEN_INVITE_WINDOW_S = 30 * 60
 
 
 def pin_of_certificate(der: bytes) -> str:
@@ -119,6 +123,7 @@ class ClusterService:
     conflict: str | None = None
     _books_cache: tuple[float, list[tuple[dict, dict]]] = (0.0, [])
     _task: asyncio.Task | None = None
+    started_at: float = field(default_factory=time.time)
 
     # ----- configuration -------------------------------------------------------------------------
 
@@ -133,6 +138,17 @@ class ClusterService:
     @property
     def enabled(self) -> bool:
         return bool(self.cluster_id and self.secret)
+
+    def open_to_invite(self) -> bool:
+        """Whether a board may add this server to a cluster without signing in to it: it is not in a
+        cluster, no school was ever made here (so there is nothing of anyone's to hand over), no
+        owner was set, and it started recently."""
+        return (
+            not self.enabled
+            and self.store.meta_get("server_owner_school") is None
+            and self.store.first_local_school_id() is None
+            and time.time() - self.started_at < OPEN_INVITE_WINDOW_S
+        )
 
     def self_url(self) -> str | None:
         return self.store.meta_get("cluster_self_url")
@@ -442,6 +458,9 @@ def _base_url(request: Request) -> str:
 class JoinPayload(BaseModel):
     url: str = Field(min_length=8, max_length=300)
     code: str = Field(pattern=r"^\d{8}$")
+    # The school that invited this server, given by a board; it becomes the owner of a server that
+    # had none, so the school that added it can manage it.
+    ownerSchool: str | None = Field(default=None, max_length=64)
 
 
 class PairPayload(BaseModel):
@@ -476,20 +495,33 @@ async def cluster_create(request: Request) -> dict:
 
 @router.post("/api/cluster/pairing-code")
 async def cluster_pairing_code(request: Request) -> dict:
-    require_server_admin(request)
+    school = require_server_admin(request)
     cluster = get_cluster(request)
     if not cluster.enabled:
         raise HTTPException(status_code=409, detail="Этот сервер не в кластере")
-    return {"code": cluster.new_pairing_code(), "expiresInSeconds": PAIRING_TTL_S}
+    return {
+        "code": cluster.new_pairing_code(),
+        "expiresInSeconds": PAIRING_TTL_S,
+        "ownerSchool": school["id"],
+        # Where a new server reaches this one: the address the cluster knows it by.
+        "url": cluster.self_url() or _base_url(request),
+    }
 
 
 @router.post("/api/cluster/join")
 async def cluster_join(payload: JoinPayload, request: Request) -> dict:
-    require_server_admin(request)
+    cluster = get_cluster(request)
+    invited = cluster.open_to_invite()
+    if not invited:
+        require_server_admin(request)
     try:
-        return await get_cluster(request).join(payload.url, payload.code, _base_url(request))
+        result = await cluster.join(payload.url, payload.code, _base_url(request))
     except (ValueError, httpx.HTTPError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if invited and payload.ownerSchool:
+        cluster.store.meta_set("server_owner_school", payload.ownerSchool)
+    logger.info("cluster: joined %s%s", payload.url, " by invitation" if invited else "")
+    return result
 
 
 @router.post("/api/cluster/leave")

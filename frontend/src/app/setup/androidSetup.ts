@@ -18,6 +18,8 @@ export const CLIENT_API_VERSION = 4;
 
 export type ServerStatus = {
   ok?: boolean;
+  /** The server takes a cluster invitation without a sign-in (empty and recently started). */
+  clusterInviteOpen?: boolean;
   product?: string;
   serverVersion?: string;
   apiVersion?: number;

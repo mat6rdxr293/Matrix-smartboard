@@ -17,7 +17,19 @@ import {
 import { useServerDiscovery } from "./useServerDiscovery";
 
 type Mode = "language" | "choose" | "existing" | "ssh";
-type Props = { onDone: () => void; skipLanguage?: boolean };
+type Props = {
+  onDone: () => void;
+  skipLanguage?: boolean;
+  /**
+   * Installing a server for a cluster from the server panel: the wizard opens on the SSH form and
+   * hands the installed server (its key already shown as the SSH fingerprint was confirmed) to this
+   * callback instead of moving the board to it.
+   */
+  onInstalled?: (server: { serverUrl: string; serverId: string; pin: string }) => Promise<void>;
+  onCancel?: () => void;
+  title?: string;
+  description?: string;
+};
 type PendingTrust = {
   serverUrl: string;
   serverId: string;
@@ -33,9 +45,9 @@ const SETUP_LANGUAGES: Array<{ code: LocaleCode; label: string; badge: string }>
 
 const LANGUAGE_PROMPTS = ["Выберите язык", "Тілді таңдаңыз", "Choose language"] as const;
 
-export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Props) {
+export default function AndroidSetupWizard({ onDone, skipLanguage = false, onInstalled, onCancel, title, description }: Props) {
   const { setLocale, tl } = useI18n();
-  const [mode, setMode] = useState<Mode>(() => skipLanguage ? "choose" : "language");
+  const [mode, setMode] = useState<Mode>(() => onInstalled ? "ssh" : skipLanguage ? "choose" : "language");
   const [serverUrl, setServerUrl] = useState("");
   const { discovered, discovering, scan, stop: stopScan, reset: resetDiscovered } = useServerDiscovery();
   const [manualFallbackVisible, setManualFallbackVisible] = useState(false);
@@ -199,6 +211,13 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
       // SSH fingerprint was explicitly verified before installation, so the
       // freshly installed TLS identity can be pinned without a second prompt.
       const probe = await probeServerIdentity(result.serverUrl);
+      if (onInstalled) {
+        await onInstalled({ serverUrl: probe.serverUrl, serverId: probe.serverId, pin: probe.pin });
+        setPassword("");
+        setSudoPassword("");
+        onDone();
+        return;
+      }
       await trustServerIdentity(probe.serverUrl, probe.serverId, probe.pin);
       const checked = await testServer(probe.serverUrl);
       if (checked.needsTrust) throw new Error(tl("setup_error_pin_installed_server"));
@@ -236,8 +255,8 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
             </h1>
           ) : (
             <>
-              <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">{tl("setup_title")}</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-frost/50">{tl("setup_description")}</p>
+              <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-frost">{title ?? tl("setup_title")}</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-frost/50">{description ?? tl("setup_description")}</p>
               {/* Opens the admin guide at the section for the step on screen. */}
               <button type="button" onClick={() => openHelp("admin", mode === "ssh" ? "5" : mode === "existing" ? "6" : "4")}
                 className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-accent hover:underline">
@@ -410,7 +429,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false }: Pro
 
           {mode === "ssh" && (
             <div>
-              <Back label={tl("back")} onClick={() => setMode("choose")} />
+              <Back label={tl("back")} onClick={() => (onCancel ? onCancel() : setMode("choose"))} />
               <div className="mt-5 grid gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
                 <div>
                   <h2 className="text-xl font-semibold">{tl("setup_ssh_server")}</h2>
