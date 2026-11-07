@@ -30,6 +30,11 @@ describe("choosing a cluster member", () => {
     expect(chooseMember(members, scores([[a, 0.95], [b, 0.1], [c, 0.12]]), a.url, "board-7")).toBe(once);
   });
 
+  it("right after a move for load, stays even when busy, but still leaves a server that is down", () => {
+    expect(chooseMember(members, scores([[a, 0.95], [b, 0.1], [c, 0.1]]), a.url, "board", true)).toBeNull();
+    expect(chooseMember(members, scores([[a, null], [b, 0.1], [c, 0.1]]), a.url, "board", true)).not.toBeNull();
+  });
+
   it("does not move when every other server is busy too", () => {
     expect(chooseMember(members, scores([[a, 0.95], [b, 0.7], [c, 0.9]]), a.url)).toBeNull();
   });

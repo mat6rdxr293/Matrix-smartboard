@@ -15,7 +15,7 @@ import {
   type ServerStatus,
 } from "./androidSetup";
 import { useServerDiscovery } from "./useServerDiscovery";
-import InstallProgress from "./InstallProgress";
+import InstallProgress, { appendInstallOutput } from "./InstallProgress";
 
 type Mode = "language" | "choose" | "existing" | "ssh";
 type Props = {
@@ -200,7 +200,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
     try {
       handle = await SshProvisioner.addListener("provisionProgress", ({ line }) => {
         if (!line.trim()) return;
-        setLines((current) => [...current.slice(-120), line]);
+        setLines((current) => appendInstallOutput(current, line));
         setLastOutputAt(Date.now());
       });
       const result = await SshProvisioner.provisionServer({

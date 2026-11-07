@@ -526,24 +526,35 @@ New-NetFirewallRule -DisplayName "Matrix Smartboard mDNS" -Direction Inbound -Ac
 
 Start-ScheduledTask -TaskName $BackendTaskName
 
+# Asked through the server's own Python: Windows PowerShell's certificate override is unreliable
+# against a self-signed certificate, and a working server was reported as not ready.
+$StatusCheck = @"
+import ssl, sys, urllib.request
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+try:
+    with urllib.request.urlopen('https://127.0.0.1:$Port/api/status', context=ctx, timeout=5) as r:
+        sys.exit(0 if r.status == 200 else 1)
+except Exception as error:
+    print(error)
+    sys.exit(1)
+"@
 function Test-MatrixServer {
-    $previous = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-    try {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://127.0.0.1:$Port/api/status" -TimeoutSec 3
-        return $response.StatusCode -eq 200
-    } catch {
-        return $false
-    } finally {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previous
-    }
+    # Python's own errors on stderr must not stop the whole script while the server is starting.
+    $ErrorActionPreference = "Continue"
+    $script:LastCheckError = ((& $VenvPython -c $StatusCheck 2>&1) | ForEach-Object { "$_" }) -join " "
+    return $LASTEXITCODE -eq 0
 }
 
 Write-Step "[7/7] Checking server"
+# The first start on a slow computer (making the certificate, loading the libraries) can take minutes.
 $Ready = $false
-for ($i = 0; $i -lt 30; $i++) {
+$CheckClock = [Diagnostics.Stopwatch]::StartNew()
+while ($CheckClock.Elapsed.TotalMinutes -lt 5) {
     if (Test-MatrixServer) { $Ready = $true; break }
-    Start-Sleep -Seconds 2
+    Say "Waiting for the server to answer ($([int]$CheckClock.Elapsed.TotalSeconds) s): $LastCheckError"
+    Start-Sleep -Seconds 5
 }
 
 if ($Ready) {

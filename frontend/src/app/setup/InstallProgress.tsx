@@ -10,6 +10,40 @@ export function installStage(lines: string[]): { step: number; total: number; ti
   return null;
 }
 
+const STAGE_LINE = /\[\d+\/\d+\]/;
+/** A line that redraws itself as it goes: a download, an unpacking, a model layer being pulled. */
+const PROGRESS_LINE = /^(pulling [0-9a-f]{6,}|Downloading [^:]+|Unpacking [^:]+):\s/;
+const MAX_LOG_LINES = 120;
+
+/**
+ * Adds a chunk of installer output to the log. Terminal progress (Ollama redraws its bar many times
+ * a second with escape codes) becomes one line updated in place, and the current stage line is
+ * kept even when the rest of the log is trimmed, so the stage bar never falls back to the start.
+ */
+export function appendInstallOutput(lines: string[], chunk: string): string[] {
+  // Moving the cursor back to redraw is the start of a new line here; other escape codes go.
+  const pieces = chunk
+    .split(/\r|\x1b\[\d*A|\x1b\[\d*G/)
+    .map((piece) => piece.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\s+$/, ""))
+    .filter((piece) => piece.trim());
+  let next = lines;
+  for (const piece of pieces) {
+    const from = Math.max(0, next.length - 3);
+    const tail = next.slice(from);
+    if (piece === "pulling manifest" && tail.some((line) => line.startsWith("pulling "))) continue;
+    const key = PROGRESS_LINE.exec(piece)?.[1];
+    const same = key ? tail.findIndex((line) => PROGRESS_LINE.exec(line)?.[1] === key) : -1;
+    next = same >= 0
+      ? [...next.slice(0, from + same), piece, ...next.slice(from + same + 1)]
+      : [...next, piece];
+  }
+  if (next.length <= MAX_LOG_LINES) return next;
+  const kept = next.slice(-MAX_LOG_LINES);
+  if (kept.some((line) => STAGE_LINE.test(line))) return kept;
+  const stage = [...next].reverse().find((line) => STAGE_LINE.test(line));
+  return stage ? [stage, ...kept.slice(1)] : kept;
+}
+
 const clock = (ms: number) => {
   const total = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;

@@ -23,6 +23,12 @@ export const BUSY_SCORE = 0.8;
 /** ...and only to a server at most this busy. */
 export const FREE_SCORE = 0.5;
 const CHECK_EVERY_MS = 20_000;
+/**
+ * After moving for load the board stays put this long. Its own work moves with it, so without a
+ * pause one busy board would bounce between two servers, each looking free once it has left.
+ * A server that stops answering is still left at once.
+ */
+export const STAY_AFTER_LOAD_MOVE_MS = 5 * 60_000;
 const REFRESH_MEMBERS_EVERY_MS = 60_000;
 const STATUS_TIMEOUT_MS = 3_000;
 
@@ -130,6 +136,8 @@ export function chooseMember(
   scores: Map<string, number | null>,
   currentUrl: string,
   deviceId: string = deviceIdForSpread(),
+  /** Only move if the current member is down, not because it is busy. */
+  stayUnlessDown = false,
 ): ClusterMember | null {
   const current = members.find((member) => member.url === currentUrl);
   const currentScore = current ? scores.get(current.nodeId) : null;
@@ -140,6 +148,7 @@ export function chooseMember(
     .filter((member) => scores.get(member.nodeId)! <= lowest + SIMILAR_SCORE)
     .sort((a, b) => preference(deviceId, a.nodeId) - preference(deviceId, b.nodeId))[0];
   if (currentScore === null || currentScore === undefined) return best;
+  if (stayUnlessDown) return null;
   if (currentScore > BUSY_SCORE && scores.get(best.nodeId)! < FREE_SCORE) return best;
   return null;
 }
@@ -166,6 +175,7 @@ export function startClusterBalancer(onSwitch?: (member: ClusterMember) => void)
   if (!isNativeApp() || balancer !== null) return () => undefined;
   setServerRecoveryHook(failOverToLiveMember);
   let lastRefresh = 0;
+  let lastMoveAt = -Infinity;
   const tick = async () => {
     try {
       if (Date.now() - lastRefresh > REFRESH_MEMBERS_EVERY_MS) {
@@ -174,8 +184,10 @@ export function startClusterBalancer(onSwitch?: (member: ClusterMember) => void)
       }
       const members = clusterMembers();
       if (members.length < 2) return;
-      const choice = chooseMember(members, await scoreAll(members), getApiBaseUrl());
+      const staying = Date.now() - lastMoveAt < STAY_AFTER_LOAD_MOVE_MS;
+      const choice = chooseMember(members, await scoreAll(members), getApiBaseUrl(), undefined, staying);
       if (choice) {
+        lastMoveAt = Date.now();
         switchToMember(choice);
         onSwitch?.(choice);
       }
