@@ -268,7 +268,12 @@ try {
     $SourceDir = Get-ChildItem -Path $ExtractPath -Directory | Select-Object -First 1
     if (-not $SourceDir) { throw "Downloaded repository archive is empty" }
 
-    if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
+    # The old app goes, but its Python environment stays: the libraries in it are checked below
+    # instead of being downloaded and installed again.
+    if (Test-Path $AppDir) {
+        Get-ChildItem -Path $AppDir -Force | Where-Object { $_.Name -ne ".venv" } |
+            Remove-Item -Recurse -Force
+    }
     New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
     Copy-Item -Path (Join-Path $SourceDir.FullName "*") -Destination $AppDir -Recurse -Force
 } finally {
@@ -276,13 +281,40 @@ try {
 }
 
 Write-Step "[4/7] Installing Python backend"
-$VenvPython = Join-Path $AppDir ".venv\Scripts\python.exe"
-& $Python -m venv (Join-Path $AppDir ".venv")
-if ($LASTEXITCODE -ne 0) { throw "Failed to create Python virtual environment" }
-& $VenvPython -m pip install --upgrade pip wheel
-if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip" }
-& $VenvPython -m pip install -r (Join-Path $AppDir "backend\requirements.txt")
-if ($LASTEXITCODE -ne 0) { throw "Failed to install backend dependencies" }
+$VenvDir = Join-Path $AppDir ".venv"
+$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+$Requirements = Join-Path $AppDir "backend\requirements.txt"
+$VenvStamp = Join-Path $VenvDir ".matrix-requirements"
+
+# An environment left by an earlier run is kept if it still works; one that does not (a broken or
+# moved Python) is made again.
+$VenvWorks = $false
+if (Test-Path $VenvPython) {
+    & $VenvPython -c "import sys" 2>$null
+    $VenvWorks = $LASTEXITCODE -eq 0
+}
+if (-not $VenvWorks) {
+    if (Test-Path $VenvDir) { Remove-Item -Recurse -Force $VenvDir }
+    & $Python -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create Python virtual environment" }
+} else {
+    Write-Output "Using the Python environment from an earlier install"
+}
+
+# What the environment was last fully installed for: the requirements and the Python they went into.
+$PythonVersion = (& $VenvPython -c "import sys; print(sys.version)") -join ""
+$WantedStamp = (Get-FileHash -Algorithm SHA256 -Path $Requirements).Hash + " " + $PythonVersion
+$HaveStamp = if (Test-Path $VenvStamp) { (Get-Content -Raw -Path $VenvStamp).Trim() } else { "" }
+if ($HaveStamp -eq $WantedStamp) {
+    Write-Output "Backend libraries are already installed"
+} else {
+    # After an install that broke off, pip skips what is already in place and fetches only the rest.
+    & $VenvPython -m pip install --upgrade pip wheel
+    if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip" }
+    & $VenvPython -m pip install -r $Requirements
+    if ($LASTEXITCODE -ne 0) { throw "Failed to install backend dependencies" }
+    Set-Content -Path $VenvStamp -Value $WantedStamp -Encoding ASCII
+}
 
 function Find-Ollama {
     $command = Get-Command ollama.exe -ErrorAction SilentlyContinue
@@ -399,7 +431,7 @@ if ($InstallOllama) {
     $OllamaAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$RunOllama`""
     $StartupTrigger = New-ScheduledTaskTrigger -AtStartup
     $SystemPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 5)
+    $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $OllamaTaskName -Action $OllamaAction -Trigger $StartupTrigger -Principal $SystemPrincipal -Settings $TaskSettings -Force | Out-Null
     Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
@@ -471,7 +503,7 @@ Set-Location "$($BackendDir.Replace('"','""'))"
 $BackendAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$RunBackend`""
 $BackendTrigger = New-ScheduledTaskTrigger -AtStartup
 $BackendPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$BackendSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 5)
+$BackendSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName $BackendTaskName -Action $BackendAction -Trigger $BackendTrigger -Principal $BackendPrincipal -Settings $BackendSettings -Force | Out-Null
 
 @{
