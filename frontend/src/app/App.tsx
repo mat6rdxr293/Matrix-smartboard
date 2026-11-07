@@ -1,6 +1,6 @@
 import { apiFetch, apiUrl, backendAssetUrl, isNativeApp } from "@/lib/apiClient";
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import TopBar, { TAB_PILL_SECONDS } from "@/app/layout/TopBar";
+import TopBar from "@/app/layout/TopBar";
 import Slides, { type Slide } from "@/app/presentation/Slides";
 import OfficePresentationFrame from "@/app/presentation/OfficePresentationFrame";
 import PresentationErrorBoundary from "@/app/presentation/PresentationErrorBoundary";
@@ -106,6 +106,8 @@ type LessonWorkspaceProps = {
   onChangeRoom: () => void;
 };
 
+
+const SIDEBAR_SLIDE_MS = 320;
 export default function App({ school, room, lesson, boardProfile, onComplete, onOpenHistory, onChangeRoom }: LessonWorkspaceProps) {
   const { locale, tl } = useI18n();
   const { theme } = useTheme();
@@ -160,21 +162,21 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [connectionState, setConnectionState] = useState<"online" | "offline" | "syncing">("online");
   const [pendingOperations, setPendingOperations] = useState(0);
   const [tab, setTab] = useState<TabId>("tasks");
-  // Building a tab's page (the board above all) takes the main thread for a good part of the pill's
-  // slide, which then stalls. The pill moves first; the page follows once it has arrived.
-  const [pillTab, setPillTab] = useState<TabId>("tasks");
-  const tabSwitchTimerRef = useRef<number | null>(null);
-  useEffect(() => setPillTab(tab), [tab]);
+  // TopBar moves its pill at once from its own state; the page under the new tab (the board above
+  // all) is built two frames later, once the pill's transition has started, so that work neither
+  // delays the tap's response nor stalls the slide.
+  const tabSwitchFrameRef = useRef<number | null>(null);
   useEffect(() => () => {
-    if (tabSwitchTimerRef.current !== null) window.clearTimeout(tabSwitchTimerRef.current);
+    if (tabSwitchFrameRef.current !== null) window.cancelAnimationFrame(tabSwitchFrameRef.current);
   }, []);
   const switchTab = (id: TabId) => {
-    setPillTab(id);
-    if (tabSwitchTimerRef.current !== null) window.clearTimeout(tabSwitchTimerRef.current);
-    tabSwitchTimerRef.current = window.setTimeout(() => {
-      tabSwitchTimerRef.current = null;
-      setTab(id);
-    }, TAB_PILL_SECONDS * 1000 + 20);
+    if (tabSwitchFrameRef.current !== null) window.cancelAnimationFrame(tabSwitchFrameRef.current);
+    tabSwitchFrameRef.current = window.requestAnimationFrame(() => {
+      tabSwitchFrameRef.current = window.requestAnimationFrame(() => {
+        tabSwitchFrameRef.current = null;
+        setTab(id);
+      });
+    });
   };
   useEffect(() => {
     if (tab !== "teacher") setTeacherUnlocked(false);
@@ -186,6 +188,15 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [boardExpanded, setBoardExpanded] = useState(false);
+  // The task panel slides from the tap itself (its style is set here, directly); the layout and the
+  // board take the new width only once the slide is over. Re-rendering the lesson first made the
+  // tap feel late, and resizing the board mid-slide made it stutter.
+  const sidebarPanelRef = useRef<HTMLDivElement | null>(null);
+  const boardExpandedTargetRef = useRef(false);
+  const panelsTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (panelsTimerRef.current !== null) window.clearTimeout(panelsTimerRef.current);
+  }, []);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -1365,6 +1376,23 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       window.addEventListener("pointercancel", handleUp);
     };
 
+  const togglePanels = () => {
+    const next = !boardExpandedTargetRef.current;
+    boardExpandedTargetRef.current = next;
+    const panel = sidebarPanelRef.current;
+    if (panel) {
+      panel.style.transition = `transform ${SIDEBAR_SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${next ? 240 : 200}ms ease-out`;
+      panel.style.transform = next ? `translate3d(${-(tasksSidebarWidth + 24)}px, 0, 0)` : "translate3d(0, 0, 0)";
+      panel.style.opacity = next ? "0" : "1";
+      panel.style.pointerEvents = next ? "none" : "auto";
+    }
+    if (panelsTimerRef.current !== null) window.clearTimeout(panelsTimerRef.current);
+    panelsTimerRef.current = window.setTimeout(() => {
+      panelsTimerRef.current = null;
+      setBoardExpanded(boardExpandedTargetRef.current);
+    }, panel ? SIDEBAR_SLIDE_MS : 0);
+  };
+
   const startSidebarResize =
     (target: "tasks" | "slides") => (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -1651,7 +1679,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
           seconds={timerSeconds}
           onToggleRunning={() => setTimerRunning((v) => !v)}
           onReset={() => setTimerSeconds(0)}
-          currentTab={pillTab}
+          currentTab={tab}
           tabs={tabs}
           onChangeTab={(id) => switchTab(id as TabId)}
           slideshowOpen={slideshowOpen}
@@ -1687,13 +1715,14 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                   {/* A CSS transition, like the board toolbar's: the compositor runs it, so React
                       work at the same moment cannot stall it as it stalls a JS-driven animation. */}
                   <div
+                    ref={sidebarPanelRef}
                     className="glass absolute inset-y-0 left-0 rounded-2xl p-4 shadow-soft"
                     style={{
                       width: tasksSidebarWidth,
                       pointerEvents: boardExpanded ? "none" : "auto",
                       transform: boardExpanded ? `translate3d(${-(tasksSidebarWidth + 24)}px, 0, 0)` : "translate3d(0, 0, 0)",
                       opacity: boardExpanded ? 0 : 1,
-                      transition: `transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${boardExpanded ? 240 : 200}ms ease-out`,
+                      transition: `transform ${SIDEBAR_SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${boardExpanded ? 240 : 200}ms ease-out`,
                     }}
                   >
                     <div className="mb-3">
@@ -1777,7 +1806,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                     ref={boardCanvasRef}
                     ocrEnabled={!!apiStatus?.ocr}
                     expanded={boardExpanded}
-                    onTogglePanels={() => setBoardExpanded((v) => !v)}
+                    onTogglePanels={togglePanels}
                     onStartTimer={() => setTimerRunning(true)}
                     initialStrokes={boardHistory.document.strokes}
                     onChangeStrokes={syncBoardStrokes}

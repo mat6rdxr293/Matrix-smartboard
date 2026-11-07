@@ -93,10 +93,14 @@ export default function TopBar({
 
   // Where the pill sits: measured from the tab buttons, so labels in any language fit.
   const tabsRef = useRef<HTMLDivElement | null>(null);
+  // The tab the pill shows: set on the tap itself so only this bar re-renders before it moves; the
+  // lesson follows through onChangeTab.
+  const [shownTab, setShownTab] = useState(currentTab);
+  useEffect(() => setShownTab(currentTab), [currentTab]);
   const [pill, setPill] = useState<{ left: number; width: number; base: number; animate: boolean } | null>(null);
   useLayoutEffect(() => {
     const measure = () => {
-      const button = tabsRef.current?.querySelector<HTMLElement>(`[data-tab-id="${currentTab}"]`);
+      const button = tabsRef.current?.querySelector<HTMLElement>(`[data-tab-id="${shownTab}"]`);
       if (!button) { setPill(null); return; }
       setPill((prev) => {
         const left = button.offsetLeft, width = button.offsetWidth;
@@ -111,7 +115,7 @@ export default function TopBar({
     const observer = new ResizeObserver(measure);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [currentTab, tabs.map((tab) => `${tab.id}:${tab.label}`).join("|")]);
+  }, [shownTab, tabs.map((tab) => `${tab.id}:${tab.label}`).join("|")]);
 
   const nativeApp = isNativeApp();
   const isSlidesTab = currentTab === "slides";
@@ -177,13 +181,16 @@ export default function TopBar({
             <button
               key={tab.id}
               data-tab-id={tab.id}
-              onClick={() => onChangeTab(tab.id)}
+              onClick={() => {
+                setShownTab(tab.id);
+                onChangeTab(tab.id);
+              }}
               className={cn(
                 "relative min-w-[104px] overflow-hidden rounded-[11px] px-4 py-2 text-[12px] font-semibold transition-colors",
-                currentTab === tab.id ? "text-accentText" : "text-frost/55 hover:text-frost/90"
+                shownTab === tab.id ? "text-accentText" : "text-frost/55 hover:text-frost/90"
               )}
             >
-              {!pill && currentTab === tab.id && <span className="absolute inset-0 rounded-[11px] bg-accent" />}
+              {!pill && shownTab === tab.id && <span className="absolute inset-0 rounded-[11px] bg-accent" />}
               <span className="relative z-10">{tab.label}</span>
             </button>
           ))}
