@@ -15,6 +15,7 @@ import {
   type ServerStatus,
 } from "./androidSetup";
 import { useServerDiscovery } from "./useServerDiscovery";
+import InstallProgress from "./InstallProgress";
 
 type Mode = "language" | "choose" | "existing" | "ssh";
 type Props = {
@@ -67,6 +68,10 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  const [lastOutputAt, setLastOutputAt] = useState<number | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installFailed, setInstallFailed] = useState(false);
+  const [installDone, setInstallDone] = useState(false);
   const [languagePromptIndex, setLanguagePromptIndex] = useState(0);
 
   const resetError = () => setError(null);
@@ -190,11 +195,13 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
 
   const provision = async () => {
     setBusy(true); resetError(); setLines([]);
+    setInstalling(true); setInstallFailed(false); setInstallDone(false); setLastOutputAt(null);
     let handle: Awaited<ReturnType<typeof SshProvisioner.addListener>> | null = null;
     try {
       handle = await SshProvisioner.addListener("provisionProgress", ({ line }) => {
         if (!line.trim()) return;
         setLines((current) => [...current.slice(-120), line]);
+        setLastOutputAt(Date.now());
       });
       const result = await SshProvisioner.provisionServer({
         host: host.trim(),
@@ -210,6 +217,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
 
       // SSH fingerprint was explicitly verified before installation, so the
       // freshly installed TLS identity can be pinned without a second prompt.
+      setInstallDone(true);
       const probe = await probeServerIdentity(result.serverUrl);
       if (onInstalled) {
         await onInstalled({ serverUrl: probe.serverUrl, serverId: probe.serverId, pin: probe.pin });
@@ -227,8 +235,10 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
       finishConnection(checked.serverUrl);
     } catch (next) {
       setError(localizedError(next));
+      setInstallFailed(true);
     } finally {
       await handle?.remove();
+      setInstalling(false);
       setBusy(false);
     }
   };
@@ -491,6 +501,7 @@ export default function AndroidSetupWizard({ onDone, skipLanguage = false, onIns
 
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                   <div className="flex items-center gap-2 text-xs font-semibold text-frost/60"><Terminal size={15} />{tl("setup_install_progress")}</div>
+                  <InstallProgress lines={lines} running={installing} failed={installFailed} done={installDone} lastOutputAt={lastOutputAt} />
                   <div className="mt-3 h-[390px] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 font-mono text-[10px] leading-5 text-frost/55">
                     {lines.length ? lines.join("\n") : tl("setup_install_log_placeholder")}
                   </div>

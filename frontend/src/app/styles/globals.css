@@ -877,3 +877,20 @@ body.native-board-active [data-native-board-page] {
   background: transparent !important;
   background-image: none !important;
 }
+
+/* The installer stage under way: a light band sweeping across its segment. */
+.install-progress-current {
+  background: rgb(var(--color-accent) / 0.35);
+}
+.install-progress-current::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent)), transparent);
+  animation: install-progress-sweep 1.2s ease-in-out infinite;
+}
+@keyframes install-progress-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(200%); }
+}
