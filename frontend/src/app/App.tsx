@@ -39,7 +39,6 @@ import { Button } from "@/components/ui/button";
 import { callAi, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
-import { instantUi } from "@/lib/instantUi";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/app/theme/ThemeProvider";
 import { sessionApi } from "@/app/session/api";
@@ -1434,7 +1433,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   if (slideshowOpen && tab === "slides" && isOfficeEmbedSource && presentationSource.embedUrl) {
     return (
-      <MotionConfig reducedMotion={ultraLite || instantUi ? "always" : "never"}>
+      <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
         <div className="min-h-screen bg-black">
           <div className="relative h-screen w-screen overflow-hidden">
             <Button
@@ -1460,7 +1459,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
 
   if (slideshowOpen && tab === "slides" && slideshowSlide) {
     return (
-      <MotionConfig reducedMotion={ultraLite || instantUi ? "always" : "never"}>
+      <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
       <div className="min-h-screen" style={effectiveSiteBgStyle}>
         <div
           className="relative h-screen w-screen overflow-hidden"
@@ -1601,7 +1600,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   }
 
   return (
-    <MotionConfig reducedMotion={ultraLite || instantUi ? "always" : "never"}>
+    <MotionConfig reducedMotion={ultraLite ? "always" : "never"}>
     <div
       data-native-board-page
       ref={appRef}

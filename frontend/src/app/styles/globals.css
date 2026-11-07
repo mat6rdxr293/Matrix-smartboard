@@ -455,14 +455,6 @@ body.native-app *::after {
   -webkit-backdrop-filter: none !important;
 }
 
-/* See instantUi.ts: on a 4K board a transition is only a few jerky frames, so none are run. */
-body.instant-ui *,
-body.instant-ui *::before,
-body.instant-ui *::after {
-  transition-duration: 0s !important;
-  transition-delay: 0s !important;
-}
-
 body.lite-mode .thinking-shimmer {
   animation-duration: 4.2s;
 }
