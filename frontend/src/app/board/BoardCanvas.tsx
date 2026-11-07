@@ -1645,6 +1645,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     if (!nativeBoardReady) return;
     // React controls, graph edit handles and floating dialogs must remain clickable
     // above the ink view. Android receives their bounding rects, never JS touch events.
+    let lastBlockers = "";
     const updateBlockers = () => {
       const boardRect = canvasRef.current?.getBoundingClientRect();
       if (!boardRect) return;
@@ -1690,6 +1691,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
           covers: false,
         });
       }
+      // Most refreshes find the same rects; a bridge call each time is wasted work on both sides.
+      const key = JSON.stringify(rects);
+      if (key === lastBlockers) return;
+      lastBlockers = key;
       void NativeBoard.setBlockers({ rects }).catch(() => undefined);
     };
     // A popover or dialog that has just opened must be clickable straight away, or Android takes
