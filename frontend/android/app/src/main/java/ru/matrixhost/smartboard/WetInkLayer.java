@@ -56,6 +56,9 @@ final class WetInkLayer {
         // Above the WebView so ink is never hidden behind it; transparent everywhere else.
         surface.setZOrderOnTop(true);
         surface.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        // A full-screen translucent layer is blended into every frame by SurfaceFlinger, on boards
+        // without overlay planes by the GPU at 4K. Kept at alpha 0 between strokes, it is left out.
+        surface.setAlpha(0f);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeJoin(Paint.Join.ROUND);
@@ -88,9 +91,17 @@ final class WetInkLayer {
 
     void setLatencySink(LatencySink sink) { latencySink = sink; }
 
-    void draw(Segment segment) { renderer.renderFrontBufferedLayer(segment); }
+    /** UI thread. The first segment shows the layer; it lands in the front buffer either way. */
+    void draw(Segment segment) {
+        if (surface.getAlpha() != 1f) surface.setAlpha(1f);
+        renderer.renderFrontBufferedLayer(segment);
+    }
 
-    void clear() { renderer.clear(); }
+    /** UI thread. */
+    void clear() {
+        renderer.clear();
+        surface.setAlpha(0f);
+    }
 
     void release() { renderer.release(true); }
 }
