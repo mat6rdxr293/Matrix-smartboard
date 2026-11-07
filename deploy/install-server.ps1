@@ -65,6 +65,69 @@ function Find-Python {
     return $null
 }
 
+$PythonVersion = "3.13.5"
+$Arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+
+# Straight to stdout: a function whose result is used cannot print with Write-Output, and the
+# board shows each line as it arrives.
+function Say([string]$Text) {
+    [Console]::Out.WriteLine($Text)
+    [Console]::Out.Flush()
+}
+
+function Format-MB([double]$Bytes) { return "{0:N0} MB" -f ($Bytes / 1MB) }
+
+# Downloads with a line of progress every few seconds, so a long download over SSH is visibly alive.
+function Get-FileWithProgress([string]$Url, [string]$Path, [string]$Label) {
+    Add-Type -AssemblyName System.Net.Http
+    $client = New-Object System.Net.Http.HttpClient
+    $client.Timeout = [TimeSpan]::FromMinutes(90)
+    try {
+        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { throw "$Label download failed: HTTP $([int]$response.StatusCode)" }
+        $total = $response.Content.Headers.ContentLength
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $output = [IO.File]::Create($Path)
+        try {
+            $buffer = New-Object byte[] 1048576
+            $done = 0
+            $tick = [Diagnostics.Stopwatch]::StartNew()
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $output.Write($buffer, 0, $read)
+                $done += $read
+                if ($tick.Elapsed.TotalSeconds -ge 5) {
+                    $tick.Restart()
+                    if ($total) { Say "Downloading ${Label}: $(Format-MB $done) of $(Format-MB $total) ($([int](100 * $done / $total))%)" }
+                    else { Say "Downloading ${Label}: $(Format-MB $done)" }
+                }
+            }
+        } finally {
+            $output.Dispose()
+            $stream.Dispose()
+        }
+        Say "Downloaded ${Label}: $(Format-MB $done)"
+    } finally {
+        $client.Dispose()
+    }
+}
+
+# Waits for an installer, saying every 15 s that it is still running, and gives up after a limit
+# instead of hanging the whole setup.
+function Wait-Installer([Diagnostics.Process]$Process, [string]$Label, [int]$TimeoutMinutes) {
+    # Without the handle taken early, Windows PowerShell reports no exit code for such a process.
+    $null = $Process.Handle
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while (-not $Process.WaitForExit(15000)) {
+        if ($clock.Elapsed.TotalMinutes -ge $TimeoutMinutes) {
+            try { $Process.Kill() } catch {}
+            throw "$Label did not finish in $TimeoutMinutes minutes"
+        }
+        Say "$Label still installing ($([int]$clock.Elapsed.TotalSeconds) s)"
+    }
+    return $Process.ExitCode
+}
+
+# Fallback only: winget often waits forever in an SSH session (no desktop, store agreements).
 function Install-WingetPackage([string]$Id) {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     $wingetPath = if ($winget) { $winget.Source } else { Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe" }
@@ -72,19 +135,41 @@ function Install-WingetPackage([string]$Id) {
         Write-Error "winget is required to install missing Windows prerequisites automatically."
         exit 3
     }
-
-    & $wingetPath install --id $Id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "winget failed to install $Id (exit $LASTEXITCODE)"
+    Say "Trying winget for $Id"
+    $process = Start-Process -FilePath $wingetPath -PassThru -NoNewWindow -ArgumentList @(
+        "install", "--id", $Id, "-e", "--silent", "--scope", "machine",
+        "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"
+    )
+    $code = Wait-Installer $process "winget $Id" 20
+    if ($code -ne 0) {
+        Write-Error "winget failed to install $Id (exit $code)"
         exit 3
+    }
+}
+
+function Install-Python {
+    $installer = Join-Path $env:TEMP "python-$PythonVersion-$Arch.exe"
+    try {
+        Get-FileWithProgress "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-$Arch.exe" $installer "Python $PythonVersion"
+        Write-Output "Running the Python installer (all users, silent)"
+        $process = Start-Process -FilePath $installer -PassThru -ArgumentList @(
+            "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0", "Include_launcher=1", "Include_doc=0"
+        )
+        $code = Wait-Installer $process "Python" 15
+        if ($code -ne 0 -and $code -ne 3010) { throw "Python installer exit code $code" }
+    } catch {
+        Write-Output "Direct Python install failed: $($_.Exception.Message)"
+        Install-WingetPackage "Python.Python.3.13"
+    } finally {
+        Remove-Item -Force $installer -ErrorAction SilentlyContinue
     }
 }
 
 Write-Step "[1/7] Checking Windows prerequisites"
 $Python = Find-Python
 if (-not $Python) {
-    Write-Output "Python 3.11+ not found; installing Python 3.13 with winget"
-    Install-WingetPackage "Python.Python.3.13"
+    Write-Output "Python 3.11+ not found; installing Python $PythonVersion from python.org"
+    Install-Python
     $Python = Find-Python
 }
 if (-not $Python) {
@@ -137,6 +222,7 @@ function Find-Ollama {
     $command = Get-Command ollama.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
     foreach ($candidate in @(
+        (Join-Path $RootDir "ollama\ollama.exe"),
         "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
         "$env:ProgramFiles\Ollama\ollama.exe"
     )) {
@@ -155,8 +241,21 @@ if ($InstallOllama) {
     Write-Step "[5/7] Configuring local AI (Ollama)"
     $Ollama = Find-Ollama
     if (-not $Ollama) {
-        Write-Output "Ollama not found; installing with winget"
-        Install-WingetPackage "Ollama.Ollama"
+        # The standalone build: no installer, no tray app, a fixed place the service can run from.
+        Write-Output "Ollama not found; downloading the standalone build from ollama.com"
+        $OllamaZip = Join-Path $env:TEMP "ollama-windows-$Arch.zip"
+        try {
+            Get-FileWithProgress "https://ollama.com/download/ollama-windows-$Arch.zip" $OllamaZip "Ollama"
+            Write-Output "Unpacking Ollama"
+            $OllamaDir = Join-Path $RootDir "ollama"
+            if (Test-Path $OllamaDir) { Remove-Item -Recurse -Force $OllamaDir }
+            Expand-Archive -Path $OllamaZip -DestinationPath $OllamaDir -Force
+        } catch {
+            Write-Output "Direct Ollama install failed: $($_.Exception.Message)"
+            Install-WingetPackage "Ollama.Ollama"
+        } finally {
+            Remove-Item -Force $OllamaZip -ErrorAction SilentlyContinue
+        }
         $Ollama = Find-Ollama
     }
     if (-not $Ollama) {

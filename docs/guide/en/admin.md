@@ -49,7 +49,7 @@ Any computer that is always on and is on the same network as the boards will do.
 
 **Supported systems and what to prepare:**
 
-- **Windows 10/11 or Server** — needs the **OpenSSH Server** feature. The SSH user must be in the **Administrators** group. `winget` is required: the installer uses it to add Python 3.13 and Ollama if they are missing.
+- **Windows 10/11 or Server** — needs the **OpenSSH Server** feature. The SSH user must be in the **Administrators** group. If Python 3.13 or Ollama is missing, the installer downloads it from python.org and ollama.com and shows the download progress; `winget` is only a fallback.
 - **Linux — Debian / Ubuntu** — an SSH server must be running, with a `sudo` user (or `root`). The installer adds everything else (git, Python, curl) through `apt`.
 - **Linux — Arch** — automatic setup over SSH does **not work on Arch yet**: the installer installs packages with `apt`. Choose Debian or Ubuntu for the server. The Arch commands below are for when Arch runs on the IT admin's own computer.
 - **macOS** — needs "Remote Login", an administrator user, and `python3`, `git` and `curl` from Homebrew.
@@ -501,7 +501,7 @@ If SSH is off, turn it on with the commands from [section 2](#2-what-the-server-
 Check the keyboard layout and the user name. Login is by password: the app does not support SSH key-only login.
 
 **Automatic setup on Windows fails with a permissions error.**
-The SSH user must be in the **Administrators** group. Check that `winget` is available: on older Windows install it from the Microsoft Store ("App Installer").
+The SSH user must be in the **Administrators** group. The server needs to reach python.org and ollama.com. If the direct download fails the installer tries `winget`: on older Windows install it from the Microsoft Store ("App Installer").
 
 **Automatic setup: "The server SSH fingerprint changed".**
 The SSH key at this address differs from the one the app saw before. If you reinstalled the system, that is expected. If not, check that it is the right computer.
