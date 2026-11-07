@@ -82,11 +82,15 @@ function Say([string]$Text) {
 function Format-MB([double]$Bytes) { return "{0:N0} MB" -f ($Bytes / 1MB) }
 
 # Downloads with a line of progress every few seconds, so a long download over SSH is visibly alive.
-# A dropped connection is resumed where it stopped (HTTP Range), up to a few times.
+# A dropped connection is resumed where it stopped (HTTP Range), up to a few times, and so is a
+# file a previous run left half downloaded.
 function Get-FileWithProgress([string]$Url, [string]$Path, [string]$Label) {
     Add-Type -AssemblyName System.Net.Http
-    Remove-Item -Force $Path -ErrorAction SilentlyContinue
     $done = [long]0
+    if (Test-Path $Path) {
+        $done = (Get-Item $Path).Length
+        if ($done -gt 0) { Say "Found $(Format-MB $done) of $Label from an earlier run; continuing" }
+    }
     $total = $null
     $attempts = 8
     for ($attempt = 1; $attempt -le $attempts; $attempt++) {
@@ -96,6 +100,11 @@ function Get-FileWithProgress([string]$Url, [string]$Path, [string]$Label) {
             $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $Url)
             if ($done -gt 0) { $request.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue($done, $null) }
             $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            if ($done -gt 0 -and [int]$response.StatusCode -eq 416) {
+                # Nothing past the end: the earlier run had already downloaded all of it.
+                Say "Downloaded ${Label}: $(Format-MB $done)"
+                return
+            }
             if (-not $response.IsSuccessStatusCode) { throw "HTTP $([int]$response.StatusCode)" }
             if ($done -gt 0 -and [int]$response.StatusCode -ne 206) {
                 # The server ignored the range: start over.
@@ -278,14 +287,55 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install backend dependencies" }
 function Find-Ollama {
     $command = Get-Command ollama.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
+    # Our own copy counts once it is whole: moved in after unpacking, or (from installs before that)
+    # with its runtime libraries beside it.
+    $own = Join-Path $RootDir "ollama"
+    if ((Test-Path (Join-Path $own "ollama.exe")) -and
+        ((Test-Path (Join-Path $own ".complete")) -or (Test-Path (Join-Path $own "lib\ollama")))) {
+        return (Join-Path $own "ollama.exe")
+    }
     foreach ($candidate in @(
-        (Join-Path $RootDir "ollama\ollama.exe"),
         "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
         "$env:ProgramFiles\Ollama\ollama.exe"
     )) {
         if (Test-Path $candidate) { return $candidate }
     }
+    # Installed by someone at the desktop: the SSH session runs under another profile.
+    $users = Join-Path $env:SystemDrive "Users"
+    $installed = Get-ChildItem -Path $users -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName "AppData\Local\Programs\Ollama\ollama.exe" } |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($installed) { return $installed }
     return $null
+}
+
+# The manifest Ollama keeps for a pulled model, e.g. qwen2.5:7b -> library\qwen2.5\7b.
+function Test-OllamaModel([string]$Models, [string]$Model) {
+    $name, $tag = $Model.Split(":", 2)
+    if (-not $tag) { $tag = "latest" }
+    return Test-Path (Join-Path $Models "manifests\registry.ollama.ai\library\$name\$tag")
+}
+
+# Models already on this computer are used where they are rather than downloaded again: from an
+# earlier install, from OLLAMA_MODELS, or from an Ollama someone set up at the desktop.
+function Find-OllamaModels([string]$Default, [string[]]$Wanted) {
+    $candidates = @($Default)
+    foreach ($scope in @("Machine", "User")) {
+        $value = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", $scope)
+        if ($value) { $candidates += $value }
+    }
+    $candidates += Join-Path $env:USERPROFILE ".ollama\models"
+    $candidates += Get-ChildItem -Path (Join-Path $env:SystemDrive "Users") -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName ".ollama\models" }
+    $best = $null
+    $bestCount = 0
+    foreach ($dir in $candidates) {
+        if (-not $dir -or -not (Test-Path $dir)) { continue }
+        $count = @($Wanted | Where-Object { Test-OllamaModel $dir $_ }).Count
+        if ($count -gt $bestCount) { $best = $dir; $bestCount = $count }
+    }
+    if ($best) { return $best }
+    return $Default
 }
 
 $AiBaseUrl = ""
@@ -300,17 +350,33 @@ if ($InstallOllama) {
     if (-not $Ollama) {
         # The standalone build: no installer, no tray app, a fixed place the service can run from.
         Write-Output "Ollama not found; downloading the standalone build from ollama.com"
-        $OllamaZip = Join-Path $env:TEMP "ollama-windows-$Arch.zip"
+        # Kept outside TEMP until it is unpacked, so a run that breaks off picks up where it stopped.
+        $Downloads = Join-Path $RootDir "downloads"
+        New-Item -ItemType Directory -Force -Path $Downloads | Out-Null
+        $OllamaZip = Join-Path $Downloads "ollama-windows-$Arch.zip"
+        $OllamaDir = Join-Path $RootDir "ollama"
+        $OllamaPartial = Join-Path $RootDir "ollama.partial"
         try {
             Get-FileWithProgress "https://ollama.com/download/ollama-windows-$Arch.zip" $OllamaZip "Ollama"
-            $OllamaDir = Join-Path $RootDir "ollama"
+            # Unpacked beside the final place and moved in whole, so an unpacking that breaks off
+            # never looks like an installed Ollama.
+            if (Test-Path $OllamaPartial) { Remove-Item -Recurse -Force $OllamaPartial }
+            try {
+                Expand-ZipWithProgress $OllamaZip $OllamaPartial "Ollama"
+            } catch {
+                # A broken archive is downloaded afresh next time.
+                Remove-Item -Force $OllamaZip -ErrorAction SilentlyContinue
+                throw
+            }
             if (Test-Path $OllamaDir) { Remove-Item -Recurse -Force $OllamaDir }
-            Expand-ZipWithProgress $OllamaZip $OllamaDir "Ollama"
+            Move-Item -Path $OllamaPartial -Destination $OllamaDir
+            Set-Content -Path (Join-Path $OllamaDir ".complete") -Value (Get-Date -Format o)
+            Remove-Item -Force $OllamaZip -ErrorAction SilentlyContinue
         } catch {
             Write-Output "Direct Ollama install failed: $($_.Exception.Message)"
             Install-WingetPackage "Ollama.Ollama"
         } finally {
-            Remove-Item -Force $OllamaZip -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $OllamaPartial -ErrorAction SilentlyContinue
         }
         $Ollama = Find-Ollama
     }
@@ -318,6 +384,9 @@ if ($InstallOllama) {
         Write-Error "Ollama installation completed but ollama.exe could not be located."
         exit 3
     }
+    Write-Output "Ollama: $Ollama"
+    $OllamaModels = Find-OllamaModels $OllamaModels @($AiModel, $OcrModel)
+    Write-Output "Ollama models: $OllamaModels"
 
     New-Item -ItemType Directory -Force -Path $OllamaModels | Out-Null
     $RunOllama = Join-Path $RootDir "run-ollama.ps1"
@@ -348,10 +417,14 @@ if ($InstallOllama) {
     }
     if (-not $OllamaReady) { throw "Ollama did not become ready" }
 
-    & $Ollama pull $AiModel
-    if ($LASTEXITCODE -ne 0) { throw "Failed to download $AiModel" }
-    & $Ollama pull $OcrModel
-    if ($LASTEXITCODE -ne 0) { throw "Failed to download $OcrModel" }
+    foreach ($model in @($AiModel, $OcrModel)) {
+        if (Test-OllamaModel $OllamaModels $model) {
+            Write-Output "$model is already downloaded"
+            continue
+        }
+        & $Ollama pull $model
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download $model" }
+    }
     $AiBaseUrl = "http://127.0.0.1:11434/v1"
     $OcrBaseUrl = "http://127.0.0.1:11434/v1"
 } else {
