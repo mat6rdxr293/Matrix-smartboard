@@ -219,7 +219,7 @@ public final class NativeBoardView extends View {
     /** Canvas pixels per board unit for the strokes being drawn now. */
     private float pixelsPerUnit = 1f;
 
-    private WetInkLayer wetInk;
+    private LiveInk wetInk;
     private boolean liveIsWet;
     private float wetLastX, wetLastY;
     private final InkLatency latency = new InkLatency();
@@ -315,7 +315,7 @@ public final class NativeBoardView extends View {
     }
 
     /** Null keeps the live stroke in this view, which is the path for API < 29 or a renderer failure. */
-    public void setWetInk(WetInkLayer layer) {
+    public void setWetInk(LiveInk layer) {
         wetInk = layer;
         if (layer != null) layer.setLatencySink(latency::record);
     }
@@ -347,7 +347,7 @@ public final class NativeBoardView extends View {
         pinching = false;
         setVisibility(value ? VISIBLE : GONE);
         if (surface != null) surface.setVisibility(value ? VISIBLE : GONE);
-        if (wetInk != null) wetInk.view().setVisibility(value ? VISIBLE : GONE);
+        if (wetInk != null) wetInk.setShown(value);
         invalidate();
     }
 
@@ -655,7 +655,7 @@ public final class NativeBoardView extends View {
 
     private void wetSegment(float x0, float y0, float x1, float y1, long eventTime) {
         float sx = scaleX(), sy = scaleY();
-        wetInk.draw(new WetInkLayer.Segment(x0, y0, x1, y1, liveStroke.width * sx * zoom, liveStroke.color,
+        wetInk.draw(new LiveInk.Segment(x0, y0, x1, y1, liveStroke.width * sx * zoom, liveStroke.color,
             boardLeft*sx, boardTop*sy, (boardLeft+boardWidth)*sx, (boardTop+boardHeight)*sy, wetCutouts, eventTime));
         wetLastX = x1;
         wetLastY = y1;
@@ -683,7 +683,7 @@ public final class NativeBoardView extends View {
 
     /** The board view shows a committed stroke one frame later; clear the wet copy only after that. */
     private void clearWetInkAfterCommit() {
-        final WetInkLayer layer = wetInk;
+        final LiveInk layer = wetInk;
         Choreographer.getInstance().postFrameCallback(first ->
             Choreographer.getInstance().postFrameCallback(second -> layer.clear()));
     }

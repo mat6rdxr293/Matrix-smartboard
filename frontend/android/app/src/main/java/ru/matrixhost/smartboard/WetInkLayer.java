@@ -23,27 +23,7 @@ import java.util.Collection;
  * the live one.
  */
 @RequiresApi(29)
-final class WetInkLayer {
-    /** Screen-pixel segment. {@code eventTime} is the input event's uptime, kept for latency stats. */
-    static final class Segment {
-        final float x0, y0, x1, y1, width;
-        final int color;
-        final float clipLeft, clipTop, clipRight, clipBottom;
-        /** Screen-pixel rects of UI over the board (left, top, right, bottom, ...), never drawn on. */
-        final float[] cutouts;
-        final long eventTime;
-
-        Segment(float x0, float y0, float x1, float y1, float width, int color,
-                float clipLeft, float clipTop, float clipRight, float clipBottom, float[] cutouts, long eventTime) {
-            this.x0 = x0; this.y0 = y0; this.x1 = x1; this.y1 = y1;
-            this.width = width; this.color = color;
-            this.clipLeft = clipLeft; this.clipTop = clipTop; this.clipRight = clipRight; this.clipBottom = clipBottom;
-            this.cutouts = cutouts;
-            this.eventTime = eventTime;
-        }
-    }
-
-    interface LatencySink { void record(long millis); }
+final class WetInkLayer implements LiveInk {
 
     private final SurfaceView surface;
     private final CanvasFrontBufferedRenderer<Segment> renderer;
@@ -89,19 +69,21 @@ final class WetInkLayer {
 
     View view() { return surface; }
 
-    void setLatencySink(LatencySink sink) { latencySink = sink; }
+    @Override public void setShown(boolean shown) { surface.setVisibility(shown ? View.VISIBLE : View.GONE); }
+
+    @Override public void setLatencySink(LatencySink sink) { latencySink = sink; }
 
     /** UI thread. The first segment shows the layer; it lands in the front buffer either way. */
-    void draw(Segment segment) {
+    @Override public void draw(Segment segment) {
         if (surface.getAlpha() != 1f) surface.setAlpha(1f);
         renderer.renderFrontBufferedLayer(segment);
     }
 
     /** UI thread. */
-    void clear() {
+    @Override public void clear() {
         renderer.clear();
         surface.setAlpha(0f);
     }
 
-    void release() { renderer.release(true); }
+    @Override public void release() { renderer.release(true); }
 }

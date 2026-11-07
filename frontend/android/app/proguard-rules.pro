@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# JNI names in the XBH board library are bound to this class.
+-keep class com.xbh.whiteboard.AccelerateDraw { *; }

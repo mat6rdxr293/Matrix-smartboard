@@ -107,7 +107,9 @@ public class NativeBoardPlugin extends Plugin {
                     }
                     parent.addView(view, parent.indexOfChild(web),
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                    WetInkLayer wetInk = createWetInk();
+                    LiveInk overlayInk = createOverlayInk(view);
+                    WetInkLayer wetInk = overlayInk == null ? createWetInk() : null;
+                    if (overlayInk != null) view.setWetInk(overlayInk);
                     if (wetInk != null) {
                         // Below the WebView in view order so touches still reach it; its surface
                         // is composited above everything regardless.
@@ -124,6 +126,14 @@ public class NativeBoardPlugin extends Plugin {
                 call.reject("Failed to enable NativeBoard", e);
             }
         });
+    }
+
+    /** XBH boards: the maker's overlay plane, as their own whiteboard uses. `--ez xbhInk false` turns it off. */
+    private LiveInk createOverlayInk(View anchor) {
+        if (!getActivity().getIntent().getBooleanExtra("xbhInk", true)) return null;
+        android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+        getActivity().getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
+        return XbhAccelInk.create(anchor, metrics.widthPixels, metrics.heightPixels);
     }
 
     /** `am start ... --ez wetInk false` turns the front buffer off to compare latency on a device. */
