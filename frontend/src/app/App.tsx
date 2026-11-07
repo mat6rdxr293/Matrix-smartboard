@@ -1684,14 +1684,16 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                   style={{ width: boardExpanded ? 0 : tasksSidebarWidth }}
                   aria-hidden={boardExpanded}
                 >
-                  <motion.div
+                  {/* A CSS transition, like the board toolbar's: the compositor runs it, so React
+                      work at the same moment cannot stall it as it stalls a JS-driven animation. */}
+                  <div
                     className="glass absolute inset-y-0 left-0 rounded-2xl p-4 shadow-soft"
-                    style={{ width: tasksSidebarWidth, pointerEvents: boardExpanded ? "none" : "auto" }}
-                    initial={false}
-                    animate={{ x: boardExpanded ? -(tasksSidebarWidth + 24) : 0, opacity: boardExpanded ? 0 : 1 }}
-                    transition={{
-                      x: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
-                      opacity: { duration: boardExpanded ? 0.24 : 0.2, ease: "easeOut" },
+                    style={{
+                      width: tasksSidebarWidth,
+                      pointerEvents: boardExpanded ? "none" : "auto",
+                      transform: boardExpanded ? `translate3d(${-(tasksSidebarWidth + 24)}px, 0, 0)` : "translate3d(0, 0, 0)",
+                      opacity: boardExpanded ? 0 : 1,
+                      transition: `transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${boardExpanded ? 240 : 200}ms ease-out`,
                     }}
                   >
                     <div className="mb-3">
@@ -1756,7 +1758,7 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
                         )}
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
 
                 <div

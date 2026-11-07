@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, CloudUpload, DoorOpen, Expand, History, Moon, Pause, Play, RefreshCw, Server, Settings2, SquareCheckBig, Sun, Tv, WifiOff } from "lucide-react";
-import { motion } from "framer-motion";
 
 /** The page under a tab is swapped only after the pill has moved; see App. */
 export const TAB_PILL_SECONDS = 0.22;
@@ -92,6 +91,28 @@ export default function TopBar({
   const [serverPanelOpen, setServerPanelOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
+  // Where the pill sits: measured from the tab buttons, so labels in any language fit.
+  const tabsRef = useRef<HTMLDivElement | null>(null);
+  const [pill, setPill] = useState<{ left: number; width: number; base: number; animate: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const button = tabsRef.current?.querySelector<HTMLElement>(`[data-tab-id="${currentTab}"]`);
+      if (!button) { setPill(null); return; }
+      setPill((prev) => {
+        const left = button.offsetLeft, width = button.offsetWidth;
+        if (prev && prev.left === left && prev.width === width) return prev;
+        // The first placement jumps; every later one slides.
+        return { left, width, base: prev?.base ?? width, animate: prev !== null };
+      });
+    };
+    measure();
+    const container = tabsRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [currentTab, tabs.map((tab) => `${tab.id}:${tab.label}`).join("|")]);
+
   const nativeApp = isNativeApp();
   const isSlidesTab = currentTab === "slides";
   const isTeacherTab = currentTab === "teacher";
@@ -137,23 +158,32 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center justify-center">
-        <div className="relative flex items-center rounded-[14px] border border-white/10 bg-white/[0.045] p-0.5 shadow-inner">
+        <div ref={tabsRef} className="relative flex items-center rounded-[14px] border border-white/10 bg-white/[0.045] p-0.5 shadow-inner">
+          {/* One pill moved by a CSS transform transition, which the compositor runs; a JS-driven
+              layout animation stalled whenever the page under the new tab was being built. */}
+          {pill && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0.5 bottom-0.5 rounded-[11px] bg-accent"
+              style={{
+                width: pill.base,
+                transformOrigin: "0 50%",
+                transform: `translate3d(${pill.left}px, 0, 0) scaleX(${pill.width / pill.base})`,
+                transition: pill.animate ? `transform ${TAB_PILL_SECONDS * 1000}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none",
+              }}
+            />
+          )}
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              data-tab-id={tab.id}
               onClick={() => onChangeTab(tab.id)}
               className={cn(
                 "relative min-w-[104px] overflow-hidden rounded-[11px] px-4 py-2 text-[12px] font-semibold transition-colors",
                 currentTab === tab.id ? "text-accentText" : "text-frost/55 hover:text-frost/90"
               )}
             >
-              {currentTab === tab.id && (
-                <motion.span
-                  layoutId="topbar-tab-pill"
-                  className="absolute inset-0 rounded-[11px] bg-accent"
-                  transition={{ duration: TAB_PILL_SECONDS, ease: [0.22, 1, 0.36, 1] }}
-                />
-              )}
+              {!pill && currentTab === tab.id && <span className="absolute inset-0 rounded-[11px] bg-accent" />}
               <span className="relative z-10">{tab.label}</span>
             </button>
           ))}
