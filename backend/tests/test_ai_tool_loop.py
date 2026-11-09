@@ -1598,3 +1598,57 @@ def test_visual_fallback_deletes_only_an_unambiguous_graph():
     assert ai_module._fallback_visual_board_actions("Удали график.", state) == [
         {"type": "delete_graph", "target_id": "graph-1"},
     ]
+
+
+def _reply(content=None, tool_calls=None):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=tool_calls or []))])
+
+
+def _use_fake_ai(monkeypatch, responses, requests):
+    class FakeCompletions:
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            return responses[min(len(requests), len(responses)) - 1]
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ai_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ai_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ai_module.settings, "ai_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ai_module.settings, "ai_model", "qwen")
+    monkeypatch.setattr(ai_module.settings, "ai_tools_enabled", True)
+
+
+def test_a_task_no_tool_fits_is_answered_without_tools_not_failed(monkeypatch):
+    # sin α + sin β: the model reaches for a numeric tool, which cannot take symbols, twice.
+    def bad_call(n):
+        return SimpleNamespace(id=f"call-{n}", function=SimpleNamespace(
+            name="math_trig_value", arguments=json.dumps({"function": "sin", "angle": f"alpha{n}", "unit": "radians"})))
+    requests = []
+    _use_fake_ai(monkeypatch, [
+        _reply(tool_calls=[bad_call(1)]),
+        _reply(tool_calls=[bad_call(2)]),
+        _reply("Здесь нечего вычислять: это выражение, а не уравнение."),
+    ], requests)
+
+    result = ai_module.generate_ai_response("check", r"\sin \alpha + \sin \beta", subject="algebra")
+
+    assert result == "Здесь нечего вычислять: это выражение, а не уравнение."
+    assert len(requests) == 3
+    assert "tools" not in requests[2]
+
+
+def test_a_second_answer_without_a_tool_is_taken(monkeypatch):
+    requests = []
+    _use_fake_ai(monkeypatch, [
+        _reply("Ответ без инструмента"),
+        _reply("Снова ответ без инструмента"),
+    ], requests)
+
+    result = ai_module.generate_ai_response("check", r"\sin \alpha + \sin \beta", subject="algebra")
+
+    # One reminder to use a tool, then the model's answer instead of four more rounds and a 503.
+    assert result == "Снова ответ без инструмента"
+    assert len(requests) == 2

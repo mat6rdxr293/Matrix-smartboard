@@ -529,6 +529,36 @@ def _local_chat_with_tools(
 
         return ""
 
+    # The model's last answer turned away because no tool had been used yet.
+    refused_answer = ""
+
+    def answer_without_tools(reason: str) -> str:
+        """A tool is a check, not the answer: when none fits the task (a bare expression, a
+        question with nothing to compute), answer without one instead of failing the request."""
+        logger.info("AI tools did not help (%s); answering without them", reason)
+        if refused_answer:
+            return _postprocess_math(refused_answer) if postprocess else refused_answer
+        response = client.chat.completions.create(
+            model=settings.ai_model,
+            messages=[
+                {"role": "system", "content": sys},
+                {
+                    "role": "user",
+                    "content": (
+                        user
+                        + "\n\nВычислительные инструменты к этой задаче не подошли. Ответь без них: "
+                        "не выдумывай численных результатов, если в задаче нечего вычислять, так и скажи."
+                    ),
+                },
+            ],
+            max_tokens=max_tokens,
+        )
+        content = getattr(response.choices[0].message, "content", None)
+        text = content.strip() if content else ""
+        if not text:
+            raise RuntimeError(reason)
+        return _postprocess_math(text) if postprocess else text
+
     def run_tool(name: str, arguments: dict) -> tuple[dict, bool]:
         nonlocal successful_tool_use, unique_tool_calls, failed_tool_calls
 
@@ -659,7 +689,7 @@ def _local_chat_with_tools(
             ):
                 force_final = True
             elif not successful_tool_use and failed_tool_calls >= 2:
-                raise RuntimeError(
+                return answer_without_tools(
                     "AI не смог выполнить вычислительные инструменты после нескольких попыток"
                 )
             continue
@@ -716,12 +746,19 @@ def _local_chat_with_tools(
             ):
                 force_final = True
             elif not successful_tool_use and failed_tool_calls >= 2:
-                raise RuntimeError(
+                return answer_without_tools(
                     "AI не смог выполнить вычислительные инструменты после нескольких попыток"
                 )
             continue
 
         if require_tool and not successful_tool_use:
+            if text and refused_answer:
+                # Asked once already to use a tool and answered without one again: a tool does
+                # not fit here, and every further round costs the class several seconds.
+                refused_answer = text
+                return answer_without_tools("AI ответил без инструментов дважды")
+            if text:
+                refused_answer = text
             messages.append({"role": "assistant", "content": text or ""})
             messages.append(
                 {
@@ -746,7 +783,7 @@ def _local_chat_with_tools(
         # a 503 for the whole task.
         return ""
 
-    raise RuntimeError("AI не смог завершить ответ после вызова инструментов")
+    return answer_without_tools("AI не смог завершить ответ после вызова инструментов")
 
 
 
