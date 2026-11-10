@@ -289,7 +289,7 @@ def test_incomplete_result_tail_is_removed_and_previous_answer_promoted():
     ]
 
 
-def test_board_solution_requires_model_selected_tool_before_structured_answer(monkeypatch):
+def test_board_solution_explains_a_result_the_backend_computed_first(monkeypatch):
     requests = []
     tool_call = SimpleNamespace(
         id="quad-1",
@@ -299,13 +299,6 @@ def test_board_solution_requires_model_selected_tool_before_structured_answer(mo
         ),
     )
     responses = [
-        SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=None, tool_calls=[tool_call])
-                )
-            ]
-        ),
         SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -362,16 +355,12 @@ def test_board_solution_requires_model_selected_tool_before_structured_answer(mo
         response_locale="ru",
     )
 
-    assert len(requests) == 3
-    assert requests[0]["tool_choice"] == "required"
-    assert requests[0]["tools"]
-    assert "tool_choice" not in requests[1]
-    assert requests[1]["messages"][-1]["role"] == "tool"
-    assert '"discriminant"' in requests[1]["messages"][-1]["content"]
-    assert '"text": "-84"' in requests[1]["messages"][-1]["content"]
-    assert steps[-1] == {"text": "Действительных корней нет.", "kind": "result"}
-    assert "$$D=16-100=-84$$" in text
-
+    # No round spent getting the model to call the tool: the computation was already done and
+    # the model only explains it (the second call asks for the too-short answer in full).
+    assert len(requests) == 2
+    assert "tools" not in requests[0]
+    assert '"discriminant"' in requests[0]["messages"][-1]["content"]
+    assert steps[-1]["kind"] == "result"
 
 def test_local_ai_recovers_pseudo_tool_call_printed_as_text(monkeypatch):
     requests = []
@@ -1640,15 +1629,61 @@ def test_a_task_no_tool_fits_is_answered_without_tools_not_failed(monkeypatch):
     assert "tools" not in requests[2]
 
 
-def test_a_second_answer_without_a_tool_is_taken(monkeypatch):
+def test_a_third_answer_without_a_tool_ends_the_tool_rounds(monkeypatch):
     requests = []
     _use_fake_ai(monkeypatch, [
         _reply("Ответ без инструмента"),
         _reply("Снова ответ без инструмента"),
+        _reply("И снова без инструмента"),
+        _reply("Полный ответ"),
     ], requests)
 
     result = ai_module.generate_ai_response("check", r"\sin \alpha + \sin \beta", subject="algebra")
 
-    # One reminder to use a tool, then the model's answer instead of four more rounds and a 503.
-    assert result == "Снова ответ без инструмента"
-    assert len(requests) == 2
+    # Two reminders to use a tool, then a full answer without tools instead of more rounds and
+    # a 503. The rounds before a tool are capped, so their cut-off text is not shown.
+    assert result == "Полный ответ"
+    assert len(requests) == 4
+    assert requests[0]["max_tokens"] == ai_module.PRE_TOOL_MAX_TOKENS
+    assert requests[3]["max_tokens"] > ai_module.PRE_TOOL_MAX_TOKENS
+    assert "tools" not in requests[3]
+
+
+def test_the_models_own_step_numbers_are_dropped():
+    _text, steps = ai_module._parse_board_solution(
+        '{"summary":"","steps":[{"text":"1. Теорема Пифагора","kind":"text"},{"text":"2) 10","kind":"result"}]}'
+    )
+    assert [step["text"] for step in steps] == ["Теорема Пифагора", "10"]
+
+
+def test_the_backend_reads_and_runs_the_computation_of_common_tasks():
+    cases = {
+        "Решите уравнение x^2 - 5x + 6 = 0": ("math_quadratic", "x"),
+        "Решите систему: 2x + y = 7, x - y = 2": ("math_solve_system", None),
+        r"Найдите производную f(x) = x^3 \cdot \sin x": ("math_differentiate", "x**3*cos(x) + 3*x**2*sin(x)"),
+        "Упростите: \\sin^2 x + \\cos^2 x + \\tan x \\cdot \\cot x\nОтвет: 2": ("math_simplify", "2"),
+        "Разложите на множители x^2 - 9": ("math_factor", "(x - 3)*(x + 3)"),
+    }
+    for problem, (tool, expected) in cases.items():
+        trace = ai_module._prerun_reference_tool(problem, "algebra")
+        assert [item["tool"] for item in trace] == [tool], problem
+        result = trace[0]["payload"]["result"]
+        if tool in {"math_differentiate", "math_simplify", "math_factor"}:
+            assert f"'text': '{expected}'" in str(result), (problem, result)
+
+
+def test_student_work_below_the_task_is_not_read_as_the_task():
+    trace = ai_module._prerun_reference_tool(
+        "Решите уравнение x^2 - 5x + 6 = 0\nD = 25 + 24 = 49\nx1 = (5 + 7)/2 = 6", "algebra"
+    )
+    assert trace and trace[0]["arguments"] == {"equation": "x^2 - 5x + 6=0"}
+
+
+def test_a_task_in_words_is_left_to_the_model():
+    assert ai_module._prerun_reference_tool("Тело падает с высоты 45 м. Сколько времени оно падает?", "physics") == []
+
+
+def test_functions_without_brackets_are_read_as_functions():
+    assert ai_module._tool_expression(r"\tan x \cdot \cot x") == "tan(x) * cot(x)"
+    assert ai_module._tool_expression("tg x + ctg 2x") == "tan(x) + cot(2x)"
+    assert ai_module._tool_expression(r"\sin^2 x") == "sin(x)^2"

@@ -15,6 +15,17 @@ from .ai_tools import ToolError, execute_tool, openai_chat_tools
 logger = logging.getLogger(__name__)
 
 
+# Enough for a tool call, or for a text that asks for one ("pseudo" tool calls), and no more.
+PRE_TOOL_MAX_TOKENS = 320
+
+
+def _json_mode() -> dict:
+    """JSON mode for the request, but not for a local model: Ollama enforces it with a grammar
+    that has no room for LaTeX's backslashes, so ``\\sin x`` came out as ``\\text{sin } x`` or as
+    garbage such as ``ó(x)``. The board's parser already takes slightly broken JSON."""
+    return {} if settings.ai_base_url else {"response_format": {"type": "json_object"}}
+
+
 def _find_math_ranges(text: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     i = 0
@@ -379,6 +390,7 @@ def _local_chat_with_tools(
     finalize_after_tool: bool = False,
     return_after_tool_names: Optional[set[str]] = None,
     only_tool_names: Optional[set[str]] = None,
+    prerun_trace: Optional[list[dict]] = None,
 ) -> str:
     tools = openai_chat_tools(subject, task_text or user) if settings.ai_tools_enabled else []
     only_tool_names = set(only_tool_names or ())
@@ -480,7 +492,7 @@ def _local_chat_with_tools(
                 "temperature": 0,
             }
             if structured_board and json_mode_supported:
-                request["response_format"] = {"type": "json_object"}
+                request.update(_json_mode())
             try:
                 response = client.chat.completions.create(**request)
             except Exception:
@@ -529,15 +541,14 @@ def _local_chat_with_tools(
 
         return ""
 
-    # The model's last answer turned away because no tool had been used yet.
-    refused_answer = ""
+    # Answers turned away because no tool had been used yet. They are written under a token cap
+    # (see below), so they are a signal, not something to show.
+    refusals = 0
 
     def answer_without_tools(reason: str) -> str:
         """A tool is a check, not the answer: when none fits the task (a bare expression, a
         question with nothing to compute), answer without one instead of failing the request."""
         logger.info("AI tools did not help (%s); answering without them", reason)
-        if refused_answer:
-            return _postprocess_math(refused_answer) if postprocess else refused_answer
         response = client.chat.completions.create(
             model=settings.ai_model,
             messages=[
@@ -593,6 +604,21 @@ def _local_chat_with_tools(
             failed_tool_calls += 1
         return payload, True
 
+    if prerun_trace:
+        # The backend already ran the computation (_prerun_reference_tool): one call explains
+        # it, instead of rounds spent getting the model to call the tool.
+        for item in prerun_trace:
+            internal_tool_trace.append(dict(item))
+            if tool_trace is not None:
+                tool_trace.append(dict(item))
+            if isinstance(item.get("payload"), dict) and item["payload"].get("ok"):
+                successful_tool_use = True
+                unique_tool_calls += 1
+        if successful_tool_use:
+            finalized = finalize_from_tools()
+            if finalized:
+                return finalized
+
     for round_index in range(6):
         if force_final and not force_final_notice_sent:
             messages.append(
@@ -617,6 +643,9 @@ def _local_chat_with_tools(
             request["tools"] = tools
             if require_tool and not successful_tool_use:
                 request["tool_choice"] = "required"
+                # Ollama ignores tool_choice, so a local model often writes a whole answer first,
+                # only for it to be turned away. A tool call is short; cap the round at that.
+                request["max_tokens"] = min(max_tokens, PRE_TOOL_MAX_TOKENS)
 
         response = client.chat.completions.create(**request)
         message = response.choices[0].message
@@ -752,13 +781,12 @@ def _local_chat_with_tools(
             continue
 
         if require_tool and not successful_tool_use:
-            if text and refused_answer:
-                # Asked once already to use a tool and answered without one again: a tool does
+            if text and refusals >= 2:
+                # Asked twice already to use a tool and answered without one again: a tool does
                 # not fit here, and every further round costs the class several seconds.
-                refused_answer = text
-                return answer_without_tools("AI ответил без инструментов дважды")
+                return answer_without_tools("AI трижды ответил без инструментов")
             if text:
-                refused_answer = text
+                refusals += 1
             messages.append({"role": "assistant", "content": text or ""})
             messages.append(
                 {
@@ -932,6 +960,10 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
                     continue
                 if kind not in {"text", "math", "result", "warning"}:
                     kind = "text"
+                # The board numbers the steps; the model sometimes numbers them too ("1. 1. ...").
+                text = re.sub(r"^\s*\d{1,2}[.)]\s+(?=\S)", "", text)
+                if not text.strip():
+                    continue
                 steps.append({"text": text.strip()[:2000], "kind": kind})
 
     if not steps:
@@ -939,6 +971,13 @@ def _parse_board_solution(raw: str) -> tuple[str, list[dict[str, str]]]:
         if loose_steps:
             summary = summary or loose_summary
             steps = loose_steps
+
+    if not steps and re.search(r'\\+"(?:summary|steps|text|kind)', cleaned):
+        # Without JSON mode a local model sometimes writes the JSON as an escaped string
+        # ({\"summary\": ...}); the quotes are what is escaped, not the mathematics.
+        unescaped = re.sub(r'\\+"', '"', cleaned)
+        if unescaped != cleaned:
+            return _parse_board_solution(unescaped)
 
     if not steps:
         fallback = _postprocess_math((raw or "").strip())
@@ -998,7 +1037,7 @@ def _repair_board_solution_response(
         ],
         "max_tokens": 1400,
         "temperature": 0,
-        "response_format": {"type": "json_object"},
+        **_json_mode(),
     }
     try:
         response = client.chat.completions.create(**request)
@@ -1205,7 +1244,8 @@ def _extract_quadratic_equation(problem: str) -> str | None:
             continue
 
         line = re.sub(
-            r"^(?:реши(?:ть|те)?|решить|solve|найди(?:те)?|find)\s*:?\s*",
+            r"^(?:реши(?:ть|те)?|решить|solve|найди(?:те)?|find)\s*"
+            r"(?:(?:квадратное\s+)?уравнени[ея]|(?:quadratic\s+)?equation)?\s*:?\s*",
             "",
             line,
             flags=re.I,
@@ -1592,7 +1632,7 @@ def _generate_visual_board_plan(
         ],
         "max_tokens": 700,
         "temperature": 0,
-        "response_format": {"type": "json_object"},
+        **_json_mode(),
     }
     try:
         response = client.chat.completions.create(**request)
@@ -2425,7 +2465,7 @@ def _augment_verified_steps_with_explanations(
             ],
             "max_tokens": 700,
             "temperature": 0,
-            "response_format": {"type": "json_object"},
+            **_json_mode(),
         }
         try:
             response = client.chat.completions.create(**request)
@@ -2845,6 +2885,131 @@ _REFERENCE_TOOLS: dict[str, set[str]] = {
     "molar_mass": {"chemistry_molar_mass"},
     "chem_balance": {"chemistry_balance_equation"},
 }
+
+
+# Words that start a task statement and are not part of the mathematics.
+_TASK_WORDS_RE = re.compile(
+    r"^\s*(?:(?:реши(?:ть|те)?|найди(?:те)?|вычисли(?:ть|те)?|упрости(?:ть|те)?|раскрой(?:те)?|"
+    r"разложи(?:ть|те)?|докажи(?:те)?|solve|find|compute|simplify|expand|factor|calculate)\s*"
+    r"(?:на\s+множители|скобки|производную|систему(?:\s+уравнений)?|(?:квадратное\s+)?уравнени[ея]|"
+    r"выражение|значение\s+выражения|the\s+derivative|the\s+system|equation|expression|of)?\s*"
+    r"(?:функции|function|of)?\s*:?\s*)+",
+    re.I,
+)
+
+
+def _task_line(problem: str) -> str:
+    """The statement of the task: before a marked answer, and its first line when the student's
+    work follows on the next ones."""
+    task, _answer = _split_problem_and_marked_answer(problem)
+    for line in task.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+# A function written without brackets, as on a board: sin x, \cos^2 x, tg x.
+_BARE_FUNCTION_RE = re.compile(
+    r"\b(sin|cos|tan|cot|tg|ctg|ln|log|exp)\s*(?:\^\s*\{?\s*(\d+)\s*\}?)?\s*(\d*(?:\.\d+)?[a-zA-Z](?![a-zA-Z(])|\d+(?:\.\d+)?)"
+)
+_FUNCTION_NAMES = {"tg": "tan", "ctg": "cot"}
+
+
+def _bracket_bare_functions(expression: str) -> str:
+    """``sin x * cot x`` to ``sin(x) * cot(x)``: the tools' parser read ``tan x * cot x`` as
+    ``tan(cot*x**2)``, and the board then called a right answer wrong."""
+    def bracket(match: re.Match) -> str:
+        name = _FUNCTION_NAMES.get(match.group(1), match.group(1))
+        call = f"{name}({match.group(3)})"
+        return f"{call}^{match.group(2)}" if match.group(2) else call
+    return _BARE_FUNCTION_RE.sub(bracket, expression)
+
+
+def _tool_expression(fragment: str) -> str:
+    fragment = fragment.strip().strip(".;:")
+    fragment = re.sub(r"^\$+|\$+$", "", fragment).strip()
+    fragment = re.sub(r"^\\\(|\\\)$", "", fragment).strip()
+    fragment = re.sub(r"\\(sin|cos|tan|cot|tg|ctg|ln|log|exp)\b", r"\1", fragment)
+    expression = _latexish_to_tool_expression(fragment.replace("х", "x").replace("Х", "X"))
+    return _bracket_bare_functions(expression)
+
+
+def _prerun_arguments(problem: str, task_kind: str) -> tuple[str, dict] | None:
+    """The reference tool and its arguments, read straight from the task, for the kinds whose
+    input is one expression or equation. None when the task does not read cleanly: the model
+    then picks the tool itself, as before."""
+    line = _task_line(problem)
+    if not line:
+        return None
+    body = _TASK_WORDS_RE.sub("", line).strip()
+    if not body or re.search(r"[а-яё]{3,}", body, re.I):
+        # Words left in the mathematics: not something to hand to the tool as it is.
+        return None
+    if task_kind == "equation" and body.count("=") == 1:
+        left, right = (_tool_expression(part) for part in body.split("=", 1))
+        if not left or not right:
+            return None
+        equation = f"{left}={right}"
+        quadratic = re.search(r"x\s*\^\s*\(?2\)?", equation) and not re.search(r"x\s*\^\s*\(?[3-9]", equation)
+        return ("math_quadratic" if quadratic else "math_solve"), {"equation": equation}
+    if task_kind == "system":
+        parts = [part for part in re.split(r"\s*[,;]\s*|\s+и\s+|\s+and\s+", body) if part.count("=") == 1]
+        if len(parts) < 2:
+            return None
+        equations = []
+        for part in parts:
+            left, right = (_tool_expression(side) for side in part.split("=", 1))
+            if not left or not right:
+                return None
+            equations.append(f"{left}={right}")
+        return "math_solve_system", {"equations": equations}
+    if task_kind in {"derivative", "simplify", "expand", "factor"}:
+        expression = body
+        named = re.match(r"^(?:[a-zA-Z]\s*\(\s*[a-z]\s*\)|y)\s*=\s*(.+)$", expression)
+        if named:
+            expression = named.group(1)
+        if "=" in expression:
+            return None
+        expression = _tool_expression(expression)
+        if not expression:
+            return None
+        tool = {"derivative": "math_differentiate", "simplify": "math_simplify",
+                "expand": "math_expand", "factor": "math_factor"}[task_kind]
+        arguments: dict = {"expression": expression}
+        if task_kind == "derivative":
+            arguments["variable"] = "x"
+        return tool, arguments
+    return None
+
+
+def _is_word_problem(problem: str) -> bool:
+    """A task told in sentences rather than written as mathematics: several words left once the
+    instruction at the start is taken off."""
+    body = _TASK_WORDS_RE.sub("", _task_line(problem))
+    return len(re.findall(r"[а-яёәіңғүұқөһ]{3,}|[a-z]{4,}", body, re.I)) >= 3
+
+
+def _prerun_reference_tool(problem: str, subject: Optional[str]) -> list[dict]:
+    """Runs the computation for the task before the model is asked, so the model only has to
+    explain a result that is already right. A local model is slow at deciding which tool to call
+    (whole answers were written and thrown away first) and unreliable at checking a student's
+    arithmetic itself. Returns a tool trace with one successful call, or nothing."""
+    task_kind = _check_task_kind(problem, subject)
+    if task_kind not in _REFERENCE_TOOLS:
+        return []
+    found = _prerun_arguments(problem, task_kind)
+    if not found:
+        return []
+    name, arguments = found
+    try:
+        payload = execute_tool(name, arguments)
+    except Exception as error:  # noqa: BLE001 - any tool failure means: let the model choose
+        logger.info("Pre-run %s %s failed: %s", name, arguments, error)
+        return []
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return []
+    logger.info("Pre-ran %s for a %s task", name, task_kind)
+    return [{"tool": name, "arguments": dict(arguments), "payload": payload}]
 
 
 def _successful_tool_entries(tool_trace: list[dict]) -> list[dict]:
@@ -3562,6 +3727,12 @@ def generate_board_response(
         tool_trace=tool_trace,
         return_after_tool_names=reference_tool_names if simple_marked_check else None,
         only_tool_names=reference_tool_names if simple_marked_check else None,
+        # A hint must not give the answer away; a bare marked answer is judged without the model.
+        prerun_trace=(
+            _prerun_reference_tool(problem, subject)
+            if mode == "check" and not simple_marked_check
+            else None
+        ),
     )
 
     if simple_marked_check and _check_trace_covers_task(problem, subject, tool_trace):
@@ -4076,6 +4247,11 @@ def generate_board_solution(
     )
 
     tool_trace: list[dict] = []
+    prerun_trace = _prerun_reference_tool(problem, subject)
+    # A task in words (a triangle, a falling body) that the backend could not read as one
+    # expression: the model is not pushed to call a tool first. Pushing it took up to eight
+    # calls and three minutes, and the solution was right without the tool anyway.
+    word_problem = not prerun_trace and _is_word_problem(problem)
     raw = _local_chat_with_tools(
         client,
         sys=sys,
@@ -4084,13 +4260,14 @@ def generate_board_solution(
         subject=subject,
         task_text=problem,
         postprocess=False,
-        require_tool=_requires_tool_use(subject, "solution"),
+        require_tool=_requires_tool_use(subject, "solution") and not word_problem,
         tool_trace=tool_trace,
         only_tool_names=constrained_tools,
         return_after_tool_names=return_after_verified_tool,
+        prerun_trace=prerun_trace,
     )
 
-    if include_actions and required_reference_tools and not _check_trace_covers_task(
+    if include_actions and required_reference_tools and not word_problem and not _check_trace_covers_task(
         problem,
         subject,
         tool_trace,
@@ -4129,6 +4306,7 @@ def generate_board_solution(
         }
         task_label = task_kind_labels.get(task_kind, task_kind)
         retry_trace: list[dict] = []
+        unverified_raw = raw
         raw = _local_chat_with_tools(
             client,
             sys=(
@@ -4157,11 +4335,16 @@ def generate_board_solution(
         tool_trace = retry_trace
 
         if not _check_trace_covers_task(problem, subject, tool_trace):
-            raise RuntimeError(
-                f"Не удалось надежно подтвердить решение задачи типа «{task_label}». "
-                "Вычислительный модуль не подтвердил исходную запись. "
-                "Попробуйте распознать задание ещё раз."
-            )
+            # Word problems (a triangle, a falling body) often do not map onto a tool call the
+            # model manages to make. The class gets the model's own solution rather than an
+            # error after three minutes; only an empty answer is a failure.
+            logger.warning("No tool confirmed the %s task; answering without confirmation", task_kind)
+            if not _parse_board_solution(raw)[1]:
+                raw = unverified_raw
+            if not _parse_board_solution(raw)[1]:
+                raise RuntimeError(
+                    f"Не удалось решить задачу типа «{task_label}». Попробуйте ещё раз."
+                )
 
     actions = _parse_board_actions(raw) if include_actions else []
     text, steps = _parse_board_solution(raw)
@@ -4286,7 +4469,7 @@ def generate_board_solution(
                 ],
                 "max_tokens": max(max_tokens, 1600),
                 "temperature": 0,
-                "response_format": {"type": "json_object"},
+                **_json_mode(),
             }
             try:
                 rewritten_response = client.chat.completions.create(**request)

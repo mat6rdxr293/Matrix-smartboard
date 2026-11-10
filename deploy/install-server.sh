@@ -89,7 +89,7 @@ install_macos() {
   <key>Label</key><string>ru.matrixhost.ollama</string>
   <key>ProgramArguments</key><array><string>$ollama_bin</string><string>serve</string></array>
   <key>UserName</key><string>$run_user</string>
-  <key>EnvironmentVariables</key><dict><key>HOME</key><string>$run_home</string><key>OLLAMA_HOST</key><string>127.0.0.1:11434</string></dict>
+  <key>EnvironmentVariables</key><dict><key>HOME</key><string>$run_home</string><key>OLLAMA_HOST</key><string>127.0.0.1:11434</string><key>OLLAMA_CONTEXT_LENGTH</key><string>8192</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/var/tmp/matrix-smartboard-ollama.log</string>
@@ -247,7 +247,13 @@ if [[ "$INSTALL_OLLAMA" == "1" ]]; then
   if ! command -v ollama >/dev/null 2>&1; then
     curl -fsSL https://ollama.com/install.sh | sh
   fi
-  systemctl enable --now ollama || true
+  # The assistant's prompt with its tools is ~3k tokens before the answer; Ollama's default 4k
+  # context cut its start off silently.
+  mkdir -p /etc/systemd/system/ollama.service.d
+  printf '[Service]\nEnvironment="OLLAMA_CONTEXT_LENGTH=8192"\n' > /etc/systemd/system/ollama.service.d/matrix-smartboard.conf
+  systemctl daemon-reload || true
+  systemctl enable ollama || true
+  systemctl restart ollama || true
   for _ in $(seq 1 30); do
     if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then break; fi
     sleep 2

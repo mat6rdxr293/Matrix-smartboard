@@ -23,7 +23,10 @@ ALLOWED_EXPR = re.compile(r"^[A-Za-z0-9+*/^().,= \t-]+$")
 IDENT = re.compile(r"\b[A-Za-z][A-Za-z0-9]*\b")
 FUNCTIONS: dict[str, Any] = {
     "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
-    "asin": sp.asin, "acos": sp.acos, "atan": sp.atan,
+    # Without these, cot(x) was read as the product cot*x and tan(x)*cot(x) did not simplify to 1.
+    "cot": sp.cot, "sec": sp.sec, "csc": sp.csc, "tg": sp.tan, "ctg": sp.cot,
+    "asin": sp.asin, "acos": sp.acos, "atan": sp.atan, "acot": sp.acot,
+    "arcsin": sp.asin, "arccos": sp.acos, "arctan": sp.atan, "arctg": sp.atan, "arcctg": sp.acot,
     "sqrt": sp.sqrt, "exp": sp.exp, "log": sp.log, "ln": sp.log,
     "abs": sp.Abs, "Abs": sp.Abs, "pi": sp.pi, "E": sp.E,
 }
