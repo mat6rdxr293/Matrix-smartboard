@@ -458,13 +458,62 @@ function findOpeningBrace(source: string, closeIndex: number) {
   return -1;
 }
 
+function findOpeningBracket(source: string, closeIndex: number) {
+  let depth = 0;
+  for (let i = closeIndex; i >= 0; i -= 1) {
+    if (source[i] === "]") depth += 1;
+    else if (source[i] === "[") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+const LEFT_RIGHT_TOKEN_RE = /\\(left|right)\s*(\\[A-Za-z]+|\\.|[^\s\\])/g;
+
+// "\right)" only makes sense with its "\left(", so both delimiters go together and the content stays.
+function removeRightDelimiter(source: string, end: number) {
+  const head = source.slice(0, end);
+  const tokens = [...head.matchAll(LEFT_RIGHT_TOKEN_RE)];
+  const last = tokens[tokens.length - 1];
+  if (!last || last[1] !== "right" || last.index! + last[0].length !== end) return null;
+  let depth = 0;
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    depth += tokens[i][1] === "right" ? 1 : -1;
+    if (depth === 0) {
+      const left = tokens[i];
+      return (
+        source.slice(0, left.index!) +
+        source.slice(left.index! + left[0].length, last.index!) +
+        source.slice(end)
+      );
+    }
+  }
+  return source.slice(0, last.index!) + source.slice(end);
+}
+
 function removeLastMathAtom(source: string) {
   let end = source.length;
   while (end > 0 && /\s/.test(source[end - 1])) end -= 1;
   if (end === 0) return "";
 
+  const withoutRight = removeRightDelimiter(source, end);
+  if (withoutRight != null) return withoutRight;
+
   if (source[end - 1] === "}") {
-    const open = findOpeningBrace(source, end - 1);
+    let open = findOpeningBrace(source, end - 1);
+    // Commands with several arguments (\frac{a}{b}, \sqrt[n]{x}) are removed whole,
+    // never one argument at a time, which would leave broken LaTeX behind.
+    while (open > 0) {
+      const previous = source[open - 1];
+      const previousOpen =
+        previous === "}" ? findOpeningBrace(source, open - 1)
+          : previous === "]" ? findOpeningBracket(source, open - 1)
+            : -1;
+      if (previousOpen < 0) break;
+      open = previousOpen;
+    }
     if (open >= 0) {
       let commandStart = open;
       while (commandStart > 0 && /[A-Za-z]/.test(source[commandStart - 1])) commandStart -= 1;
@@ -656,6 +705,7 @@ export default function StructuredMathEditor({
       const nextContent =
         activePart.content.slice(0, localOffset) + latex + activePart.content.slice(localOffset);
       const nextValue = replacePart(value, activePart, nextContent);
+      if (!validateLatex(nextValue)) return;
       const insertionStart = activePart.start + 1 + localOffset;
       if (selectKind) {
         setPendingCaretTarget({ kind: selectKind, from: insertionStart, to: insertionStart + latex.length });
@@ -667,6 +717,7 @@ export default function StructuredMathEditor({
     }
 
     const nextValue = value.slice(0, position) + latex + value.slice(position);
+    if (!validateLatex(nextValue)) return;
     if (selectKind) {
       setPendingCaretTarget({ kind: selectKind, from: position, to: position + latex.length });
     } else {
@@ -717,6 +768,7 @@ export default function StructuredMathEditor({
       return;
     }
     const nextValue = replacePart(value, activePart, "");
+    if (!validateLatex(nextValue)) return;
     setCaretPos(activePart.start + (activePart.bare ? 1 : 0));
     onChange(nextValue);
   };
@@ -733,6 +785,7 @@ export default function StructuredMathEditor({
       const removed = before.length - nextBefore.length;
       const nextContent = nextBefore + activePart.content.slice(localOffset);
       const nextValue = replacePart(value, activePart, nextContent);
+      if (!validateLatex(nextValue)) return;
       const contentStart = activePart.start + (activePart.bare ? 1 : 0);
       setCaretPos(contentStart + Math.max(0, localOffset - removed));
       onChange(nextValue);
@@ -742,6 +795,7 @@ export default function StructuredMathEditor({
     const before = value.slice(0, position);
     const nextBefore = removeLastMathAtom(before);
     if (nextBefore === before) return;
+    if (!validateLatex(nextBefore + value.slice(position))) return;
     setCaretPos(nextBefore.length);
     onChange(nextBefore + value.slice(position));
   };

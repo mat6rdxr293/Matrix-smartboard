@@ -74,6 +74,11 @@ _MATH_OCR_RE = re.compile(
 
 _INTEGRAL_RE = re.compile(r"(?:\\?int(?=\b|_|\[)|∫)", re.I)
 
+# The vision model reads a handwritten "sin α" as "sinh α": the hook of α or the tail of n
+# looks like an h. Hyperbolic functions are not part of the school course, so a trailing h on
+# a trig function is always a misread and is dropped.
+_HYPERBOLIC_MISREAD_RE = re.compile(r"(\\?)(sin|cos|tan|cot|tg|ctg)h(?![A-Za-z])")
+
 
 def _integral_count(text: str | None) -> int:
     return len(_INTEGRAL_RE.findall(_normalize_ocr_text(text)))
@@ -117,6 +122,7 @@ def _normalize_ocr_text(text: str | None) -> str:
         value = re.sub(r"^(?:latex|tex|text|math)\s*\n", "", value, flags=re.I)
     value = re.sub(r"^(?:ocr|transcription|распознано|транскрипция)\s*:\s*", "", value, flags=re.I)
     value = "\n".join(line.strip() for line in value.splitlines() if line.strip())
+    value = _HYPERBOLIC_MISREAD_RE.sub(r"\1\2", value)
     return value.strip()
 
 
@@ -991,6 +997,15 @@ def _reconcile_math_prompt(candidates: list[str]) -> str:
 
 
 def ocr_image(
+    png_bytes: bytes,
+    progress: Callable[[int, str, int | None, int | None], None] | None = None,
+) -> str:
+    # Verification and audit passes return fresh model output, so the misread fix is applied once
+    # more to whatever comes out, not only to the candidates.
+    return _HYPERBOLIC_MISREAD_RE.sub(r"\1\2", _ocr_image(png_bytes, progress))
+
+
+def _ocr_image(
     png_bytes: bytes,
     progress: Callable[[int, str, int | None, int | None], None] | None = None,
 ) -> str:

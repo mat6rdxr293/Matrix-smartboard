@@ -739,3 +739,39 @@ def test_spatial_json_parser_repairs_unescaped_latex_backslashes():
     parsed = ocr_module._integral_from_spatial_response(raw)
 
     assert parsed == r"\int_{0}^{4} (3x^2 + \cos 4\pi) dx"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (r"\sinh \alpha + \sinh \beta", r"\sin \alpha + \sin \beta"),
+        ("sinh α + sinh β", "sin α + sin β"),
+        (r"\cosh(x) - \tanh x", r"\cos(x) - \tan x"),
+        ("tgh x + ctgh x", "tg x + ctg x"),
+        (r"\sin \alpha + \sinh", r"\sin \alpha + \sin"),
+        # Ordinary trig functions and words with "sin" inside stay as they are.
+        (r"\sin \alpha + \arcsin x", r"\sin \alpha + \arcsin x"),
+        ("sin hx", "sin hx"),
+    ],
+)
+def test_ocr_drops_hyperbolic_misread_of_trig_functions(raw, expected):
+    assert ocr_module._normalize_ocr_text(raw) == expected
+
+
+def test_ocr_result_never_returns_sinh(monkeypatch):
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=r"\sinh \alpha + \sinh \beta"))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+
+    assert ocr_module.ocr_image(b"\x89PNG fake") == r"\sin \alpha + \sin \beta"

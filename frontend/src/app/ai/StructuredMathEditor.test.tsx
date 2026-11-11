@@ -205,3 +205,43 @@ describe("StructuredMathEditor visual keyboard", () => {
     expect(onChange).toHaveBeenCalledWith("x + 1");
   });
 });
+
+describe("StructuredMathEditor delete keeps the visual editor", () => {
+  const pressDelete = () => fireEvent.click(screen.getAllByText("Удалить")[0]);
+
+  it("removes a whole fraction instead of leaving \\frac{1} behind", () => {
+    const values: string[] = [];
+    render(<Harness initial={String.raw`x + \frac{1}{2}`} onValue={(value) => values.push(value)} />);
+
+    pressDelete();
+
+    expect(values.at(-1)).toBe("x + ");
+    expect(screen.getByTestId("structured-math-editor")).toBeInTheDocument();
+  });
+
+  it("removes \\right) together with its \\left( and keeps what was inside", () => {
+    const values: string[] = [];
+    render(<Harness initial={String.raw`\left(\frac{1}{2}\right)`} onValue={(value) => values.push(value)} />);
+
+    pressDelete();
+
+    expect(values.at(-1)).toBe(String.raw`\frac{1}{2}`);
+    expect(screen.getByTestId("structured-math-editor")).toBeInTheDocument();
+  });
+
+  it.each([
+    String.raw`\sin \alpha + \sin \beta = 2\sin\frac{\alpha+\beta}{2}\cos\frac{\alpha-\beta}{2}`,
+    String.raw`\left(\frac{1}{2}\right)^{x-2} > 4`,
+    String.raw`\sqrt[3]{x+1} = 3`,
+    String.raw`5^{x-1} < 25`,
+  ])("deletes %s to the end without falling back to the text field", (formula) => {
+    const values: string[] = [];
+    render(<Harness initial={formula} onValue={(value) => values.push(value)} />);
+
+    for (let i = 0; i < 80 && values.at(-1) !== ""; i += 1) {
+      pressDelete();
+      expect(screen.getByTestId("structured-math-editor")).toBeInTheDocument();
+    }
+    expect(values.at(-1)).toBe("");
+  });
+});
