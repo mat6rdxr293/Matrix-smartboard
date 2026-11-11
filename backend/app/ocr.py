@@ -1225,7 +1225,11 @@ def _ocr_image(
         best = _choose_math_candidate(candidates)
         if best:
             emit(90, "auditing")
-            if _ocr_line_count(best) == 1:
+            # The model often reads only the first row of a worked solution. The rows are re-read
+            # one by one only when the reading has fewer lines than the image visibly has rows,
+            # so a one-row reading of a three-row solution must go to the row audit as well.
+            visible_rows = len(_horizontal_math_line_crops(compact))
+            if _ocr_line_count(best) == 1 and visible_rows < 2:
                 best = _verify_zero_tends_to(client, best, compact, base_url)
                 best = _verify_trailing_numeric_rhs(client, best, compact, base_url)
             else:

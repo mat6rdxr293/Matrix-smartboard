@@ -784,3 +784,34 @@ def test_ocr_text_drops_a_copied_candidate_label():
     assert _normalize_ocr_text("Candidate 1: 2x=6\nCandidate 1: x=3") == "2x=6\nx=3"
     # A word that merely starts like the label inside the text is left alone.
     assert _normalize_ocr_text("x = кандидатов 3") == "x = кандидатов 3"
+
+
+def test_a_worked_solution_read_as_one_row_is_re_read_row_by_row(monkeypatch):
+    """The laptop's OCR model returned only "2x+5=11" for a three-row solution on the board."""
+    from pathlib import Path
+
+    image = (Path(__file__).parent / "fixtures" / "board-three-rows.png").read_bytes()
+    rows = iter(["2x+5=11", "2x=6", "x=3"])
+
+    def answer(prompt: str) -> str:
+        if prompt == ocr_module._SINGLE_LINE_OCR_PROMPT:
+            return next(rows)
+        if prompt in (ocr_module._RHS_TAIL_OCR_PROMPT, ocr_module._SPATIAL_LINE_AUDIT_PROMPT):
+            return ""
+        return "2x + 5 = 11"
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            prompt = kwargs["messages"][0]["content"][0]["text"]
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=answer(prompt)))])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(ocr_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ocr_module, "get_openai_key", lambda: None)
+    monkeypatch.setattr(ocr_module.settings, "ocr_base_url", "http://localhost:11434/v1")
+    monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
+
+    assert ocr_module.ocr_image(image).splitlines() == ["2x+5=11", "2x=6", "x=3"]
