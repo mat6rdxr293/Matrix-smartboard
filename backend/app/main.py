@@ -20,7 +20,13 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from .ai import ai_stream_sink, generate_ai_response, generate_board_response
+from .ai import (
+    ai_stream_sink,
+    generate_ai_response,
+    generate_board_response,
+    visible_stream_steps,
+    visible_stream_text,
+)
 from .ocr import ocr_image
 from .polynomial import candidates, divide, eval_poly, horner, horner_table, normalize
 from .ratelimit import RateLimiter
@@ -782,7 +788,12 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
 async def _run_ai_job(job_id: str, payload: AiRequest, context: dict) -> None:
     # Only answers that are shown as written stream: a check's draft is replaced by the verdict.
     streams = payload.mode in {"hint", "solution"} or not payload.board_output
-    token = ai_stream_sink.set((lambda text: progress_jobs.set_partial(job_id, text)) if streams else None)
+    locale = payload.response_locale or "ru"
+
+    def sink(raw: str) -> None:
+        progress_jobs.set_partial(job_id, visible_stream_text(raw), visible_stream_steps(raw, locale))
+
+    token = ai_stream_sink.set(sink if streams else None)
     try:
         response = await _answer_ai(payload, context)
         progress_jobs.complete(job_id, response.model_dump())

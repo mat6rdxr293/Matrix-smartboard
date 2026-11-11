@@ -25,6 +25,7 @@ class ProgressJobStore:
                 "result": None,
                 "error": None,
                 "partial": None,
+                "partialSteps": None,
                 "updatedAt": int(time.time() * 1000),
             }
         return job_id
@@ -41,14 +42,18 @@ class ProgressJobStore:
                 "updatedAt": int(time.time() * 1000),
             })
 
-    def set_partial(self, job_id: str, text: str) -> None:
-        """The answer as far as it is written, for a client that shows it while it is written."""
+    def set_partial(self, job_id: str, text: str, steps: list | None = None) -> None:
+        """The answer as far as it is written, for a client that shows it while it is written:
+        the readable text and the steps already finished."""
         with self._lock:
             job = self._jobs[job_id]
+            if job.get("partial") == text and job.get("partialSteps") == steps:
+                return
             job.update({
                 "status": "running",
                 "stage": "writing",
                 "partial": text,
+                "partialSteps": steps,
                 "updatedAt": int(time.time() * 1000),
             })
 

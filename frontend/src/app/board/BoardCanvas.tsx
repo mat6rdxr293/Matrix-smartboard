@@ -102,6 +102,10 @@ export type BoardCanvasHandle = {
     shouldCancel?: () => boolean,
     lowMotion?: boolean,
   ) => Promise<Stroke[]>;
+  /** AI ink written step by step stays on the board until it is saved, even if the board's saved strokes change. */
+  holdAiInk: () => void;
+  /** Ends holdAiInk; `discard` takes the unsaved AI ink off the board again. */
+  releaseAiInk: (discard: boolean) => void;
 };
 
 const EMPTY_SOLUTIONS: AiSolutionBlock[] = [];
@@ -205,6 +209,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   const workerEnabledRef = useRef(false);
   const strokesRef = useRef<Stroke[]>(initialStrokes);
   const aiStrokeAnimationActiveRef = useRef(false);
+  const aiInkHeldRef = useRef(false);
   const graphsRef = useRef<GraphElement[]>(initialGraphs);
   const [graphs, setGraphs] = useState<GraphElement[]>(initialGraphs);
   const solutionsRef = useRef<AiSolutionBlock[]>(initialSolutions);
@@ -1802,7 +1807,7 @@ const BoardCanvas = forwardRef(function BoardCanvas({
   }, []);
 
   useEffect(() => {
-    if (aiStrokeAnimationActiveRef.current) return;
+    if (aiStrokeAnimationActiveRef.current || aiInkHeldRef.current) return;
     strokesRef.current = [...initialStrokes];
     setShowClearConfirm(false);
     setClearSlideValue(0);
@@ -2312,6 +2317,15 @@ const BoardCanvas = forwardRef(function BoardCanvas({
     getLastOcrTargetColor: () => lastOcrTargetColorRef.current,
     allocateSolutionPlacement,
     animateAiStrokes,
+    holdAiInk: () => {
+      aiInkHeldRef.current = true;
+    },
+    releaseAiInk: (discard: boolean) => {
+      aiInkHeldRef.current = false;
+      if (!discard) return;
+      strokesRef.current = [...initialStrokes];
+      scheduleRender();
+    },
   }));
 
   const schedulePenHide = () => {

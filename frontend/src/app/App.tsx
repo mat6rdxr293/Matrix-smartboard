@@ -17,6 +17,7 @@ import BoardCanvas, { type BoardCanvasHandle } from "@/app/board/BoardCanvas";
 import type { Stroke } from "@/app/board/boardEngine";
 import { extractSafeHandwritingSteps, solutionStepsToHandwritingStrokes } from "@/app/board/aiHandwriting";
 import { pickAiInkColor } from "@/app/board/aiInkColor";
+import { createLiveBoardWriter } from "@/app/board/liveHandwriting";
 import {
   buildAiBoardState,
   graphFromAiAction,
@@ -1067,6 +1068,66 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       solutionRunRef.current !== token ||
       activeSolutionTokenRef.current?.id !== runId;
 
+    // Title and layout depend on the mode only: a solution or hint is written while it is generated.
+    const title =
+      mode === "hint"
+        ? locale === "kk"
+          ? "Көмек:"
+          : locale === "en"
+            ? "Hint:"
+            : "Подсказка:"
+        : mode === "check"
+          ? locale === "kk"
+            ? "Тексеру:"
+            : locale === "en"
+              ? "Check:"
+              : "Проверка:"
+          : "";
+
+    const width = mode === "hint" ? 430 : mode === "check" ? 500 : 560;
+    const fontSize =
+      mode === "solution"
+        ? ultraLite
+          ? 27
+          : 29
+        : ultraLite
+          ? 23
+          : 25;
+    const strokeWidth = mode === "solution"
+      ? ultraLite
+        ? 2.4
+        : 2.15
+      : ultraLite
+        ? 2.2
+        : 1.95;
+    const lineGap = mode === "solution" ? 11 : 9;
+    const stepGap = mode === "solution" ? 16 : mode === "check" ? 12 : 10;
+
+    const live =
+      mode !== "check" && boardCanvasRef.current
+        ? createLiveBoardWriter(
+            boardCanvasRef.current,
+            {
+              width,
+              estimatedHeight: mode === "hint" ? 200 : 520,
+              color: pickAiInkColor({
+                mode,
+                studentColor: boardCanvasRef.current.getLastOcrTargetColor() ?? boardPenColor,
+                boardBgColor,
+                checkCorrect: undefined,
+              }),
+              strokeWidth,
+              fontSize,
+              lineGap,
+              stepGap,
+              lowMotion: ultraLite,
+            },
+            title ? { text: title, kind: "text" } : null,
+            isCancelled,
+          )
+        : null;
+    let liveSaved = false;
+
     setAiStreamText("");
     try {
       const res = await callAiStreaming(
@@ -1087,8 +1148,11 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
             boardHistory.document.strokes,
           ),
         ],
-        (partial) => {
-          if (!isCancelled()) setAiStreamText(partial);
+        (partial, finished) => {
+          if (isCancelled()) return;
+          if (live && finished.length) live.update(extractSafeHandwritingSteps(finished, "", locale));
+          // Once the board is writing, the text card would only repeat it.
+          setAiStreamText(live?.writing ? "" : partial);
         },
       );
       setAiStreamText("");
@@ -1115,43 +1179,11 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         checkCorrect,
       });
 
-      const title =
-        mode === "hint"
-          ? locale === "kk"
-            ? "Көмек:"
-            : locale === "en"
-              ? "Hint:"
-              : "Подсказка:"
-          : mode === "check"
-            ? locale === "kk"
-              ? "Тексеру:"
-              : locale === "en"
-                ? "Check:"
-                : "Проверка:"
-            : "";
 
       const boardSteps = title
         ? [{ text: title, kind: "text" as const }, ...rawSteps]
         : rawSteps;
 
-      const width = mode === "hint" ? 430 : mode === "check" ? 500 : 560;
-      const fontSize =
-        mode === "solution"
-          ? ultraLite
-            ? 27
-            : 29
-          : ultraLite
-            ? 23
-            : 25;
-      const strokeWidth = mode === "solution"
-        ? ultraLite
-          ? 2.4
-          : 2.15
-        : ultraLite
-          ? 2.2
-          : 1.95;
-      const lineGap = mode === "solution" ? 11 : 9;
-      const stepGap = mode === "solution" ? 16 : mode === "check" ? 12 : 10;
 
       const taskHeading = /^(?:Задание|Task|Тапсырма)\s+\d+\s*$/i;
       const taskGroups: typeof boardSteps[] = [];
@@ -1173,7 +1205,13 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       }
 
       const writtenAll: Stroke[] = [];
-      for (let groupIndex = 0; groupIndex < taskGroups.length; groupIndex += 1) {
+      if (live) {
+        // Several tasks are placed next to each task, not in one column: written as before.
+        const liveStrokes = taskGroups.length === 1 ? await live.finish(taskGroups[0]) : (live.release(true), null);
+        if (isCancelled()) return;
+        if (liveStrokes?.length) writtenAll.push(...liveStrokes);
+      }
+      for (let groupIndex = 0; !writtenAll.length && groupIndex < taskGroups.length; groupIndex += 1) {
         const group = taskGroups[groupIndex];
         const draft = solutionStepsToHandwritingStrokes(group, {
           x: 12,
@@ -1228,6 +1266,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         strokes: writtenAll,
         ts: Date.now(),
       });
+      live?.release(false);
+      liveSaved = true;
 
       await executeAiBoardActions(res.board_actions, aiColor, isCancelled);
       if (isCancelled()) return;
@@ -1254,6 +1294,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         setAssistantLoading(false);
         setAiStreamText("");
       }
+      // Ink written while the answer was generated and never saved (error, cancel) goes away.
+      if (!liveSaved) live?.release(true);
     }
   };
 

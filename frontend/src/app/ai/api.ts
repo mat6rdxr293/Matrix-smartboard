@@ -29,9 +29,11 @@ export async function callAi(
   return (await res.json()) as AiResult;
 }
 
+export type AiStep = { text: string; kind: "text" | "math" | "result" | "warning" };
+
 export type AiResult = {
   text: string;
-  steps?: Array<{ text: string; kind: "text" | "math" | "result" | "warning" }> | null;
+  steps?: AiStep[] | null;
   board_actions?: AiBoardAction[] | null;
 };
 
@@ -73,12 +75,13 @@ async function aiErrorDetail(res: Response) {
 
 /**
  * The same answer as callAi, with the text shown while the model writes it: the server runs the
- * request as a job and `onPartial` gets what is written so far. A server without AI jobs (an older
- * version) is asked the usual way.
+ * request as a job and `onPartial` gets what is written so far: the readable text and the steps
+ * the model has finished (cleaned like the steps of the answer). A server without AI jobs (an
+ * older version) is asked the usual way.
  */
 export async function callAiStreaming(
   args: Parameters<typeof callAi>,
-  onPartial: (text: string) => void,
+  onPartial: (text: string, finishedSteps: AiStep[]) => void,
   pollMs = 400,
 ): Promise<AiResult> {
   const created = await apiFetch("/api/ai/jobs", {
@@ -99,12 +102,13 @@ export async function callAiStreaming(
     const job = (await res.json()) as {
       status: "queued" | "running" | "done" | "error";
       partial?: string | null;
+      partialSteps?: AiStep[] | null;
       result?: AiResult | null;
       error?: string | null;
     };
     if (job.partial && job.partial !== shown) {
       shown = job.partial;
-      onPartial(shown);
+      onPartial(shown, job.partialSteps ?? []);
     }
     if (job.status === "done" && job.result) return job.result;
     if (job.status === "error") throw new Error(job.error || "AI недоступен");

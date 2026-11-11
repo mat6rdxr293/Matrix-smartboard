@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 # Enough for a tool call, or for a text that asks for one ("pseudo" tool calls), and no more.
-# Where the text of the answer being written goes while the model writes it (the board shows it
-# live). Set per request; calls with tools are not streamed, their text is never shown.
+# Where the answer goes while the model writes it: the raw text so far (read it with
+# visible_stream_text / visible_stream_steps). Set per request; calls with tools are not
+# streamed, their text is never shown.
 ai_stream_sink: ContextVar[Optional[Callable[[str], None]]] = ContextVar("ai_stream_sink", default=None)
 
 _STREAM_TEXT_RE = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)', re.S)
@@ -45,6 +46,36 @@ def visible_stream_text(raw: str) -> str:
     return "\n".join(parts)
 
 
+_STREAM_STEP_RE = re.compile(r'\{[^{}]*"text"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}', re.S)
+
+
+def visible_stream_steps(raw: str, response_locale: str = "ru") -> list[dict[str, str]]:
+    """The steps the model has finished writing so far, cleaned the same way as the steps of the
+    finished answer, so a board that writes them as they come gets what it would have written."""
+    value = raw.lstrip()
+    if not (value.startswith("{") or value.startswith("```")):
+        return []
+    steps: list[dict[str, str]] = []
+    for match in _STREAM_STEP_RE.finditer(value):
+        try:
+            item = json.loads(match.group(0))
+        except ValueError:
+            continue
+        text = item.get("text") if isinstance(item, dict) else None
+        if not isinstance(text, str):
+            continue
+        kind = item.get("kind")
+        if kind not in {"text", "math", "result", "warning"}:
+            kind = "text"
+        text = re.sub(r"^\s*\d{1,2}[.)]\s+(?=\S)", "", text).strip()[:2000]
+        if text:
+            steps.append({"text": text, "kind": kind})
+    if not steps:
+        return []
+    _text, steps = _sanitize_board_language("", steps, response_locale)
+    return steps
+
+
 class _StreamingCompletions:
     def __init__(self, inner) -> None:
         self._inner = inner
@@ -55,7 +86,6 @@ class _StreamingCompletions:
             return self._inner.create(**request)
         pieces: list[str] = []
         finish_reason = None
-        shown = ""
         for chunk in self._inner.create(**request, stream=True):
             choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
             if choice is None:
@@ -63,13 +93,10 @@ class _StreamingCompletions:
             delta = getattr(getattr(choice, "delta", None), "content", None)
             if delta:
                 pieces.append(delta)
-                visible = visible_stream_text("".join(pieces))
-                if visible != shown:
-                    shown = visible
-                    try:
-                        sink(visible)
-                    except Exception:  # noqa: BLE001
-                        logger.debug("AI stream sink failed", exc_info=True)
+                try:
+                    sink("".join(pieces))
+                except Exception:  # noqa: BLE001
+                    logger.debug("AI stream sink failed", exc_info=True)
             finish_reason = getattr(choice, "finish_reason", None) or finish_reason
         return SimpleNamespace(
             choices=[SimpleNamespace(

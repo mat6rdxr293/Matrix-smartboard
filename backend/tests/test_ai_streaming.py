@@ -60,7 +60,8 @@ def test_answers_stream_to_the_sink_and_tool_rounds_do_not(monkeypatch):
 
     assert answer.choices[0].message.content == '{"steps":[{"text":"Шаг один"}]}'
     assert answer.choices[0].finish_reason == "stop"
-    assert seen == ["1. Шаг", "1. Шаг один"]
+    # The sink gets the raw text so far; what the class sees is read from it.
+    assert seen == ['{"steps":[{"text":"Шаг', '{"steps":[{"text":"Шаг один"}]}']
     assert tool_round.choices[0].message.content == "без потока"
     assert "stream" not in fake.requests[1]
 
@@ -113,3 +114,28 @@ def test_ai_job_shows_the_text_while_it_is_written(monkeypatch):
 def test_the_summary_is_not_counted_as_a_step():
     raw = '{"summary":"Решение неравенства","steps":[{"text":"Заметим, что 9 = 3^2","kind":"text"},{"text":"Тогда'
     assert ai_module.visible_stream_text(raw) == "1. Заметим, что 9 = 3^2\n2. Тогда"
+
+
+def test_only_finished_steps_are_handed_to_the_board_and_cleaned_like_the_answer():
+    raw = (
+        '{"summary":"","steps":[{"text":"1. Заметим, что 25 = 5^2","kind":"text"},'
+        '{"text":"x < 3","kind":"result"},{"text":"Ответ: x'
+    )
+    steps = ai_module.visible_stream_steps(raw)
+    # The model's own number is dropped as in the finished answer; the step still being written is not there.
+    assert steps == [
+        {"text": "Заметим, что 25 = 5^2", "kind": "text"},
+        {"text": "x < 3", "kind": "result"},
+    ]
+    assert ai_module.visible_stream_steps("Просто текст") == []
+    assert ai_module.visible_stream_steps('{"steps":[{"text":"Шаг') == []
+
+
+def test_finished_steps_match_the_steps_of_the_finished_answer():
+    raw = (
+        '{"summary":"Решение","steps":[{"text":"2) Перепишем: 3^{2-x} \\\\geq 3^2","kind":"math"},'
+        '{"text":"x \\\\leq 0","kind":"result"}]}'
+    )
+    _text, final_steps = ai_module._parse_board_solution(raw)
+    _text, final_steps = ai_module._sanitize_board_language(_text, final_steps, "ru")
+    assert ai_module.visible_stream_steps(raw) == final_steps
