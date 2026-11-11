@@ -36,7 +36,7 @@ import {
   withSubjectQuery,
 } from "@/app/subjects/subjectConfig";
 import { Button } from "@/components/ui/button";
-import { callAi, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
+import { callAi, callAiStreaming, getStatus, type AiMode, type ProgressUpdate } from "@/app/ai/api";
 import { X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, useDragControls } from "framer-motion";
 import { useI18n } from "@/i18n";
@@ -199,6 +199,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
   }, []);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  // The answer as the model writes it, shown over the board until the handwriting starts.
+  const [aiStreamText, setAiStreamText] = useState("");
   const [taskOpen, setTaskOpen] = useState(false);
   const [focusedFloatingPanel, setFocusedFloatingPanel] = useState<"task" | "assistant">("assistant");
   const [slideshowOpen, setSlideshowOpen] = useState(false);
@@ -1065,24 +1067,31 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       solutionRunRef.current !== token ||
       activeSolutionTokenRef.current?.id !== runId;
 
+    setAiStreamText("");
     try {
-      const res = await callAi(
-        mode,
-        boardText,
-        undefined,
-        undefined,
-        false,
-        subjectName,
-        lesson.id,
-        crypto.randomUUID(),
-        true,
-        true,
-        locale,
-        buildAiBoardState(
-          boardHistory.document.graphs,
-          boardHistory.document.strokes,
-        ),
+      const res = await callAiStreaming(
+        [
+          mode,
+          boardText,
+          undefined,
+          undefined,
+          false,
+          subjectName,
+          lesson.id,
+          crypto.randomUUID(),
+          true,
+          true,
+          locale,
+          buildAiBoardState(
+            boardHistory.document.graphs,
+            boardHistory.document.strokes,
+          ),
+        ],
+        (partial) => {
+          if (!isCancelled()) setAiStreamText(partial);
+        },
       );
+      setAiStreamText("");
       if (isCancelled()) return;
 
       const rawSteps = extractSafeHandwritingSteps(res.steps, res.text, locale);
@@ -1241,7 +1250,10 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
       if (activeSolutionTokenRef.current?.id === runId) {
         activeSolutionTokenRef.current = null;
       }
-      if (solutionRunRef.current === token) setAssistantLoading(false);
+      if (solutionRunRef.current === token) {
+        setAssistantLoading(false);
+        setAiStreamText("");
+      }
     }
   };
 
@@ -2051,6 +2063,22 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         </div>
 
       </div>
+      <AnimatePresence>
+        {assistantLoading && aiStreamText && (
+          <motion.div
+            data-floating-panel
+            data-testid="ai-stream-card"
+            className="fixed bottom-6 left-1/2 z-[60] max-h-[40vh] w-[min(640px,calc(100vw-32px))] -translate-x-1/2 overflow-y-auto rounded-2xl border border-white/10 bg-[#0d131c]/95 px-5 py-4 text-[15px] leading-6 text-frost shadow-2xl backdrop-blur"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.16 }}
+          >
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-accent/80">{tl("thinking")}</div>
+            <MathText text={aiStreamText} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {scoreOverlay && (
           <motion.div

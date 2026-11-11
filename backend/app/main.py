@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from .ai import generate_ai_response, generate_board_response
+from .ai import ai_stream_sink, generate_ai_response, generate_board_response
 from .ocr import ocr_image
 from .polynomial import candidates, divide, eval_poly, horner, horner_table, normalize
 from .ratelimit import RateLimiter
@@ -657,8 +657,8 @@ async def media_endpoint(name: str) -> FileResponse:
     return FileResponse(path, media_type=media_type)
 
 
-@app.post("/api/ai", response_model=AiResponse, dependencies=[Depends(_rate_limit_dependency)])
-async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
+def _ai_request_context(payload: AiRequest, request: Request) -> dict:
+    """Checks the lesson and records the student's message, before the answer is generated."""
     subject_id = _normalize_subject(payload.subject)
     history_file = _subject_ai_history_file(subject_id)
     lesson_store = None
@@ -678,6 +678,21 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
             text=payload.student_attempt or payload.problem,
             mode=payload.mode,
         )
+    return {
+        "subject_id": subject_id,
+        "history_file": history_file,
+        "lesson_store": lesson_store,
+        "school_id": school_id,
+        "message_id": message_id,
+    }
+
+
+async def _answer_ai(payload: AiRequest, context: dict) -> AiResponse:
+    subject_id = context["subject_id"]
+    history_file = context["history_file"]
+    lesson_store = context["lesson_store"]
+    school_id = context["school_id"]
+    message_id = context["message_id"]
     try:
         steps = None
         board_actions = None
@@ -757,6 +772,45 @@ async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
                 status="error",
             )
         raise HTTPException(status_code=503, detail=f"AI недоступен: {exc}") from exc
+
+
+@app.post("/api/ai", response_model=AiResponse, dependencies=[Depends(_rate_limit_dependency)])
+async def ai_endpoint(payload: AiRequest, request: Request) -> AiResponse:
+    return await _answer_ai(payload, _ai_request_context(payload, request))
+
+
+async def _run_ai_job(job_id: str, payload: AiRequest, context: dict) -> None:
+    # Only answers that are shown as written stream: a check's draft is replaced by the verdict.
+    streams = payload.mode in {"hint", "solution"} or not payload.board_output
+    token = ai_stream_sink.set((lambda text: progress_jobs.set_partial(job_id, text)) if streams else None)
+    try:
+        response = await _answer_ai(payload, context)
+        progress_jobs.complete(job_id, response.model_dump())
+    except HTTPException as exc:
+        progress_jobs.fail(job_id, str(exc.detail))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("AI progress job failed")
+        progress_jobs.fail(job_id, f"AI недоступен: {exc}")
+    finally:
+        ai_stream_sink.reset(token)
+
+
+@app.post("/api/ai/jobs", dependencies=[Depends(_rate_limit_dependency)])
+async def create_ai_job(payload: AiRequest, request: Request) -> dict:
+    """The same answer as /api/ai, started in the background: polling the job shows the text
+    while the model writes it instead of 15-30 s of nothing."""
+    context = _ai_request_context(payload, request)
+    job_id = progress_jobs.create("ai")
+    _spawn_progress_task(_run_ai_job(job_id, payload, context))
+    return {"jobId": job_id}
+
+
+@app.get("/api/ai/jobs/{job_id}")
+async def get_ai_job(job_id: str) -> dict:
+    job = progress_jobs.get(job_id)
+    if job is None or job.get("kind") != "ai":
+        raise HTTPException(status_code=404, detail="AI job не найден")
+    return job
 
 
 def _spawn_progress_task(coro) -> None:

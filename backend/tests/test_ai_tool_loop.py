@@ -1589,8 +1589,11 @@ def test_visual_fallback_deletes_only_an_unambiguous_graph():
     ]
 
 
-def _reply(content=None, tool_calls=None):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=tool_calls or []))])
+def _reply(content=None, tool_calls=None, finish_reason="stop"):
+    return SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content=content, tool_calls=tool_calls or []),
+        finish_reason=finish_reason,
+    )])
 
 
 def _use_fake_ai(monkeypatch, responses, requests):
@@ -1640,13 +1643,39 @@ def test_a_third_answer_without_a_tool_ends_the_tool_rounds(monkeypatch):
 
     result = ai_module.generate_ai_response("check", r"\sin \alpha + \sin \beta", subject="algebra")
 
-    # Two reminders to use a tool, then a full answer without tools instead of more rounds and
-    # a 503. The rounds before a tool are capped, so their cut-off text is not shown.
+    # A check needs the tool: two reminders to use one, then a full answer without tools instead
+    # of more rounds and a 503. The rounds before a tool are capped, so their text is not shown.
     assert result == "Полный ответ"
     assert len(requests) == 4
     assert requests[0]["max_tokens"] == ai_module.PRE_TOOL_MAX_TOKENS
     assert requests[3]["max_tokens"] > ai_module.PRE_TOOL_MAX_TOKENS
     assert "tools" not in requests[3]
+
+
+def test_without_reminders_a_text_answer_is_written_in_full_at_once(monkeypatch):
+    requests = []
+    _use_fake_ai(monkeypatch, [
+        _reply("Начало ответа без инструмента", finish_reason="length"),
+        _reply("Полный ответ"),
+        _reply("Лишний раунд"),
+    ], requests)
+    client = ai_module.OpenAI()
+
+    result = ai_module._local_chat_with_tools(
+        client,
+        sys="system",
+        user=r"Реши неравенство 5^{x-1} < 25",
+        max_tokens=2000,
+        subject="algebra",
+        require_tool=True,
+        tool_reminders=0,
+    )
+
+    # A solution does not wait through reminders (10-17 s each): one more request writes it.
+    assert result == "Полный ответ"
+    assert len(requests) == 2
+    assert requests[0]["max_tokens"] == ai_module.PRE_TOOL_MAX_TOKENS
+    assert "tools" not in requests[1]
 
 
 def test_the_models_own_step_numbers_are_dropped():
@@ -1687,3 +1716,35 @@ def test_functions_without_brackets_are_read_as_functions():
     assert ai_module._tool_expression(r"\tan x \cdot \cot x") == "tan(x) * cot(x)"
     assert ai_module._tool_expression("tg x + ctg 2x") == "tan(x) + cot(2x)"
     assert ai_module._tool_expression(r"\sin^2 x") == "sin(x)^2"
+
+
+def test_the_backend_solves_inequalities_before_asking_the_model():
+    cases = {
+        "Решите неравенство 6^(2x) <= 1/36\n6^(2x) <= 6^(-2)\nx <= -1": "x <= -1",
+        r"Решите неравенство: \left(\frac{1}{3}\right)^{5-3x} \leqslant 81": "x <= 3",
+        r"Решите неравенство: 3^{2-x} \geq 9": "x <= 0",
+        "Реши неравенство: 5^(x-1) < 25": "x < 3",
+        "Решите неравенство x^2 - 5x + 6 > 0": "x < 2",
+    }
+    for problem, expected in cases.items():
+        trace = ai_module._prerun_reference_tool(problem, "algebra")
+        assert [item["tool"] for item in trace] == ["math_solve_inequalities"], problem
+        assert expected in trace[0]["payload"]["result"]["result"]["text"], (problem, trace[0]["payload"])
+
+
+def test_an_inequality_check_compares_the_last_line_with_the_solution_set():
+    right = "Решите неравенство 6^(2x) <= 1/36\n6^(2x) <= 6^(-2)\n2x <= -2\nx <= -1"
+    wrong = "Решите неравенство 6^(2x) <= 1/36\n2x <= -2\nx <= 1"
+    half = "Решите неравенство x^2-5x+6>0\n(x-2)(x-3)>0\nx<2"
+
+    def verdict(problem):
+        return ai_module._inequality_final_line_verdict(
+            problem, "algebra", ai_module._prerun_reference_tool(problem, "algebra")
+        )
+
+    assert verdict(right)["correct"] is True
+    assert verdict(wrong)["correct"] is False
+    assert verdict(wrong)["actual"] == r"x \leq 1"
+    assert verdict(half)["correct"] is False
+    # Only the task, no work below it: nothing to compare.
+    assert verdict("Решите неравенство 6^(2x) <= 1/36") is None

@@ -4,10 +4,12 @@ import json
 import logging
 import math
 import re
+from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from types import SimpleNamespace
+from typing import Callable, Optional
 
-from openai import OpenAI
+from openai import OpenAI as _OpenAI
 
 from .settings import get_openai_key, settings
 from .ai_tools import ToolError, execute_tool, openai_chat_tools
@@ -16,6 +18,81 @@ logger = logging.getLogger(__name__)
 
 
 # Enough for a tool call, or for a text that asks for one ("pseudo" tool calls), and no more.
+# Where the text of the answer being written goes while the model writes it (the board shows it
+# live). Set per request; calls with tools are not streamed, their text is never shown.
+ai_stream_sink: ContextVar[Optional[Callable[[str], None]]] = ContextVar("ai_stream_sink", default=None)
+
+_STREAM_TEXT_RE = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)', re.S)
+
+
+def visible_stream_text(raw: str) -> str:
+    """What the class can read of a half-written answer: the numbered step texts of the board's
+    JSON (the last one possibly unfinished), or the text itself when the model writes plain text.
+    The summary is left out, as in the finished answer on the board."""
+    value = raw.lstrip()
+    if not (value.startswith("{") or value.startswith("```")):
+        return value.strip()
+    parts: list[str] = []
+    for fragment in _STREAM_TEXT_RE.findall(value):
+        fragment = re.sub(r"\\u[0-9a-fA-F]{0,3}$|\\$", "", fragment)
+        try:
+            text = json.loads(f'"{fragment}"')
+        except ValueError:
+            text = fragment
+        text = text.strip()
+        if text:
+            parts.append(f"{len(parts) + 1}. {text}")
+    return "\n".join(parts)
+
+
+class _StreamingCompletions:
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def create(self, **request):
+        sink = ai_stream_sink.get()
+        if sink is None or request.get("tools") or request.get("stream"):
+            return self._inner.create(**request)
+        pieces: list[str] = []
+        finish_reason = None
+        shown = ""
+        for chunk in self._inner.create(**request, stream=True):
+            choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+            if choice is None:
+                continue
+            delta = getattr(getattr(choice, "delta", None), "content", None)
+            if delta:
+                pieces.append(delta)
+                visible = visible_stream_text("".join(pieces))
+                if visible != shown:
+                    shown = visible
+                    try:
+                        sink(visible)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("AI stream sink failed", exc_info=True)
+            finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content="".join(pieces), tool_calls=[]),
+                finish_reason=finish_reason,
+            )],
+            usage=None,
+        )
+
+
+class _StreamingClient:
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.chat = SimpleNamespace(completions=_StreamingCompletions(inner.chat.completions))
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def OpenAI(**options):  # noqa: N802 - stands in for the SDK class everywhere in this module
+    return _StreamingClient(_OpenAI(**options))
+
+
 PRE_TOOL_MAX_TOKENS = 320
 
 
@@ -391,7 +468,10 @@ def _local_chat_with_tools(
     return_after_tool_names: Optional[set[str]] = None,
     only_tool_names: Optional[set[str]] = None,
     prerun_trace: Optional[list[dict]] = None,
+    tool_reminders: int = 2,
 ) -> str:
+    """``tool_reminders``: how many times a model that answers in text is asked again to call a
+    tool before it answers without one. A check needs the tool, a solution can do without it."""
     tools = openai_chat_tools(subject, task_text or user) if settings.ai_tools_enabled else []
     only_tool_names = set(only_tool_names or ())
     if only_tool_names:
@@ -781,10 +861,10 @@ def _local_chat_with_tools(
             continue
 
         if require_tool and not successful_tool_use:
-            if text and refusals >= 2:
-                # Asked twice already to use a tool and answered without one again: a tool does
-                # not fit here, and every further round costs the class several seconds.
-                return answer_without_tools("AI трижды ответил без инструментов")
+            if text and refusals >= tool_reminders:
+                # Reminded and still answering without a tool: a tool does not fit here, and every
+                # further round costs the class 10-17 s. The capped draft itself is never shown.
+                return answer_without_tools("AI ответил без инструментов")
             if text:
                 refusals += 1
             messages.append({"role": "assistant", "content": text or ""})
@@ -2891,7 +2971,8 @@ _REFERENCE_TOOLS: dict[str, set[str]] = {
 _TASK_WORDS_RE = re.compile(
     r"^\s*(?:(?:реши(?:ть|те)?|найди(?:те)?|вычисли(?:ть|те)?|упрости(?:ть|те)?|раскрой(?:те)?|"
     r"разложи(?:ть|те)?|докажи(?:те)?|solve|find|compute|simplify|expand|factor|calculate)\s*"
-    r"(?:на\s+множители|скобки|производную|систему(?:\s+уравнений)?|(?:квадратное\s+)?уравнени[ея]|"
+    r"(?:на\s+множители|скобки|производную|(?:систему\s+)?неравенств[оа]?|(?:the\s+)?inequality|"
+    r"систему(?:\s+уравнений)?|(?:квадратное\s+)?уравнени[ея]|"
     r"выражение|значение\s+выражения|the\s+derivative|the\s+system|equation|expression|of)?\s*"
     r"(?:функции|function|of)?\s*:?\s*)+",
     re.I,
@@ -2952,6 +3033,13 @@ def _prerun_arguments(problem: str, task_kind: str) -> tuple[str, dict] | None:
         equation = f"{left}={right}"
         quadratic = re.search(r"x\s*\^\s*\(?2\)?", equation) and not re.search(r"x\s*\^\s*\(?[3-9]", equation)
         return ("math_quadratic" if quadratic else "math_solve"), {"equation": equation}
+    if task_kind == "inequality":
+        # Inequalities were never computed up front: the model had to call the tool itself, and a
+        # check took 50-140 s and still came back as "could not be determined".
+        relation = _inequality_relation_text(body)
+        if not relation:
+            return None
+        return "math_solve_inequalities", {"inequalities": [relation]}
     if task_kind == "system":
         parts = [part for part in re.split(r"\s*[,;]\s*|\s+и\s+|\s+and\s+", body) if part.count("=") == 1]
         if len(parts) < 2:
@@ -3505,6 +3593,50 @@ def _board_check_conflicts_with_tools(
     return False
 
 
+def _inequality_relation_text(line: str) -> str | None:
+    """'x ≤ -1' (or \\leqslant) -> 'x<=-1' in the tools' syntax, or None when the line is not one inequality."""
+    relation = re.sub(r"\\(?:leqslant|leq|le)\b|≤|⩽", "<=", line)
+    relation = re.sub(r"\\(?:geqslant|geq|ge)\b|≥|⩾", ">=", relation)
+    relation = re.sub(r"\\lt\b", "<", re.sub(r"\\gt\b", ">", relation))
+    pieces = re.split(r"(<=|>=|<|>)", relation)
+    if len(pieces) != 3:
+        return None
+    left, right = (_tool_expression(part) for part in (pieces[0], pieces[2]))
+    if not left or not right:
+        return None
+    return f"{left}{pieces[1]}{right}"
+
+
+def _inequality_final_line_verdict(problem: str, subject: Optional[str], tool_trace: list[dict]) -> dict | None:
+    """Compares the student's last inequality with the solution the tool computed, as sets, so a
+    check of an inequality does not depend on the model matching x <= -1 to (-oo < x) & (x <= -1)."""
+    if _check_task_kind(problem, subject) != "inequality":
+        return None
+    entry = _reference_tool_entry(problem, subject, tool_trace)
+    if not entry or entry.get("tool") != "math_solve_inequalities":
+        return None
+    lines = [line.strip() for line in _split_problem_and_marked_answer(problem)[0].splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+    student = _inequality_relation_text(lines[-1])
+    if not student:
+        return None
+    try:
+        import sympy as sp
+
+        from .ai_tools import _relation, math_solve_inequalities
+
+        symbol = sp.Symbol("x", real=True)
+        expected_text = ((entry.get("payload") or {}).get("result") or {}).get("result", {}).get("text")
+        expected = sp.sympify(expected_text, locals={"x": symbol}).as_set()
+        actual_text = math_solve_inequalities([student])["result"]["text"]
+        actual = sp.sympify(actual_text, locals={"x": symbol}).as_set()
+        relation = _relation(student)
+    except Exception:  # noqa: BLE001
+        return None
+    return {"correct": actual == expected, "actual": sp.latex(relation), "expected": sp.latex(expected)}
+
+
 def _verify_board_check_against_tools(
     client,
     *,
@@ -3879,7 +4011,31 @@ def generate_board_response(
             _board_check_needs_retry(verified_text, verified_steps, response_locale)
             or _board_check_conflicts_with_tools(verified_steps, tool_trace)
         )
-        if verifier_bad:
+        inequality_verdict = _inequality_final_line_verdict(problem, subject, tool_trace)
+        if inequality_verdict is not None:
+            # Decided by comparing solution sets: the model's verifier failed on inequalities
+            # nearly every time and the class got "could not locate the error" for a right answer.
+            score_label = {"ru": "Выполнено", "kk": "Орындалды", "en": "Completed"}.get(response_locale, "Выполнено")
+            expected = f"$${inequality_verdict['expected']}$$"
+            if inequality_verdict["correct"]:
+                confirmed = {
+                    "ru": "Решение верное: {expected}.",
+                    "kk": "Шешім дұрыс: {expected}.",
+                    "en": "The solution is correct: {expected}.",
+                }.get(response_locale, "Решение верное: {expected}.").format(expected=expected)
+                text = f"{score_label}: 100%"
+                steps = [{"text": confirmed, "kind": "result"}]
+            else:
+                wrong = {
+                    "ru": "Ответ неверный: у тебя {actual}, должно быть {expected}.",
+                    "kk": "Жауап қате: сенде {actual}, дұрысы {expected}.",
+                    "en": "The answer is incorrect: you wrote {actual}, but it should be {expected}.",
+                }.get(response_locale, "Ответ неверный: у тебя {actual}, должно быть {expected}.").format(
+                    actual=f"$${inequality_verdict['actual']}$$", expected=expected
+                )
+                text = wrong
+                steps = [{"text": wrong, "kind": "warning"}]
+        elif verifier_bad:
             if any(step.get("kind") == "warning" for step in steps):
                 # The first pass found an explicit error; keep that safer diagnosis
                 # instead of replacing it with an unreliable verifier response.
@@ -4265,6 +4421,8 @@ def generate_board_solution(
         only_tool_names=constrained_tools,
         return_after_tool_names=return_after_verified_tool,
         prerun_trace=prerun_trace,
+        # A solution is right without the tool as often as with it; reminders only cost time.
+        tool_reminders=0,
     )
 
     if include_actions and required_reference_tools and not word_problem and not _check_trace_covers_task(

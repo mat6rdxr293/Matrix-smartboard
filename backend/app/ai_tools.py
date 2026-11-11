@@ -364,6 +364,15 @@ def math_solve_inequalities(
             result = sp.reduce_inequalities(relations, symbol)
     except Exception as exc:
         raise ToolError(f"Не удалось решить систему неравенств: {exc}") from exc
+    try:
+        # Exponential inequalities come back as log(81)/(3*log(3)) + 5/3 where the class expects 3.
+        tidy = lambda side: sp.simplify(sp.expand_log(side, force=True))  # noqa: E731
+        result = result.xreplace({
+            relation: relation.func(tidy(relation.lhs), tidy(relation.rhs))
+            for relation in result.atoms(sp.Rel)
+        })
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "inequalities": [{"text": str(item), "latex": sp.latex(item)} for item in relations],
         "variable": str(symbol),

@@ -24,6 +24,7 @@ class ProgressJobStore:
                 "total": None,
                 "result": None,
                 "error": None,
+                "partial": None,
                 "updatedAt": int(time.time() * 1000),
             }
         return job_id
@@ -37,6 +38,17 @@ class ProgressJobStore:
                 "stage": stage,
                 "completed": completed,
                 "total": total,
+                "updatedAt": int(time.time() * 1000),
+            })
+
+    def set_partial(self, job_id: str, text: str) -> None:
+        """The answer as far as it is written, for a client that shows it while it is written."""
+        with self._lock:
+            job = self._jobs[job_id]
+            job.update({
+                "status": "running",
+                "stage": "writing",
+                "partial": text,
                 "updatedAt": int(time.time() * 1000),
             })
 
