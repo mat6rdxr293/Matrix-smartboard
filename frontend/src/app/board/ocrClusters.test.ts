@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Stroke } from "./boardEngine";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts } from "./ocrClusters";
+import { chooseActiveOcrCluster, chooseOcrTargets, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts } from "./ocrClusters";
+import handwrittenFormulas from "./__fixtures__/handwritten-formulas.json";
 
 const stroke = (x1: number, y1: number, x2: number, y2: number, source?: "ai"): Stroke => ({
   points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
@@ -300,4 +301,44 @@ it("keeps one handwritten formula together across a moderate operator gap", () =
 
   expect(clusters).toHaveLength(1);
   expect(clusters[0].indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+});
+
+describe("chooseOcrTargets on real-size handwriting", () => {
+  // Messy handwriting at the size a teacher writes on the board (zoom 0.5, board units). Before
+  // the fix the space after "x²" or around "≥" split these, and only the newer part reached OCR.
+  const formulas = handwrittenFormulas as { formula: string; strokes: number[][][] }[];
+  const toStrokes = (sample: { strokes: number[][][] }, scale = 1): Stroke[] =>
+    sample.strokes.map((points) => ({
+      points: points.map(([x, y]) => ({ x: x * scale, y: y * scale })),
+      color: "#f00",
+      width: 4,
+      mode: "draw",
+    }));
+
+  it.each(formulas.map((sample, index) => [index, sample.formula, sample] as const))(
+    "sends sample %i (%s) to OCR whole",
+    (_index, _formula, sample) => {
+      for (const scale of [0.5, 1, 1.5]) {
+        const strokes = toStrokes(sample, scale);
+        const [target] = chooseOcrTargets(strokes);
+        expect(target?.indices).toHaveLength(strokes.length);
+        expect(chooseOcrTargets(strokes, { multipleTasks: true })).toHaveLength(1);
+      }
+    },
+  );
+
+  it("still keeps two equations written side by side apart, at any size", () => {
+    for (const scale of [1, 3]) {
+      const strokes = [
+        stroke(50, 80, 120, 140),
+        stroke(125, 100, 180, 100),
+        stroke(190, 70, 190, 145),
+        stroke(430, 90, 500, 150),
+        stroke(505, 110, 565, 110),
+        stroke(580, 80, 580, 155),
+      ].map((item) => ({ ...item, points: item.points.map((point) => ({ x: point.x * scale, y: point.y * scale })) }));
+      expect(chooseOcrTargets(strokes)[0].indices).toEqual([3, 4, 5]);
+      expect(chooseOcrTargets(strokes, { multipleTasks: true })).toHaveLength(2);
+    }
+  });
 });

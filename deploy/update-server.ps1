@@ -13,22 +13,34 @@ $RepoCommitUrl = "https://api.github.com/repos/mat6rdxr293/Matrix-smartboard/com
 $BackendTaskName = "Matrix Smartboard Server"
 
 
+# Asked through the server's own Python: Windows PowerShell cannot complete the TLS handshake with
+# the server's self-signed certificate ("the underlying connection was closed"), so a working
+# update was reported as broken and rolled back.
 function Wait-MatrixHealth {
     param([int]$Port)
-    $previous = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-    try {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-        for ($i = 0; $i -lt 30; $i++) {
-            try {
-                $response = Invoke-WebRequest -UseBasicParsing -Uri "https://127.0.0.1:$Port/api/status" -TimeoutSec 3
-                if ($response.StatusCode -eq 200) { return $true }
-            } catch {}
-            Start-Sleep -Seconds 2
-        }
-        return $false
-    } finally {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previous
+    $python = Join-Path $AppDir ".venv\Scripts\python.exe"
+    $check = @"
+import ssl, sys, urllib.request
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+try:
+    with urllib.request.urlopen('https://127.0.0.1:$Port/api/status', context=ctx, timeout=5) as r:
+        sys.exit(0 if r.status == 200 else 1)
+except Exception as error:
+    print(error)
+    sys.exit(1)
+"@
+    # The first start after an update (new libraries) can take a few minutes on a slow computer.
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalMinutes -lt 4) {
+        $ErrorActionPreference = "Continue"
+        $last = ((& $python -c $check 2>&1) | ForEach-Object { "$_" }) -join " "
+        if ($LASTEXITCODE -eq 0) { return $true }
+        Write-Output "Waiting for the server ($([int]$clock.Elapsed.TotalSeconds) s): $last"
+        Start-Sleep -Seconds 5
     }
+    return $false
 }
 
 if (Test-Path $ConfigPath) {

@@ -775,3 +775,12 @@ def test_ocr_result_never_returns_sinh(monkeypatch):
     monkeypatch.setattr(ocr_module.settings, "ocr_model", "qwen2.5vl")
 
     assert ocr_module.ocr_image(b"\x89PNG fake") == r"\sin \alpha + \sin \beta"
+
+
+def test_ocr_text_drops_a_copied_candidate_label():
+    from app.ocr import _normalize_ocr_text
+
+    assert _normalize_ocr_text("Кандидат 2: \\log_2 x = 3") == "\\log_2 x = 3"
+    assert _normalize_ocr_text("Candidate 1: 2x=6\nCandidate 1: x=3") == "2x=6\nx=3"
+    # A word that merely starts like the label inside the text is left alone.
+    assert _normalize_ocr_text("x = кандидатов 3") == "x = кандидатов 3"

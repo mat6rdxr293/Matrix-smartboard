@@ -13,7 +13,7 @@ import GraphElementView from "@/app/board/GraphElementView";
 import AiSolutionBlockView from "@/app/board/AiSolutionBlockView";
 import { findFreeBoardSpace, findFreeBoardSpaceNearTarget, type BoardRect } from "@/app/board/freeSpace";
 import BoardToolbarPopover from "@/app/board/BoardToolbarPopover";
-import { chooseActiveOcrCluster, chooseOcrTaskClusters, clusterOcrStrokes, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
+import { chooseOcrTargets, composeOcrText, recentUserOcrStrokes, sanitizeMultiTaskOcrTexts, unionRects } from "@/app/board/ocrClusters";
 import BoardToolIcon from "@/app/board/BoardToolIcon";
 import { Grid3x3, Hand, Highlighter, LassoSelect, Lock, Menu, MessageSquare, Mouse, MousePointer2, NotebookPen, Pointer, RotateCcw, RotateCw, Save, Trash2, Underline, Unlock, X, ChevronLeft, ChevronRight, Plus, ImagePlus } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -2224,15 +2224,10 @@ const BoardCanvas = forwardRef(function BoardCanvas({
       !selectedIndices && options?.multipleTasks
         ? recentUserOcrStrokes(pageStrokes)
         : pageStrokes;
-    const clusters = clusterOcrStrokes(ocrSourceStrokes, selectedIndices);
-    const targetClusters = selectedIndices
-      ? (clusters[0] ? [clusters[0]] : [])
-      : options?.multipleTasks
-        ? chooseOcrTaskClusters(clusters)
-        : (() => {
-            const active = chooseActiveOcrCluster(clusters);
-            return active ? [active] : [];
-          })();
+    const targetClusters = chooseOcrTargets(ocrSourceStrokes, {
+      multipleTasks: options?.multipleTasks,
+      selectedIndices,
+    });
 
     lastOcrTaskBoundsRef.current = targetClusters.map((cluster) => cluster.bounds);
     lastOcrTargetBoundsRef.current = targetClusters.length

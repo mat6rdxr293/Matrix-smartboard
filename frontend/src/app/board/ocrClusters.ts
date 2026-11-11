@@ -289,7 +289,16 @@ export function clusterOcrStrokes(
           xGap <= Math.max(currentHeight * 3.2, 240) &&
           overlapRatio >= 0.3;
 
-        if (!smallTrailingFragment) continue;
+        // Two blocks of one row with only a narrow gap between them are one formula. The stroke
+        // gap above is set from the median stroke height, which the many flat strokes of a
+        // formula ("−", "=", the bar of "+") pull down, so the ordinary space after "x²" or
+        // around "≥" split "x² − 5x + 6 = 0" into "x²" and "−5x+6=0", and only the newer part
+        // went to OCR. Tasks written side by side stay apart: their gap is several row heights.
+        const rowHeight = Math.max(currentHeight, candidateHeight);
+        const rowGap = axisGap(current.bounds.left, current.bounds.right, candidate.bounds.left, candidate.bounds.right);
+        const tightRowNeighbour = overlapRatio >= 0.5 && rowGap <= rowHeight * 0.6;
+
+        if (!smallTrailingFragment && !tightRowNeighbour) continue;
         current = {
           strokes: [...current.strokes, ...candidate.strokes],
           indices: [...current.indices, ...candidate.indices].sort((a, b) => a - b),
@@ -513,4 +522,18 @@ export function chooseActiveOcrCluster(
   }
 
   return mergeClusters([...selected]);
+}
+
+
+/** Picks what to send to OCR: the lasso selection, the newest task, or every task in reading order. */
+export function chooseOcrTargets(
+  strokes: Stroke[],
+  options: { multipleTasks?: boolean; selectedIndices?: number[] } = {},
+): OcrStrokeCluster[] {
+  const selected = options.selectedIndices?.length ? options.selectedIndices : undefined;
+  const clusters = clusterOcrStrokes(strokes, selected);
+  if (selected) return clusters[0] ? [clusters[0]] : [];
+  if (options.multipleTasks) return chooseOcrTaskClusters(clusters);
+  const active = chooseActiveOcrCluster(clusters);
+  return active ? [active] : [];
 }

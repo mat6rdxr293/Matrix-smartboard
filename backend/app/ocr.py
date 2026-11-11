@@ -121,6 +121,9 @@ def _normalize_ocr_text(text: str | None) -> str:
         value = value.strip("`").strip()
         value = re.sub(r"^(?:latex|tex|text|math)\s*\n", "", value, flags=re.I)
     value = re.sub(r"^(?:ocr|transcription|распознано|транскрипция)\s*:\s*", "", value, flags=re.I)
+    # The reconciliation pass lists the earlier readings as "Кандидат 1: …"; the model sometimes
+    # answers by copying that label, and "Кандидат 2: 10g_{2}x=3" reached the teacher's editor.
+    value = re.sub(r"(?im)^\s*(?:кандидат|candidate)\s*\d+\s*:\s*", "", value)
     value = "\n".join(line.strip() for line in value.splitlines() if line.strip())
     value = _HYPERBOLIC_MISREAD_RE.sub(r"\1\2", value)
     return value.strip()
