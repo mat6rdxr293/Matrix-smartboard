@@ -17,7 +17,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/app/board/replayApi", async () => {
   const actual = await vi.importActual<typeof import("@/app/board/replayApi")>("@/app/board/replayApi");
-  return { ...actual, loadBoardReplay: mocks.loadBoardReplay, appendBoardReplay: mocks.appendBoardReplay };
+  return {
+    ...actual,
+    loadBoardReplay: mocks.loadBoardReplay,
+    appendBoardReplay: mocks.appendBoardReplay,
+    sendBoardReplayChunk: (chunk: Parameters<typeof actual.sendBoardReplayChunk>[0], lessonId: string) =>
+      actual.sendBoardReplayChunk(chunk, lessonId, mocks.appendBoardReplay),
+  };
 });
 vi.mock("@/app/session/api", () => ({ sessionApi: { loadChat: mocks.loadChat } }));
 vi.mock("@/app/ai/api", () => ({ getStatus: mocks.getStatus, callAi: vi.fn() }));

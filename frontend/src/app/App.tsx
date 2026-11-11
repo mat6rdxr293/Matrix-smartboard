@@ -26,7 +26,7 @@ import {
 } from "@/app/board/aiBoardActions";
 import AIAssistant, { type AssistantMessage } from "@/app/ai/AIAssistant";
 import { createBoardHistory, replayBoardOperations, type BoardHistory } from "@/app/board/boardDocument";
-import { appendBoardReplay, filterPendingBoardReplayOps, loadBoardReplay, type BoardReplayOp } from "@/app/board/replayApi";
+import { compactBoardReplayOp, filterPendingBoardReplayOps, loadBoardReplay, sendBoardReplayChunk, type BoardReplayOp } from "@/app/board/replayApi";
 import { nextDeviceStamp } from "@/app/board/deviceStamp";
 import {
   buildDefaultSlidesForSubject,
@@ -314,7 +314,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
         if (boardReplayQueueRef.current.length) setConnectionState("syncing");
         while (boardReplayQueueRef.current.length) {
           const chunk = boardReplayQueueRef.current.slice(0, 80);
-          await appendBoardReplay(chunk, lesson.id);
+          // Refused operations count as handled too, otherwise the queue would stall on them.
+          await sendBoardReplayChunk(chunk, lesson.id);
           const acknowledged = new Set(
             chunk.map((operation) => operation.client_operation_id ?? operation.clientOperationId).filter(Boolean)
           );
@@ -337,7 +338,8 @@ export default function App({ school, room, lesson, boardProfile, onComplete, on
     return tracked;
   };
 
-  const onBoardReplayOp = (op: BoardReplayOp) => {
+  const onBoardReplayOp = (incoming: BoardReplayOp) => {
+    const op = compactBoardReplayOp(incoming);
     setBoardHistory((previous) => replayBoardOperations(previous, [op]));
     // device_id + client_seq keep this board's operations in order across the servers of a cluster.
     boardReplayQueueRef.current.push({ ...op, client_operation_id: crypto.randomUUID(), ...nextDeviceStamp() } as BoardReplayOp);
